@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Tue Dec 15 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -223,6 +223,8 @@ class RecordParser:
     endian = "="
     # Parser cache
     cache = {}
+    # cache for possibly omitted data, such as RES_SCAL
+    ocache = {}
     
     @staticmethod
     def parse_raw(recType, length, rawByte):
@@ -262,12 +264,13 @@ class RecordParser:
             if "TestNum" not in testDict: testDict["TestNum"] = valueDict["TEST_NUM"]
             
             # set default LL/HL/Unit for FTR since there's no such field
-            # update the following field only once for PTR & MPR
+            # update the following field only once for PTR & MPR, as they may be omitted from records
             if "LL" not in testDict:
                 if recType == V4.ftr:
                     testDict["LL"] = None
                 else:
                     # bit 6 set = No Low Limit for this test 
+                    # this case will only run for the first record, limit and scale should be valid numbers to compute
                     testDict["LL"] = valueDict["LO_LIMIT"] * 10 ** valueDict["RES_SCAL"] if valueDict["OPT_FLAG"] & 0b01000000 == 0 else None
                     
             if "HL" not in testDict:
@@ -282,20 +285,38 @@ class RecordParser:
                     testDict["Unit"] = ""
                 else:
                     testDict["Unit"] = unit_prefix.get(valueDict["RES_SCAL"], "") + valueDict["UNITS"]
-            
-            if recType == V4.ptr:
-                tmpResult = valueDict["RESULT"] * 10 ** valueDict["RES_SCAL"]
-                # testDict.setdefault("DataList", []).append(tmpResult)     # list is immutable in python
-                testDict["DataList"] = testDict.setdefault("DataList", []) + [tmpResult]
-                
-            elif recType == V4.ftr:
+                                    
+            if recType == V4.ftr:
                 testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["TEST_FLG"]]
-
-            elif recType == V4.mpr:
-                # for mpr, datalist is 2d, column for different pins
-                testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["RTN_RSLT"] * 10 ** valueDict["RES_SCAL"]]
+            else:
+                # RES_SCAL may not be available in all records, use cached data from the first record instead.
+                result_scale = RecordParser.ocache[valueDict["TEST_NUM"]]["RES_SCAL"]
+                    
+                if recType == V4.ptr:
+                    tmpResult = valueDict["RESULT"] * 10 ** result_scale
+                    # testDict.setdefault("DataList", []).append(tmpResult)     # list is immutable in python
+                    testDict["DataList"] = testDict.setdefault("DataList", []) + [tmpResult]
+                    
+                elif recType == V4.mpr:
+                    # for mpr, datalist is 2d, column for different pins
+                    testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["RTN_RSLT"] * 10 ** result_scale]
                 
         return testDict
+    
+    @staticmethod
+    def updateOCache(recType, length, rawByte):
+        # read the first record of test items and cache (possibly) omitted fields
+        # RES_SCAL of the first record will never be omitted according to the stdf spec.
+        valueDict = RecordParser.parse_raw(recType, length, rawByte)
+        test_num = valueDict["TEST_NUM"]
+        
+        if recType == V4.ptr:
+            result_scale = valueDict["RES_SCAL"]
+            RecordParser.ocache[test_num] = {"RES_SCAL": result_scale}
+        
+        elif recType == V4.mpr:
+            result_scale = valueDict["RES_SCAL"]
+            RecordParser.ocache[test_num] = {"RES_SCAL": result_scale}
 
 
 
