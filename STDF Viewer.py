@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Mon Dec 14 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1117,7 +1117,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
     @Slot(stdfSummarizer)
     def updateData(self, smz):
-        if smz:
+        if len(smz.data) != 0:
             self.dataSrc = smz.data
             self.dataInfo = smz     # attrs: fileInfo; pinDict; hbinSUM; sbinSUM; hbinDict; sbinDict;
     

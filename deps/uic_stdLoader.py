@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Mon Dec 14 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -123,10 +123,12 @@ class stdfLoader(QtWidgets.QDialog):
 class stdReader(QtCore.QObject):
     def __init__(self, QSignal):
         super().__init__()
-        self.dataTransSignal = QSignal.dataTransSignal
-        self.progressBarSignal = QSignal.progressBarSignal
-        self.closeSignal = QSignal.closeSignal
-        self.msgSignal = QSignal.msgSignal
+        self.summarizer = stdfSummarizer(None)
+        self.QSignals = QSignal
+        self.dataTransSignal = self.QSignals.dataTransSignal
+        self.progressBarSignal = self.QSignals.progressBarSignal
+        self.closeSignal = self.QSignals.closeSignal
+        self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
         
     def readThis(self, stdHandle):
@@ -140,16 +142,17 @@ class stdReader(QtCore.QObject):
             self.summarizer = stdfDataRetriever(self.std, QSignal=self.progressBarSignal, flag=self.flag)()
             end = time.time()
             # print(end - start)
-            self.dataTransSignal.emit(self.summarizer)
-            
             if self.flag.stop:
                 if self.msgSignal: self.msgSignal.emit("Loading cancelled by user")
             else:
                 if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start))
                 
-            self.closeSignal.emit(True)     # close loaderUI
         except Exception as e:
             if self.msgSignal: self.msgSignal.emit("Load Error: " + repr(e))
+            pass
+        
+        finally:
+            self.dataTransSignal.emit(self.summarizer)
             self.closeSignal.emit(True)     # close loaderUI
         
 if __name__ == "__main__":

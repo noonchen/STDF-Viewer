@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Mon Dec 14 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -78,13 +78,15 @@ class stdfSummarizer:
         # pyqt signal
         self.flag = flag
         self.QSignal = QSignal
-        if self.QSignal: self.QSignal.emit(0)
         # get file size in Bytes
-        self.fileSize = os.stat(fileHandle.name).st_size
         self.offset = 0     # current position
         self.reading = True
-        self.pb_thread = Thread(target=self.sendProgress)
-        self.pb_thread.start()
+        # no need to update progressbar if signal is None
+        if self.QSignal: 
+            self.fileSize = os.stat(fileHandle.name).st_size
+            self.QSignal.emit(0)
+            self.pb_thread = Thread(target=self.sendProgress)
+            self.pb_thread.start()
 
         # File info
         self.fileInfo = {}
@@ -135,7 +137,8 @@ class stdfSummarizer:
         
     def after_complete(self, DataSource):
         self.reading = False
-        self.pb_thread.join()
+        if self.QSignal: 
+            self.pb_thread.join()
         
 
     def onMIR(self, **kargs):
