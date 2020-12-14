@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Dec 14 2020
+# Last Modified: Tue Dec 15 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -497,6 +497,21 @@ class MyWindow(QtWidgets.QMainWindow):
         self.onSelect()
             
             
+    def cacheOmittedRecordField(self):
+        #MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
+        # as it may be omitted in the later record, causing typeError when user directly selects sites where 
+        # no such field value is available in the data preparation.
+        for test_num in self.dataSrc[-1].keys():
+            offset_1st = self.dataSrc[-1][test_num]["Offset"][0]
+            lengthL_1s = self.dataSrc[-1][test_num]["Length"][0]
+            recType = self.dataSrc[-1][test_num]["RecType"]
+            
+            self.std_handle.seek(offset_1st, 0)
+            rawByte_1st = self.std_handle.read(lengthL_1s)
+            
+            RecordParser.updateOCache(recType, lengthL_1s, rawByte_1st)
+    
+    
     def isTestFail(self, test_num, site):
         offsetL = self.dataSrc[site][test_num]["Offset"]
         lengthL = self.dataSrc[site][test_num]["Length"]
@@ -1104,6 +1119,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def releaseMemory(self):
         # clear cache to release memory
         RecordParser.cache = {}
+        RecordParser.ocache = {}
         self.selData = {}
         # clear images
         [[self.tab_dict[key]["layout"].itemAt(index).widget().setParent(None) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin]]
@@ -1156,6 +1172,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateDutSummary()
             self.updateTableContent()
             self.updateTabContent(forceUpdate=True)
+            self.cacheOmittedRecordField()
+
     
     @Slot(str)
     def updateStatus(self, new_msg):
