@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -162,7 +162,7 @@ class reportGenerator(QtCore.QObject):
                     sheet.write_number(row, scol+i, float(dataL[i]))
                 except (TypeError, ValueError):
                     sheet.write_string(row, scol+i, dataL[i])
-        sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(100 * loopCnt/self.totalLoopCnt))
+        sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
         
         with Workbook(self.dirout) as wb:
             header_stat = ["Test Number / Site", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Count", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
@@ -330,7 +330,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.channel = dataChannel()
                 
         self.setWindowTitle("Generating XLSX report...")
-        self.UI.progressBar.setFormat("Writing: %p%")
+        self.UI.progressBar.setMaximum(10000)
         self.signals = signals()
         self.signals.progressBarSignal.connect(self.updateProgressBar)
         self.signals.closeSignal.connect(self.closeExporter)
@@ -374,6 +374,7 @@ class progressDisplayer(QtWidgets.QDialog):
     @Slot(int)
     def updateProgressBar(self, num):
         self.UI.progressBar.setValue(num)
+        self.UI.progressBar.setFormat("Writing: %.02f%%" %(num/100))
       
       
     @Slot(bool)

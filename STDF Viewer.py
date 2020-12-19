@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Dec 15 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -942,19 +942,21 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.set_xlim(left = x_arr[0] - (x_arr[-1]-x_arr[0]) * 0.05)
             data_max = self.selData[site][test_num]["Max"]
             data_min = self.selData[site][test_num]["Min"]
-            if HL != None and HL != None: # if HL/LL is not None, set ylim based on HL/LL or data
-                if HL == LL:
-                    ax.set_ylim((LL-1, HL+1))   # if HL/HL is not None, and they are identical, place the HL/LL line in the middle
-                else:
-                    headroomY = max((data_max-data_min), (HL-LL)) * 0.1     # use the bigger delta to calc the headroom
-                    ax.set_ylim((LL-headroomY, HL+headroomY))
-            else:
-                ax.set_ylim((data_min-5, data_max+5))   # if HL/LL is None, set ylim based on data
+            dataDelta = data_max - data_min
+            
+            if (HL != None) and (LL != None): # if HL/LL is not None, set ylim based on HL/LL or data
+                largeDelta = max(dataDelta, (HL-LL))     # use the bigger delta to calc the headroom
+                headroomY = 5 if largeDelta == 0 else largeDelta * 0.1
+                ax.set_ylim((LL-headroomY, HL+headroomY))
+            else:   # if HL/LL is None, set ylim based on data
+                headroomY = 5 if dataDelta == 0 else dataDelta * 0.1
+                ax.set_ylim((data_min-headroomY, data_max+headroomY))
+                
             # reset limits if data points are out of canvas
             if data_max  > ax.get_ylim()[1]:
-                ax.set_ylim(top = data_max + (data_max-data_min) * 0.1)
+                ax.set_ylim(top = data_max + dataDelta * 0.1)
             if self.selData[site][test_num]["Min"]  < ax.get_ylim()[0]:
-                ax.set_ylim(bottom = data_min - (data_max-data_min) * 0.1)
+                ax.set_ylim(bottom = data_min - dataDelta * 0.1)
             # HL/LL lines
             if self.settingParams.showHL_trend: 
                 if HL != None: 

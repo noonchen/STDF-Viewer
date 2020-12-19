@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Dec 14 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -74,6 +74,8 @@ class stdfSummarizer:
         self.onRec[V4.prr] = self.onPRR
         self.onRec[V4.hbr] = self.onHBR
         self.onRec[V4.sbr] = self.onSBR
+        self.onRec[V4.wir] = self.onWIR
+        self.onRec[V4.wrr] = self.onWRR
         
         # pyqt signal
         self.flag = flag
@@ -115,9 +117,9 @@ class stdfSummarizer:
             if self.flag:
                 if self.flag.stop == True: return
                 
-            time.sleep(0.5)
+            time.sleep(0.1)
             if self.QSignal: 
-                self.QSignal.emit(int(100 * self.offset / self.fileSize))
+                self.QSignal.emit(int(10000 * self.offset / self.fileSize))     # times additional 100 to save 2 decimal
         
         
     def before_begin(self, DataSource, endian_from_parser):
@@ -139,6 +141,8 @@ class stdfSummarizer:
         self.reading = False
         if self.QSignal: 
             self.pb_thread.join()
+            # update once again when finished, ensure the progress bar hits 100%
+            self.QSignal.emit(10000)
         
 
     def onMIR(self, **kargs):
@@ -346,6 +350,16 @@ class stdfSummarizer:
             if SBIN_PF in ["P", "F"]: self.sbinDict[SBIN_NUM][1] = SBIN_PF
 
 
+    def onWIR(self, **kargs):
+        # placeholder
+        pass
+    
+    
+    def onWRR(self, **kargs):
+        # placeholder
+        pass
+    
+    
     def getTestName(self, recType, rawData):
         """Read Test Name Efficiently by skipping unrelated bytes"""
         if recType == V4.ptr:
