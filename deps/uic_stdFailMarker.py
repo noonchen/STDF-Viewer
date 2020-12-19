@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -59,11 +59,12 @@ class FailMarker(QtWidgets.QWidget):
         self.sim = self.parent.sim_list
         self.total = self.sim.rowCount()
         failCount = 0
+        cpkFailCount = 0
         
         for i in range(self.total):
             if self.stopFlag: 
                 end_time = time.time()
-                self.parent.signals.statusSignal.emit("Fail Marker aborted, time elapsed %.2f sec."%(end_time - start_time))
+                self.parent.signals.statusSignal.emit("Fail Marker aborted, time elapsed %.2f sec."%(end_time - start_time), False)
                 return
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
@@ -72,15 +73,26 @@ class FailMarker(QtWidgets.QWidget):
             qitem = self.sim.item(i)
             test_num = int(qitem.text().split("\t")[0])
             
-            isFail = self.parent.isTestFail(test_num, -1)
-            if isFail: 
+            status = self.parent.isTestFail(test_num, -1)
+            if status == "testFailed":
                 failCount += 1
-                qitem.setData(QtGui.QColor(QtGui.QColor(255, 255, 255)), QtCore.Qt.ForegroundRole)
-                qitem.setData(QtGui.QColor(QtGui.QColor(204, 0, 0)), QtCore.Qt.BackgroundRole)
+                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+            elif status == "cpkFailed":
+                cpkFailCount += 1
+                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
             
         end_time = time.time()
-        msg = "No failed test item found" if failCount == 0 else "%d failed test items found"%failCount
-        self.parent.signals.statusSignal.emit("%s, time elapsed %.2f sec."%(msg, end_time - start_time))
+        msg = ""
+        if failCount == 0 and cpkFailCount == 0:
+            msg = "No failed test item found"
+        else:
+            if failCount != 0:
+                msg += "%d failed test items found, "%failCount
+            if cpkFailCount != 0:
+                msg += "%d passed test items found with low Cpk, "%cpkFailCount
+        self.parent.signals.statusSignal.emit("%stime elapsed %.2f sec."%(msg, end_time - start_time), False)
 
     
         
