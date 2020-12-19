@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Dec 14 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -74,6 +74,7 @@ class stdfLoader(QtWidgets.QDialog):
         
         self.loaderUI = Ui_loadingUI()
         self.loaderUI.setupUi(self)
+        self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         # create new thread and move stdReader to the new thread
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
@@ -103,6 +104,8 @@ class stdfLoader(QtWidgets.QDialog):
 
     @Slot(int)
     def updateProgressBar(self, num):
+        # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
+        self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
         self.loaderUI.progressBar.setValue(num)
         
     @Slot(stdfSummarizer)

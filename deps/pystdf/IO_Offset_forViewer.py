@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Sun Dec 20 2020
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -64,7 +64,7 @@ class stdIO(DataSource):
     def get_records_offset(self):
 
         self.eof = 0
-        records_to_parse = dict([ ((recType.typ, recType.sub), recType) for recType in [V4.mir, V4.ptr, V4.ftr, V4.mpr, V4.pir, V4.prr, V4.hbr, V4.sbr] ])
+        records_to_parse = dict([ ((recType.typ, recType.sub), recType) for recType in [V4.mir, V4.wir, V4.wrr, V4.ptr, V4.ftr, V4.mpr, V4.pir, V4.prr, V4.hbr, V4.sbr] ])
         try:
             while self.eof==0:
                 if self.flag: 
