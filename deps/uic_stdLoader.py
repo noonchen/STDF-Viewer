@@ -24,7 +24,7 @@
 
 
 
-import time
+import time, os
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
@@ -35,6 +35,7 @@ from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 # from deps.ui.stdfViewer_loadingUI_side import Ui_loadingUI
 
 from deps.stdfOffsetRetriever import stdfDataRetriever, stdfSummarizer
+from deps.pystdf.Types import InitialSequenceException
 
 
 class flags:
@@ -140,19 +141,23 @@ class stdReader(QtCore.QObject):
     @Slot()
     def readBegin(self):
         try:
-            if self.msgSignal: self.msgSignal.emit("Loading STD file...")
+            if self.msgSignal: self.msgSignal.emit("Loading STD file...", False)
             start = time.time()
             self.summarizer = stdfDataRetriever(self.std, QSignal=self.progressBarSignal, flag=self.flag)()
             end = time.time()
             # print(end - start)
             if self.flag.stop:
-                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user")
+                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False)
             else:
-                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start))
+                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False)
                 
-        except Exception as e:
-            if self.msgSignal: self.msgSignal.emit("Load Error: " + repr(e))
+        except InitialSequenceException:
+            if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), True)
             pass
+                
+        # except Exception as e:
+        #     if self.msgSignal: self.msgSignal.emit("Load Error: " + repr(e), True)
+        #     pass
         
         finally:
             self.dataTransSignal.emit(self.summarizer)

@@ -171,7 +171,7 @@ class SettingParams:
 
 class signals4MainUI(QtCore.QObject):
     dataSignal = Signal(stdfSummarizer)  # get std data from loader
-    statusSignal = Signal(str)   # status bar
+    statusSignal = Signal(str, bool)   # status bar
 
 
 class MyWindow(QtWidgets.QMainWindow):
@@ -410,8 +410,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 # mark red when failed
                 if dutDict[index]["PART_FLG"] == "Failed": 
-                    qitem.setData(QtGui.QColor(QtGui.QColor(255, 255, 255)), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor(QtGui.QColor(204, 0, 0)), QtCore.Qt.BackgroundRole)
+                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                 qitemRow.append(qitem)                        
             # tmpTable.append(tmpRow)
             self.tmodel_dut.appendRow(qitemRow)            
@@ -523,9 +523,17 @@ class MyWindow(QtWidgets.QMainWindow):
         
         try:
             testDict["StatList"].index(False)
-            return True     # no error indicates False is found, aka, test failed
+            return "testFailed"     # no error indicates False is found, aka, test failed
         except ValueError:
-            return False
+            # if the test passed, check if cpk is lower than the threshold
+            threshold = 1.33
+            _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
+            if cpk != np.nan:
+                # check cpk only if it's valid
+                if cpk < threshold:
+                    return "cpkFailed"
+
+            return "testPassed"
                         
             
     def prepareData(self, selectItemNums, selectSites):
@@ -687,7 +695,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                             qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                             # mark red when failed
-                            if status == "Fail": qitem.setData(QtGui.QColor(QtGui.QColor(204, 0, 0)), QtCore.Qt.BackgroundRole)
+                            if status == "Fail": qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                             qitemRow.append(qitem)                        
                         self.tmodel_raw.appendRow(qitemRow)
                         
@@ -824,6 +832,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # set col headers except Bin Chart
             headerLabels = ["Test Name", "Unit", "Low Limit", "High Limit", "Fail Num", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
             indexOfFail = headerLabels.index("Fail Num")    # used for pickup fail number when iterating
+            indexOfCpk = headerLabels.index("Cpk")
             self.tmodel.setHorizontalHeaderLabels(headerLabels)     
             self.ui.dataTable.horizontalHeader().setVisible(True)
             verticalHeader.setDefaultSectionSize(25)
@@ -844,8 +853,14 @@ class MyWindow(QtWidgets.QMainWindow):
                             qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                             if index == indexOfFail:
                                 if item != "0": 
-                                    qitem.setData(QtGui.QColor(QtGui.QColor(255, 255, 255)), QtCore.Qt.ForegroundRole)
-                                    qitem.setData(QtGui.QColor(QtGui.QColor(204, 0, 0)), QtCore.Qt.BackgroundRole)
+                                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+                            elif index == indexOfCpk:
+                                if item != "" and item != "∞":
+                                    threshold = 1.33
+                                    if float(item) < threshold:
+                                        qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                        qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
                             qitemList.append(qitem)
                         self.tmodel.appendRow(qitemList)
                         
@@ -871,9 +886,9 @@ class MyWindow(QtWidgets.QMainWindow):
                         qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                         qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                         # set color
-                        if item[1] == "P":      bc = QtGui.QColor(0, 204, 0); fc = QtGui.QColor(0, 0, 0)
-                        elif item[1] == "F":    bc = QtGui.QColor(204, 0, 0); fc = QtGui.QColor(255, 255, 255)
-                        else:                   bc = QtGui.QColor(254, 123, 0); fc = QtGui.QColor(0, 0, 0)
+                        if item[1] == "P":      bc = "#00CC00"; fc = "#000000"
+                        elif item[1] == "F":    bc = "#CC0000"; fc = "#FFFFFF"
+                        else:                   bc = "#FE7B00"; fc = "#000000"
                         qitem.setData(QtGui.QColor(bc), QtCore.Qt.BackgroundRole)
                         qitem.setData(QtGui.QColor(fc), QtCore.Qt.ForegroundRole)
                         qitemList.append(qitem)
@@ -1177,9 +1192,10 @@ class MyWindow(QtWidgets.QMainWindow):
             self.cacheOmittedRecordField()
 
     
-    @Slot(str)
-    def updateStatus(self, new_msg):
+    @Slot(str, bool)
+    def updateStatus(self, new_msg, popUp=False):
         self.statusBar().showMessage(new_msg)
+        if popUp: QtWidgets.QMessageBox.warning(self, "Warning", new_msg)
             
         
         
