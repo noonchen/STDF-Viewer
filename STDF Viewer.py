@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Dec 20 2020
+# Last Modified: Mon Feb 01 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,8 +24,9 @@
 
 
 
-import io, re, os, sys
+import io, re, os, sys, gzip, bz2
 import numpy as np
+from base64 import b64decode
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.pystdf.RecordParser import RecordParser
 from deps.stdfOffsetRetriever import stdfSummarizer
@@ -167,6 +168,7 @@ class SettingParams:
     # table
     dataNotation = "G"  # F E G stand for float, Scientific, automatic
     dataPrecision = 3
+    cpkThreshold = 1.33
     
 
 class signals4MainUI(QtCore.QObject):
@@ -196,7 +198,15 @@ class MyWindow(QtWidgets.QMainWindow):
         
         pathList = [item for item in sys.argv[1:] if os.path.isfile(item)]
         if pathList: 
-            self.std_handle = open(pathList[0], 'rb')
+            f = pathList[0]     # only open the first file
+            if f.endswith("gz"):
+                self.std_handle = gzip.open(f, 'rb')
+                setattr(self.std_handle, "name", f)     # manually add file path to gz/bzip handler
+            elif f.endswith("bz2"):
+                self.std_handle = bz2.BZ2File(f, 'rb')
+                setattr(self.std_handle, "name", f)
+            else:
+                self.std_handle = open(f, 'rb')
             self.std_dict[0] = self.std_handle
         # update icons for actions and widgets
         self.updateIcons()
@@ -220,6 +230,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.SearchBox.textChanged.connect(self.proxyModel_list.setFilterWildcard)
         self.ui.ClearButton.clicked.connect(self.clearSearchBox)
         self.completeTestList = []
+        self.completeWaferList = []
         
         self.tab_dict = {tab.Trend: {"scroll": self.ui.scrollArea_trend, "layout": self.ui.verticalLayout_trend},
                          tab.Histo: {"scroll": self.ui.scrollArea_histo, "layout": self.ui.verticalLayout_histo},
@@ -233,11 +244,18 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def openNewFile(self):
-        fname, _typ = QFileDialog.getOpenFileName(self, 
+        f, _typ = QFileDialog.getOpenFileName(self, 
                                              caption="Select a STD File To Open", 
                                              filter="STDF (*.std*);;All Files (*.*)",)
-        if os.path.isfile(fname):
-            self.std_handle = open(fname, 'rb')
+        if os.path.isfile(f):
+            if f.endswith("gz"):
+                self.std_handle = gzip.open(f, 'rb')
+                setattr(self.std_handle, "name", f)     # manually add file path to gz/bzip handler
+            elif f.endswith("bz2"):
+                self.std_handle = bz2.BZ2File(f, 'rb')
+                setattr(self.std_handle, "name", f)
+            else:
+                self.std_handle = open(f, 'rb')            
             # clear handles on each new file open
             self.std_dict = {}
             self.std_dict[0] = self.std_handle
@@ -526,7 +544,7 @@ class MyWindow(QtWidgets.QMainWindow):
             return "testFailed"     # no error indicates False is found, aka, test failed
         except ValueError:
             # if the test passed, check if cpk is lower than the threshold
-            threshold = 1.33
+            threshold = self.settingParams.cpkThreshold
             _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
             if cpk != np.nan:
                 # check cpk only if it's valid

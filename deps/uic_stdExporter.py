@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sun Dec 20 2020
+# Last Modified: Wed Feb 03 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -270,7 +270,7 @@ class reportGenerator(QtCore.QObject):
                         # Sheet for dut summary or file information
                         if cont == tab.DUT: 
                             StatSheet = wb.add_worksheet("DUT Summary")
-                            headerLabels = ["Part ID", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
+                            headerLabels = ["Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
                         else: 
                             StatSheet = wb.add_worksheet("File Info")
                             headerLabels = ["Property Name", "Value"]

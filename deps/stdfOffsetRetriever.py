@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Sun Dec 20 2020
+# Last Modified: Mon Feb 01 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -58,6 +58,20 @@ scale_char = {15: "f",
               -9: "G",
               -12: "T"}
 
+def getFileSize(fd):
+    # assume fd has attr "name"
+    path = fd.name
+    if path.endswith("gz"):
+        # a gzip
+        curPos = fd.tell()
+        fd.seek(-4, 2)
+        fsize = struct.unpack('I', fd.read(4))[0]
+        fd.seek(curPos)     # restore position
+    else:
+        # bzip file size is not known before uncompressing, return compressed file size instead
+        fsize = os.stat(fd.name).st_size
+    return fsize
+
 
 class stdfSummarizer:
     
@@ -85,7 +99,7 @@ class stdfSummarizer:
         self.reading = True
         # no need to update progressbar if signal is None
         if self.QSignal: 
-            self.fileSize = os.stat(fileHandle.name).st_size
+            self.fileSize = getFileSize(fileHandle)
             self.QSignal.emit(0)
             self.pb_thread = Thread(target=self.sendProgress)
             self.pb_thread.start()
