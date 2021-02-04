@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Feb 01 2021
+# Last Modified: Thu Feb 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -241,27 +241,27 @@ class stdfSummarizer:
         TEST_NUM, _, SITE_NUM = THS_struct.unpack(rawData[:6])
         
         tmpSite = self.data.setdefault(SITE_NUM, {})
-        tmpSumm = self.data.setdefault(-1, {})
+        # tmpSumm = self.data.setdefault(-1, {})
 
         tmp_TestItem_site = tmpSite.setdefault(TEST_NUM, {})
-        tmp_TestItem_summ = tmpSumm.setdefault(TEST_NUM, {})
+        # tmp_TestItem_summ = tmpSumm.setdefault(TEST_NUM, {})
         
         TEST_TXT = self.getTestName(recType, rawData)
         
         tmp_TestItem_site["TestName"] = TEST_TXT
-        tmp_TestItem_summ["TestName"] = TEST_TXT
+        # tmp_TestItem_summ["TestName"] = TEST_TXT
         # required for on-the-fly parser
         tmp_TestItem_site["RecType"] = recType
-        tmp_TestItem_summ["RecType"] = recType
+        # tmp_TestItem_summ["RecType"] = recType
         tmp_TestItem_site["Endian"] = self.endian
-        tmp_TestItem_summ["Endian"] = self.endian
+        # tmp_TestItem_summ["Endian"] = self.endian
                 
         tmp_TestItem_site.setdefault("Offset", []).append(self.offset)
-        tmp_TestItem_summ.setdefault("Offset", []).append(self.offset)
+        # tmp_TestItem_summ.setdefault("Offset", []).append(self.offset)
         tmp_TestItem_site.setdefault("Length", []).append(binaryLen)
-        tmp_TestItem_summ.setdefault("Length", []).append(binaryLen)
+        # tmp_TestItem_summ.setdefault("Length", []).append(binaryLen)
         tmp_TestItem_site.setdefault("DUTIndex", []).append(self.dutIndex)
-        tmp_TestItem_summ.setdefault("DUTIndex", []).append(self.dutIndex)
+        # tmp_TestItem_summ.setdefault("DUTIndex", []).append(self.dutIndex)
                     
             
     def onPRR(self, **kargs):
