@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Dec 13 2020
+# Last Modified: Thu Feb 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -59,6 +59,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.Confirm.clicked.connect(self.applySettings)
         self.settingsUI.Cancel.clicked.connect(self.close)
         self.settingsUI.lineEdit_binCount.setValidator(QtGui.QIntValidator(1, 1000, self))
+        self.settingsUI.lineEdit_cpk.setValidator(QtGui.QDoubleValidator(self))
         
         self.settingsUI.settingBox.setItemIcon(0, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
         self.settingsUI.settingBox.setItemIcon(1, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
@@ -89,6 +90,7 @@ class stdfSettings(QtWidgets.QDialog):
         # table
         self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
+        self.settingsUI.lineEdit_cpk.setText(str(self.originalParams.cpkThreshold))
         
         
     def updateSettings(self):
@@ -110,6 +112,7 @@ class stdfSettings(QtWidgets.QDialog):
         # table
         parent.settingParams.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
         parent.settingParams.dataPrecision = self.settingsUI.precisionSlider.value()
+        parent.settingParams.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
         
         
     def isTrendChanged(self):
@@ -132,7 +135,8 @@ class stdfSettings(QtWidgets.QDialog):
         
     def isTableChanged(self):
         return not all([self.originalParams.dataNotation == indexDic_notation[self.settingsUI.notationCombobox.currentIndex()],
-                        self.originalParams.dataPrecision == self.settingsUI.precisionSlider.value()])
+                        self.originalParams.dataPrecision == self.settingsUI.precisionSlider.value(),
+                        self.originalParams.cpkThreshold == float(self.settingsUI.lineEdit_cpk.text())])
 
 
     def applySettings(self):

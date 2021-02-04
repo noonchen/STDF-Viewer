@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Feb 01 2021
+# Last Modified: Thu Feb 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import io, re, os, sys, gzip, bz2
+import io, os, sys, gzip, bz2
 import numpy as np
 from base64 import b64decode
 from deps.ui.ImgSrc_svg import ImgDict
@@ -287,7 +287,7 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox.setWindowTitle("About")
         msgBox.setTextFormat(QtCore.Qt.RichText)
         msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>Author: noonchen<br>Email: chennoon233@foxmail.com<br>")
-        msgBox.setInformativeText("For instructions, please refer to the ReadMe in the repo:<br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a>")
+        msgBox.setInformativeText("For instructions, please refer to the ReadMe in the repo:<br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a><br><br><span style='font-size:8px'>Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.</span>")
         appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
@@ -358,12 +358,12 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         
         
-    def updateTestList(self, newList):
+    def updateModelContent(self, model, newList):
         # clear first
-        self.sim_list.clear()
+        model.clear()
         
         for data in newList:
-            self.sim_list.appendRow(QtGui.QStandardItem(data))
+            model.appendRow(QtGui.QStandardItem(data))
 
 
     def updateFileHeader(self):
@@ -410,12 +410,19 @@ class MyWindow(QtWidgets.QMainWindow):
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
         dutDict = self.dataInfo.dutDict
+        siteList = sorted(self.getCheckedSites())
         
         for index in sorted(dutDict.keys()):
             hbin = dutDict[index]["HARD_BIN"]
             sbin = dutDict[index]["SOFT_BIN"]
+            site = dutDict[index]["SITE_NUM"]
+            
+            if not (site in siteList or -1 in siteList):
+                # skip dut info if the site it tested is not selected
+                continue
+            
             tmpRow = ["%s" % dutDict[index]["PART_ID"], 
-                      "Site %d" % dutDict[index]["SITE_NUM"], 
+                      "Site %d" % site, 
                       "%d" % dutDict[index]["NUM_TEST"],
                       "%d ms" % dutDict[index]["TEST_T"],
                       "Bin %d - %s" % (hbin, self.dataInfo.hbinDict[hbin][0]),
@@ -436,20 +443,6 @@ class MyWindow(QtWidgets.QMainWindow):
             
         for column in range(header.count()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
-                    
-
-    def searchInBox(self):
-        # get current string in search box as re pattern
-        try:
-            cpl_pattern = re.compile(self.ui.SearchBox.text(), re.IGNORECASE)
-            filterList = [item for item in self.completeTestList if cpl_pattern.search(item)]
-            self.updateTestList(filterList)
-            # self.ui.statusBar().showMessage("")
-            self.statusBar().showMessage("")
-        except re.error:
-            self.updateTestList(self.completeTestList)
-            # self.ui.statusBar().showMessage("Search string is not a valid Regex")
-            self.statusBar().showMessage("Search string is not a valid Regex")
         
         
     def clearSearchBox(self):
@@ -504,6 +497,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.updateTabContent()
                 # update table
                 self.updateTableContent()
+                # update DUT summary
+                self.updateDutSummary()
     
     
     def onSiteChecked(self):
@@ -511,7 +506,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         # it is safe to call onSelect directly without any items in listView
         # the inner function will detect the items and will skip if there is none
-        # if self.getTestItemNums():
+        # if self.getSelectedNums():
         self.onSelect()
             
             
@@ -519,10 +514,11 @@ class MyWindow(QtWidgets.QMainWindow):
         #MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
         # as it may be omitted in the later record, causing typeError when user directly selects sites where 
         # no such field value is available in the data preparation.
-        for test_num in self.dataSrc[-1].keys():
-            offset_1st = self.dataSrc[-1][test_num]["Offset"][0]
-            lengthL_1s = self.dataSrc[-1][test_num]["Length"][0]
-            recType = self.dataSrc[-1][test_num]["RecType"]
+        arbSite = list(self.dataSrc.keys())[0]
+        for test_num in self.dataSrc[arbSite].keys():
+            recType, endian, _, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
+            offset_1st = offsetL[0]
+            lengthL_1s = lengthL[0]
             
             self.std_handle.seek(offset_1st, 0)
             rawByte_1st = self.std_handle.read(lengthL_1s)
@@ -531,10 +527,13 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def isTestFail(self, test_num, site):
-        offsetL = self.dataSrc[site][test_num]["Offset"]
-        lengthL = self.dataSrc[site][test_num]["Length"]
-        recType = self.dataSrc[site][test_num]["RecType"]
-        endian = self.dataSrc[site][test_num]["Endian"]
+        if site == -1:
+            recType, endian, _, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
+        else:
+            offsetL = self.dataSrc[site][test_num]["Offset"]
+            lengthL = self.dataSrc[site][test_num]["Length"]
+            recType = self.dataSrc[site][test_num]["RecType"]
+            endian = self.dataSrc[site][test_num]["Endian"]
         # parse data on-the-fly
         RecordParser.endian = endian    # specify the parse endian
         testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle, failCheck=True)
@@ -554,6 +553,27 @@ class MyWindow(QtWidgets.QMainWindow):
             return "testPassed"
                         
             
+    def mergeAllSiteTestData(self, test_num):
+        # get UnOrdered offsetL, lengthL & dutIndex list from all sites
+        uo_dutIndex = []
+        uo_offsetL = []
+        uo_lengthL = []
+        recType = None
+        endian = ""
+        
+        for site in self.dataSrc.keys():
+            if site == -1:
+                continue     # manually skip 
+            uo_offsetL += self.dataSrc[site][test_num]["Offset"]
+            uo_lengthL += self.dataSrc[site][test_num]["Length"]
+            uo_dutIndex += self.dataSrc[site][test_num]["DUTIndex"]        
+            recType = self.dataSrc[site][test_num]["RecType"]
+            endian = self.dataSrc[site][test_num]["Endian"]
+        sorted_lists = sorted(zip(uo_dutIndex, uo_offsetL, uo_lengthL), key=lambda x: x[0])
+        dutIndex, offsetL, lengthL = [[x[i] for x in sorted_lists] for i in range(3)]
+        return recType, endian, dutIndex, offsetL, lengthL
+            
+            
     def prepareData(self, selectItemNums, selectSites):
         # clear
         self.selData = {}
@@ -561,11 +581,14 @@ class MyWindow(QtWidgets.QMainWindow):
         if selectItemNums:
             for test_num in selectItemNums:
                 for site in selectSites:
-                    offsetL = self.dataSrc[site][test_num]["Offset"]
-                    lengthL = self.dataSrc[site][test_num]["Length"]
-                    recType = self.dataSrc[site][test_num]["RecType"]
-                    endian = self.dataSrc[site][test_num]["Endian"]
-                    dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
+                    if site == -1:
+                        recType, endian, dutIndex, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
+                    else:
+                        offsetL = self.dataSrc[site][test_num]["Offset"]
+                        lengthL = self.dataSrc[site][test_num]["Length"]
+                        recType = self.dataSrc[site][test_num]["RecType"]
+                        endian = self.dataSrc[site][test_num]["Endian"]
+                        dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
                     # parse data on-the-fly
                     RecordParser.endian = endian    # specify the parse endian
                     testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle)
@@ -809,6 +832,55 @@ class MyWindow(QtWidgets.QMainWindow):
             return rowList
       
       
+    def prepareDataForDUTSummary(self, siteList, **kargs):
+        """
+        Provide data for DUT summary sheet in exported excel
+        if test_num is in kargs, return its test data sorted by dutIndex
+        else, return dut info sorted by dutIndex
+        """
+        valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
+        dutDict = self.dataInfo.dutDict
+        dut_data_dict = None
+        data = []
+        
+        if "test_num" in kargs:
+            test_num = kargs["test_num"]
+            self.prepareData([test_num], [-1])     # pick data of this test item across all sites (all dutIndex)
+            testDict = self.selData[-1][test_num]
+            dut_data_dict = dict(zip(testDict["DUTIndex"], testDict["DataList"]))   # used for search test data by dutIndex
+            # headers: ["Test Name", "Test Number", "Upper Limit", "Lower Limit", "Unit"]
+            data.extend([testDict["TestName"],
+                         testDict["TestNum"],
+                         "" if testDict["HL"] == None else valueFormat % testDict["HL"],
+                         "" if testDict["LL"] == None else valueFormat % testDict["LL"],
+                         testDict["Unit"], ""])
+
+        for dutIndex in sorted(dutDict.keys()):
+            hbin = dutDict[dutIndex]["HARD_BIN"]
+            sbin = dutDict[dutIndex]["SOFT_BIN"]
+            site = dutDict[dutIndex]["SITE_NUM"]
+            
+            if not (site in siteList or -1 in siteList):
+                # skip dutIndex if its site is not selected
+                continue
+            
+            if "test_num" in kargs:
+                # append data of test_num for all selected dutIndex
+                data.append("" if not dutIndex in dut_data_dict else valueFormat % dut_data_dict[dutIndex])
+            
+            else:
+                # dut info without any test data    
+                tmpRow = [dutDict.get(dutIndex, {"PART_ID": "MissingID"})["PART_ID"], 
+                        "Site %d" % site, 
+                        "%d" % dutDict[dutIndex]["NUM_TEST"],
+                        "%d ms" % dutDict[dutIndex]["TEST_T"],
+                        "Bin %d - %s" % (hbin, self.dataInfo.hbinDict[hbin][0]),
+                        "Bin %d - %s" % (sbin, self.dataInfo.sbinDict[sbin][0]),
+                        "%s" % dutDict[dutIndex]["PART_FLG"]]
+                data.append(tmpRow)
+        return data
+    
+    
     def resizeCellWidth(self, tableView, stretchToFit = True):
         # set column width
         header = tableView.horizontalHeader()
@@ -875,8 +947,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                     qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                             elif index == indexOfCpk:
                                 if item != "" and item != "∞":
-                                    threshold = 1.33
-                                    if float(item) < threshold:
+                                    if float(item) < self.settingParams.cpkThreshold:
                                         qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                                         qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
                             qitemList.append(qitem)
@@ -1173,8 +1244,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.dataInfo = smz     # attrs: fileInfo; pinDict; hbinSUM; sbinSUM; hbinDict; sbinDict;
     
             # update listView
-            self.completeTestList = ["%d\t%s"%(test_num, self.dataSrc[-1][test_num]["TestName"]) for test_num in sorted(self.dataSrc[-1].keys())]
-            self.updateTestList(self.completeTestList)
+            arbSite = list(self.dataSrc.keys())[0]    # get an arbitrary site number to get test number & test name
+            self.completeTestList = ["%d\t%s"%(test_num, self.dataSrc[arbSite][test_num]["TestName"]) for test_num in sorted(self.dataSrc[arbSite].keys())]
+            self.updateModelContent(self.sim_list, self.completeTestList)
             
             # remove site checkbox for invalid sites
             current_exist_site = list(self.site_cb_dict.keys())     # avoid RuntimeError: dictionary changed size during iteration

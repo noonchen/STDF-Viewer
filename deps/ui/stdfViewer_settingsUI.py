@@ -41,7 +41,7 @@ class Ui_Setting(object):
         self.settingBox.setFont(font)
         self.settingBox.setObjectName("settingBox")
         self.trendSetting = QtWidgets.QWidget()
-        self.trendSetting.setGeometry(QtCore.QRect(0, 0, 354, 208))
+        self.trendSetting.setGeometry(QtCore.QRect(0, 0, 354, 210))
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setBold(False)
@@ -56,7 +56,7 @@ class Ui_Setting(object):
         self.trendscrollArea.setWidgetResizable(True)
         self.trendscrollArea.setObjectName("trendscrollArea")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 354, 208))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 354, 210))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.verticalLayout_5 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_5.setContentsMargins(12, 0, -1, -1)
@@ -194,7 +194,7 @@ class Ui_Setting(object):
         self.verticalLayout_3.addWidget(self.histoscrollArea)
         self.settingBox.addItem(self.histoSetting, "")
         self.tableSetting = QtWidgets.QWidget()
-        self.tableSetting.setGeometry(QtCore.QRect(0, 0, 354, 208))
+        self.tableSetting.setGeometry(QtCore.QRect(0, 0, 354, 210))
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setBold(False)
@@ -211,7 +211,7 @@ class Ui_Setting(object):
         self.tablescrollArea.setWidgetResizable(True)
         self.tablescrollArea.setObjectName("tablescrollArea")
         self.scrollAreaWidgetContents_3 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 354, 208))
+        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 354, 210))
         self.scrollAreaWidgetContents_3.setObjectName("scrollAreaWidgetContents_3")
         self.verticalLayout_7 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_3)
         self.verticalLayout_7.setContentsMargins(-1, 0, -1, -1)
@@ -239,13 +239,31 @@ class Ui_Setting(object):
         self.label_4 = QtWidgets.QLabel(self.scrollAreaWidgetContents_3)
         self.label_4.setObjectName("label_4")
         self.horizontalLayout_10.addWidget(self.label_4)
-        self.precisionLCD = QtWidgets.QLCDNumber(self.scrollAreaWidgetContents_3)
-        self.precisionLCD.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.precisionLCD.setDigitCount(2)
-        self.precisionLCD.setProperty("intValue", 3)
-        self.precisionLCD.setObjectName("precisionLCD")
-        self.horizontalLayout_10.addWidget(self.precisionLCD)
+        self.label_5 = QtWidgets.QLabel(self.scrollAreaWidgetContents_3)
+        self.label_5.setMinimumSize(QtCore.QSize(22, 0))
+        font = QtGui.QFont()
+        font.setFamily("Courier New")
+        font.setPointSize(18)
+        font.setBold(True)
+        font.setWeight(75)
+        self.label_5.setFont(font)
+        self.label_5.setObjectName("label_5")
+        self.horizontalLayout_10.addWidget(self.label_5)
         self.precisionSlider = QtWidgets.QSlider(self.scrollAreaWidgetContents_3)
+        self.precisionSlider.setStyleSheet("QSlider::groove:horizontal {\n"
+"    border: 0px;\n"
+"    height: 6px; /* the groove expands to the size of the slider by default. by giving it a height, it has a fixed size */\n"
+"    background: rgb(173, 173, 173);\n"
+"    margin: 2px 0;\n"
+"}\n"
+"\n"
+"QSlider::handle:horizontal {\n"
+"    background: rgb(153, 153, 153);\n"
+"    border: 1px solid #5c5c5c;\n"
+"    width: 18px;\n"
+"    margin: -2px 0; /* handle is placed by default on the contents rect of the groove. Expand outside the groove */\n"
+"    border-radius: 3px;\n"
+"}")
         self.precisionSlider.setMaximum(12)
         self.precisionSlider.setPageStep(3)
         self.precisionSlider.setProperty("value", 3)
@@ -254,6 +272,15 @@ class Ui_Setting(object):
         self.precisionSlider.setObjectName("precisionSlider")
         self.horizontalLayout_10.addWidget(self.precisionSlider)
         self.verticalLayout_7.addLayout(self.horizontalLayout_10)
+        self.horizontalLayout_13 = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_13.setObjectName("horizontalLayout_13")
+        self.label_9 = QtWidgets.QLabel(self.scrollAreaWidgetContents_3)
+        self.label_9.setObjectName("label_9")
+        self.horizontalLayout_13.addWidget(self.label_9)
+        self.lineEdit_cpk = QtWidgets.QLineEdit(self.scrollAreaWidgetContents_3)
+        self.lineEdit_cpk.setObjectName("lineEdit_cpk")
+        self.horizontalLayout_13.addWidget(self.lineEdit_cpk)
+        self.verticalLayout_7.addLayout(self.horizontalLayout_13)
         spacerItem2 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
         self.verticalLayout_7.addItem(spacerItem2)
         self.tablescrollArea.setWidget(self.scrollAreaWidgetContents_3)
@@ -312,9 +339,9 @@ class Ui_Setting(object):
         self.verticalLayout.addLayout(self.horizontalLayout_3)
 
         self.retranslateUi(Setting)
-        self.settingBox.setCurrentIndex(0)
-        self.precisionSlider.valueChanged['int'].connect(self.precisionLCD.display)
-        self.precisionSlider.sliderMoved['int'].connect(self.precisionLCD.display)
+        self.settingBox.setCurrentIndex(2)
+        self.precisionSlider.valueChanged['int'].connect(self.label_5.setNum)
+        self.precisionSlider.sliderMoved['int'].connect(self.label_5.setNum)
         QtCore.QMetaObject.connectSlotsByName(Setting)
 
     def retranslateUi(self, Setting):
@@ -343,6 +370,8 @@ class Ui_Setting(object):
         self.notationCombobox.setItemText(1, _translate("Setting", "Float Number"))
         self.notationCombobox.setItemText(2, _translate("Setting", "Scientific Notation"))
         self.label_4.setText(_translate("Setting", "Data Precison:"))
+        self.label_5.setText(_translate("Setting", "3"))
+        self.label_9.setText(_translate("Setting", "Cpk Threshold:"))
         self.settingBox.setItemText(self.settingBox.indexOf(self.tableSetting), _translate("Setting", "Statistic Table"))
         self.Confirm.setText(_translate("Setting", "Confirm"))
         self.Confirm.setShortcut(_translate("Setting", "Return"))

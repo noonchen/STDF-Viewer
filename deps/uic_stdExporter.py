@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Wed Feb 03 2021
+# Last Modified: Thu Feb 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -48,7 +48,7 @@ from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
     
 # simulate a Enum in python
 class Tab(tuple): __getattr__ = tuple.index
-tab = Tab(["RawData", "Trend", "Histo", "Bin", "DUT", "Stat", "FileInfo"])
+tab = Tab(["DUT", "Trend", "Histo", "Bin", "Stat", "FileInfo"])
 
 
 def list_operation(main, method, other):
@@ -83,7 +83,8 @@ class signals(QtCore.QObject):
     prepareDataSignal = Signal(int, int)    # site, test_num
     retrieveImageSignal = Signal(int, int, int)     # site, test_num, chartType
     retrieveDataListSignal = Signal(int, dict)      # chartType, {site, test_num} / {site, bin} / {site, test_num, RawData}
-    retrieveDUT_or_FileSignal = Signal(int)         # tab.DUT or tab.FileInfo
+    retrieveTableDataSignal = Signal(int)           # FileInfo table
+    retrieveDutSummarySignal = Signal(list, dict)   # selected sites, {test_num}, get dut info or dut test data
     # signals for sending data to qthread
     # sendImage = Signal(io.BytesIO)
     # sendDataList = Signal(list)
@@ -107,7 +108,8 @@ class reportGenerator(QtCore.QObject):
         self.prepareDataSignal = signals.prepareDataSignal
         self.retrieveImageSignal = signals.retrieveImageSignal
         self.retrieveDataListSignal = signals.retrieveDataListSignal
-        self.retrieveDUT_or_FileSignal = signals.retrieveDUT_or_FileSignal
+        self.retrieveTableDataSignal = signals.retrieveTableDataSignal
+        self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
         
     # @Slot(io.BytesIO)
     # def getImage(self, image):
@@ -143,14 +145,23 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel        
     
     
-    def waitForDUT_FileInfo(self, conType):
+    def waitForTableData(self, conType):
         self.mutex.lock()        
-        self.retrieveDUT_or_FileSignal.emit(conType)
+        self.retrieveTableDataSignal.emit(conType)
 
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel        
-        
+    
+    
+    def waitForDutSummary(self, selectedSites, kargs):
+        self.mutex.lock()        
+        self.retrieveDutSummarySignal.emit(selectedSites, kargs)
+
+        self.condWait.wait(self.mutex)
+        self.mutex.unlock()
+        return self.channel.dataListChannel        
+            
         
     @Slot()
     def generate_report(self):
@@ -162,6 +173,15 @@ class reportGenerator(QtCore.QObject):
                     sheet.write_number(row, scol+i, float(dataL[i]))
                 except (TypeError, ValueError):
                     sheet.write_string(row, scol+i, dataL[i])
+                    
+        def write_col(sheet, row, scol, dataL):
+            # write as number in default, otherwise as string
+            for i in range(len(dataL)):
+                try:
+                    sheet.write_number(row+i, scol, float(dataL[i]))
+                except (TypeError, ValueError):
+                    sheet.write_string(row+i, scol, dataL[i])                    
+                    
         sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
         
         with Workbook(self.dirout) as wb:
@@ -186,12 +206,17 @@ class reportGenerator(QtCore.QObject):
                                 # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
                                 image_io = self.waitForImage(site, test_num, tab.Trend)
                                 dataList = self.waitForDataList(tab.Trend, {"site": site, "test_num": test_num})
+                                rawDataList = self.waitForDataList(tab.Trend, {"site": site, "test_num": test_num, "RawData": True})
                                 TrendSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
                                 currentRow += imageHeight_in_rowHeight
                                 TrendSheet.write_row(currentRow, startCol, header_stat)
                                 currentRow += 1
                                 write_row(TrendSheet, currentRow, startCol, dataList)
-                                # TrendSheet.write_row(currentRow, startCol, dataList)
+                                # Add raw data source of trend chart below
+                                currentRow += 1
+                                TrendSheet.write_row(currentRow, startCol, ["Raw data:"])
+                                currentRow += 1
+                                write_row(TrendSheet, currentRow, startCol, [row[6] for row in rawDataList])   # data in index 6
                                 currentRow += 2
                                 loopCnt += 1
                                 sendProgress(loopCnt)
@@ -266,51 +291,56 @@ class reportGenerator(QtCore.QObject):
                                 sendProgress(loopCnt)
                             currentRow += 1     # add gap between different test items
 
-                    elif cont == tab.DUT or cont == tab.FileInfo:
-                        # Sheet for dut summary or file information
-                        if cont == tab.DUT: 
-                            StatSheet = wb.add_worksheet("DUT Summary")
-                            headerLabels = ["Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
-                        else: 
-                            StatSheet = wb.add_worksheet("File Info")
-                            headerLabels = ["Property Name", "Value"]
+                    elif cont == tab.FileInfo:
+                        # Sheet for file information
+                        FileInfoSheet = wb.add_worksheet("File Info")
+                        headerLabels = ["Property Name", "Value"]
                         
                         currentRow = 0
                         startCol = 0
-                        StatSheet.write_row(currentRow, startCol, headerLabels)
+                        FileInfoSheet.write_row(currentRow, startCol, headerLabels)
                         currentRow += 1
-                        data = self.waitForDUT_FileInfo(cont)   
+                        data = self.waitForTableData(cont)   
                                              
                         for row in data:
                             if self.forceQuit: return
-                            write_row(StatSheet, currentRow, startCol, row)
+                            write_row(FileInfoSheet, currentRow, startCol, row)
                             currentRow += 1
                             
                         loopCnt += 1
                         sendProgress(loopCnt)
                             
-                    elif cont == tab.RawData:
-                        # Sheet for raw data of trend chart
-                        StatSheet = wb.add_worksheet("Raw Data")
-                        headerLabels = ["Part ID", "Test Number / Site", "Test Name", "Unit", "Low Limit", "High Limit", "Value", "Test Flag"]
-                        
+                    elif cont == tab.DUT:
+                        # Sheet for DUT summary & Test raw data
+                        DutSheet = wb.add_worksheet("DUT Summary")
+                        headerLabelList = [["Test Name"],
+                                           ["Test Number"],
+                                           ["Upper Limit"],
+                                           ["Lower Limit"],
+                                           ["Unit"],
+                                           ["Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]]
+                                                
                         currentRow = 0
                         startCol = 0
-                        StatSheet.write_row(currentRow, startCol, headerLabels)
-                        currentRow += 1
+                        # write headers
+                        for h in headerLabelList:
+                            DutSheet.write_row(currentRow, startCol, h)
+                            currentRow += 1
+                        # write DUT info
+                        DutInfoList = self.waitForDutSummary(self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
+                        for infoRow in DutInfoList:
+                            write_row(DutSheet, currentRow, startCol, infoRow)
+                            currentRow += 1                            
+                        #append test raw data to the last column
+                        startRow = 0
+                        currentCol = len(headerLabelList[-1])
                         for test_num in self.numL:
-                            for site in self.siteL:
-                                if self.forceQuit: return
-                                self.prepareDataSignal.emit(site, test_num)
-                                dataList = self.waitForDataList(tab.RawData, {"site": site, "test_num": test_num, "RawData": True})
-                                # loop 2d list
-                                for row in dataList:
-                                    write_row(StatSheet, currentRow, startCol, row)
-                                    currentRow += 1
-                                currentRow += 1     # add gap between different sites
-                                loopCnt += 1
-                                sendProgress(loopCnt)
-                            currentRow += 1     # add an additional gap between different test items
+                            if self.forceQuit: return
+                            DutDataList = self.waitForDutSummary(self.siteL, {"test_num": test_num})
+                            write_col(DutSheet, startRow, currentCol, DutDataList)
+                            currentCol += 1
+                            loopCnt += 1
+                            sendProgress(loopCnt)
                                                                      
         self.closeSignal.emit(True)
         
@@ -337,7 +367,8 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.prepareDataSignal.connect(self.prepareData)
         self.signals.retrieveImageSignal.connect(self.getImageFromParentMethod)
         self.signals.retrieveDataListSignal.connect(self.getDataListFromParentMethod)
-        self.signals.retrieveDUT_or_FileSignal.connect(self.getDUT_FileFromParent)
+        self.signals.retrieveTableDataSignal.connect(self.getTableDataFromParent)
+        self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
         
         self.rg = reportGenerator(self.signals, 
                                   self.mutex, 
@@ -421,7 +452,7 @@ class progressDisplayer(QtWidgets.QDialog):
           
           
     @Slot(int)
-    def getDUT_FileFromParent(self, conType):
+    def getTableDataFromParent(self, conType):
         model = None
         data = []
         if conType == tab.DUT:
@@ -440,6 +471,15 @@ class progressDisplayer(QtWidgets.QDialog):
         self.mutex.lock()
         self.condWait.wakeAll()
         self.mutex.unlock()              
+        
+        
+    @Slot(list, dict)
+    def getDutSummaryFromParent(self, seletedSites, kargs):
+        self.channel.dataListChannel = self.parent().parent.prepareDataForDUTSummary(seletedSites, **kargs)
+        self.mutex.lock()   # wait the mutex to unlock once the thread paused
+        # self.signals.sendDataList.emit(dataList)
+        self.condWait.wakeAll()
+        self.mutex.unlock()
         
                 
 
@@ -605,7 +645,6 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.Bin_cb.isChecked(): selectedContents.append(tab.Bin)
         if self.exportUI.Stat_cb.isChecked(): selectedContents.append(tab.Stat)
         if self.exportUI.DUT_cb.isChecked(): selectedContents.append(tab.DUT)
-        if self.exportUI.RawData_cb.isChecked(): selectedContents.append(tab.RawData)
         if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(tab.FileInfo)
         
         return selectedContents
@@ -662,12 +701,14 @@ class stdfExporter(QtWidgets.QDialog):
             # self.parent.prepareTableContent(tabType, site=site, test_num=test_num)
             self.totalLoopCnt = 0
             for cont in self.contL:
-                if cont == tab.Trend or cont == tab.Histo or cont == tab.Stat or cont == tab.RawData:
+                if cont == tab.Trend or cont == tab.Histo or cont == tab.Stat:
                     self.totalLoopCnt += len(self.numL) * len(self.siteL)
                 elif cont == tab.Bin:
                     self.totalLoopCnt += len(self.siteL)
-                elif cont == tab.DUT or cont == tab.FileInfo:
+                elif cont == tab.FileInfo:
                     self.totalLoopCnt += 1
+                elif cont == tab.DUT:
+                    self.totalLoopCnt += len(self.numL)
                 elif False:
                     # Update loopcnt if more contents are added
                     # self.totalLoopCnt += len(self.siteL)
@@ -684,19 +725,19 @@ class stdfExporter(QtWidgets.QDialog):
                 
             close = QtWidgets.QMessageBox.information(None, "Export Status", 
                                                     '%s\n\n%s\n'%(msg, self.dirout), 
-                                                    QtWidgets.QMessageBox.Yes, 
-                                                    defaultButton=QtWidgets.QMessageBox.Yes)
+                                                    QtWidgets.QMessageBox.Ok, 
+                                                    defaultButton=QtWidgets.QMessageBox.Ok)
             # if close == QtWidgets.QMessageBox.No: self.close()
         
     
     def closeEvent(self, event):
         # close by clicking X
-        close = QtWidgets.QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
-        if close == QtWidgets.QMessageBox.Yes:
-            # if user clicked yes, temrinate thread and close window
-            event.accept()
-        else:
-            event.ignore()
+        # close = QtWidgets.QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
+        # if close == QtWidgets.QMessageBox.Yes:
+        #     # if user clicked yes, temrinate thread and close window
+        event.accept()
+        # else:
+        #     event.ignore()
 
                  
         
