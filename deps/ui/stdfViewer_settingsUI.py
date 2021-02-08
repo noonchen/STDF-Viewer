@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_settingsUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -41,7 +42,7 @@ class Ui_Setting(object):
         self.settingBox.setFont(font)
         self.settingBox.setObjectName("settingBox")
         self.trendSetting = QtWidgets.QWidget()
-        self.trendSetting.setGeometry(QtCore.QRect(0, 0, 354, 210))
+        self.trendSetting.setGeometry(QtCore.QRect(0, 0, 354, 198))
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setBold(False)
@@ -56,7 +57,7 @@ class Ui_Setting(object):
         self.trendscrollArea.setWidgetResizable(True)
         self.trendscrollArea.setObjectName("trendscrollArea")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 354, 210))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 354, 198))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.verticalLayout_5 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_5.setContentsMargins(12, 0, -1, -1)
@@ -94,7 +95,7 @@ class Ui_Setting(object):
         self.verticalLayout_2.addWidget(self.trendscrollArea)
         self.settingBox.addItem(self.trendSetting, "")
         self.histoSetting = QtWidgets.QWidget()
-        self.histoSetting.setGeometry(QtCore.QRect(0, 0, 354, 210))
+        self.histoSetting.setGeometry(QtCore.QRect(0, 0, 354, 198))
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setBold(False)
@@ -194,7 +195,7 @@ class Ui_Setting(object):
         self.verticalLayout_3.addWidget(self.histoscrollArea)
         self.settingBox.addItem(self.histoSetting, "")
         self.tableSetting = QtWidgets.QWidget()
-        self.tableSetting.setGeometry(QtCore.QRect(0, 0, 354, 210))
+        self.tableSetting.setGeometry(QtCore.QRect(0, 0, 354, 198))
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setBold(False)
@@ -211,7 +212,7 @@ class Ui_Setting(object):
         self.tablescrollArea.setWidgetResizable(True)
         self.tablescrollArea.setObjectName("tablescrollArea")
         self.scrollAreaWidgetContents_3 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 354, 210))
+        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 354, 198))
         self.scrollAreaWidgetContents_3.setObjectName("scrollAreaWidgetContents_3")
         self.verticalLayout_7 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_3)
         self.verticalLayout_7.setContentsMargins(-1, 0, -1, -1)
@@ -327,13 +328,13 @@ class Ui_Setting(object):
         self.Cancel.setFont(font)
         self.Cancel.setStyleSheet("QPushButton {\n"
 "color: white;\n"
-"background-color: rgb(83, 0, 0); \n"
-"border: 1px solid rgb(83, 0, 0); \n"
+"background-color: rgb(120, 120, 120); \n"
+"border: 1px solid rgb(120, 120, 120); \n"
 "border-radius: 5px;}\n"
 "\n"
 "QPushButton:pressed {\n"
-"background-color: rgb(40, 0, 0); \n"
-"border: 1px solid rgb(40, 0, 0);}")
+"background-color: rgb(50, 50, 50); \n"
+"border: 1px solid rgb(50, 50, 50);}")
         self.Cancel.setObjectName("Cancel")
         self.horizontalLayout_3.addWidget(self.Cancel)
         self.verticalLayout.addLayout(self.horizontalLayout_3)

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Feb 04 2021
+# Last Modified: Mon Feb 08 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -97,7 +97,7 @@ class reportGenerator(QtCore.QObject):
         self.forceQuit = False
         self.mutex = mutex
         self.condWait = conditionWait
-        self.contL, self.numL, self.siteL, self.dirout, self.totalLoopCnt = settings
+        self.contL, self.numL, self.siteL, self.path, self.totalLoopCnt = settings
         # for sharing data from gui thread
         self.channel = channel
         # signals for updating progress bar dialog
@@ -184,7 +184,7 @@ class reportGenerator(QtCore.QObject):
                     
         sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
         
-        with Workbook(self.dirout) as wb:
+        with Workbook(self.path) as wb:
             header_stat = ["Test Number / Site", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Count", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
             imageHeight_in_rowHeight = 20
             x_scale = imageHeight_in_rowHeight * 0.21 / 4      # default cell height = 0.21 inches, image height = 4 inches
@@ -313,12 +313,11 @@ class reportGenerator(QtCore.QObject):
                     elif cont == tab.DUT:
                         # Sheet for DUT summary & Test raw data
                         DutSheet = wb.add_worksheet("DUT Summary")
-                        headerLabelList = [["Test Name"],
+                        headerLabelList = [["", "Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
                                            ["Test Number"],
                                            ["Upper Limit"],
                                            ["Lower Limit"],
-                                           ["Unit"],
-                                           ["Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]]
+                                           ["Unit"]]
                                                 
                         currentRow = 0
                         startCol = 0
@@ -328,12 +327,12 @@ class reportGenerator(QtCore.QObject):
                             currentRow += 1
                         # write DUT info
                         DutInfoList = self.waitForDutSummary(self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
-                        for infoRow in DutInfoList:
-                            write_row(DutSheet, currentRow, startCol, infoRow)
+                        for count, infoRow in enumerate(DutInfoList):
+                            write_row(DutSheet, currentRow, startCol, ["#%d" % (count+1)] + infoRow)
                             currentRow += 1                            
                         #append test raw data to the last column
                         startRow = 0
-                        currentCol = len(headerLabelList[-1])
+                        currentCol = len(headerLabelList[0])
                         for test_num in self.numL:
                             if self.forceQuit: return
                             DutDataList = self.waitForDutSummary(self.siteL, {"test_num": test_num})
@@ -373,7 +372,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.rg = reportGenerator(self.signals, 
                                   self.mutex, 
                                   self.condWait, 
-                                  (parent.contL, parent.numL, parent.siteL, parent.dirout, parent.totalLoopCnt),
+                                  (parent.contL, parent.numL, parent.siteL, parent.path, parent.totalLoopCnt),
                                   self.channel)
         # send data from parent to qthread, bind before moveToThread
         # -- Deprecated --
@@ -507,7 +506,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.Removebutton.clicked.connect(self.onRM)
         self.exportUI.RemoveAllbutton.clicked.connect(self.onRMAll)
         
-        self.exportUI.toolButton.clicked.connect(self.outDirDialog)
+        self.exportUI.toolButton.clicked.connect(self.outFileDialog)
         self.exportUI.Confirm.clicked.connect(self.check_inputs)
         self.exportUI.Cancel.clicked.connect(lambda: self.close())
         
@@ -558,11 +557,10 @@ class stdfExporter(QtWidgets.QDialog):
         self.updateTestLists(self.remainTestItems, self.exportTestItems)
                 
         
-    def outDirDialog(self):
-        outDir = QFileDialog.getExistingDirectory(None, 
-                                                  caption="Select Directory To Save Report")
-        if outDir:
-            self.exportUI.plainTextEdit.setPlainText(outDir)
+    def outFileDialog(self):
+        outPath = QFileDialog.getSaveFileName(None, caption="Save Report As", filter="Excel file (*.xlsx)")
+        if outPath[0]:
+            self.exportUI.plainTextEdit.setPlainText(outPath[0])
             
             
     def searchInBox(self):
@@ -655,26 +653,13 @@ class stdfExporter(QtWidgets.QDialog):
     
     
     def getOutPath(self):
-        dirout = self.exportUI.plainTextEdit.toPlainText()
-        timestamp = datetime.today().strftime('%Y%m%d_%H%M%S')
-        autoFileName = "STDF_Report_" + timestamp + ".xlsx"
+        path_out = self.exportUI.plainTextEdit.toPlainText()
         
-        if dirout == "":
-            return None
-        
-        elif os.path.isdir(dirout):
-            # directory is valid and existed
-            if not os.access(dirout, os.W_OK):
+        if path_out:
+            if not os.access(os.path.dirname(path_out) , os.W_OK):
                 return None
-            else:
-                return os.path.join(dirout, autoFileName)
-            
-        elif os.path.isfile(dirout):
-            # file path is valid and existed
-            return os.path.join(os.path.dirname(dirout), os.path.basename(dirout) + ".xlsx")
-                
+            return path_out
         else:
-            # invalid path or non-existing path
             return None
     
   
@@ -682,15 +667,15 @@ class stdfExporter(QtWidgets.QDialog):
         self.numL = self.getExportTestNums()
         self.siteL = self.getSites()
         self.contL = self.getSelectedContents()
-        self.dirout = self.getOutPath()
+        self.path = self.getOutPath()
        
-        if len(self.numL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.dirout == None:
+        if len(self.numL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path == None:
             # input not complete
             message = ""
             if len(self.numL) == 0: message += "No test item is selected\n\n"
             if len(self.siteL) == 0: message += "No site is selected\n\n"
             if len(self.contL) == 0: message += "No content is selected\n\n"
-            if self.dirout == None: message += "Output directory is invalid, not writable or not existed\n"
+            if self.path == None: message += "Output directory is invalid, not writable or not existed\n"
             
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             
@@ -724,7 +709,7 @@ class stdfExporter(QtWidgets.QDialog):
                 msg = "Process Aborted! Partial report is saved in:"
                 
             close = QtWidgets.QMessageBox.information(None, "Export Status", 
-                                                    '%s\n\n%s\n'%(msg, self.dirout), 
+                                                    '%s\n\n%s\n'%(msg, self.path), 
                                                     QtWidgets.QMessageBox.Ok, 
                                                     defaultButton=QtWidgets.QMessageBox.Ok)
             # if close == QtWidgets.QMessageBox.No: self.close()
