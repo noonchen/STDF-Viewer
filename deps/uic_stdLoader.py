@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Dec 20 2020
+# Last Modified: Mon Feb 08 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -63,7 +63,6 @@ class stdfLoader(QtWidgets.QDialog):
         super().__init__(parent)
         self.closeEventByThread = False    # used to determine the source of close event
         self.std = stdHandle
-        self.summarizer = None
         
         self.signals = signal4Loader()
         self.signals.dataTransSignal.connect(self.getSummarizer)
@@ -97,11 +96,15 @@ class stdfLoader(QtWidgets.QDialog):
             if close == QtWidgets.QMessageBox.Yes:
                 # if user clicked yes, change thread flag and close window
                 self.reader.flag.stop = True
-                self.thread.quit()
-                self.thread.wait()
-                event.accept()
-            else:
-                event.ignore()
+                # self.thread.quit()
+                # self.thread.wait()
+                # event.accept()
+            # else:
+            """
+            lesson learned: do not enable the code above, as it would nullify the sender in the thread, causing the slot is not invoked
+            we should simply ingnore the close event, let the thread finish its job and send close signal.
+            """
+            event.ignore()
 
     @Slot(int)
     def updateProgressBar(self, num):
@@ -111,8 +114,7 @@ class stdfLoader(QtWidgets.QDialog):
         
     @Slot(stdfSummarizer)
     def getSummarizer(self, smz):
-        self.summarizer = smz
-        if self.signals.dataTransToParent: self.signals.dataTransToParent.emit(self.summarizer)
+        if self.signals.dataTransToParent: self.signals.dataTransToParent.emit(smz)
         
     @Slot(bool)
     def closeLoader(self, closeUI):
@@ -147,13 +149,13 @@ class stdReader(QtCore.QObject):
             end = time.time()
             # print(end - start)
             if self.flag.stop:
+                self.summarizer.data = {}   # empty its data in order to force fail the content check
                 if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False)
             else:
                 if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False)
                 
         except InitialSequenceException:
             if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), True)
-            pass
                 
         # except Exception as e:
         #     if self.msgSignal: self.msgSignal.emit("Load Error: " + repr(e), True)

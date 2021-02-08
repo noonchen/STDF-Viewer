@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Tue Dec 15 2020
+# Last Modified: Sun Feb 07 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -263,6 +263,13 @@ class RecordParser:
             if "TestName" not in testDict: testDict["TestName"] = valueDict["TEST_TXT"]
             if "TestNum" not in testDict: testDict["TestNum"] = valueDict["TEST_NUM"]
             
+            # the following data may not be available in all PTR/MPR records, use cached data from the first record instead.
+            result_scale = RecordParser.ocache.get(valueDict["TEST_NUM"], {"RES_SCAL": 0})["RES_SCAL"]
+            result_lolimit = RecordParser.ocache.get(valueDict["TEST_NUM"], {"LO_LIMIT": 0})["LO_LIMIT"]
+            result_hilimit = RecordParser.ocache.get(valueDict["TEST_NUM"], {"HI_LIMIT": 0})["HI_LIMIT"]
+            result_unit = RecordParser.ocache.get(valueDict["TEST_NUM"], {"UNITS": ""})["UNITS"]
+            record_flag = RecordParser.ocache.get(valueDict["TEST_NUM"], {"OPT_FLAG": 0})["OPT_FLAG"]
+            
             # set default LL/HL/Unit for FTR since there's no such field
             # update the following field only once for PTR & MPR, as they may be omitted from records
             if "LL" not in testDict:
@@ -270,28 +277,24 @@ class RecordParser:
                     testDict["LL"] = None
                 else:
                     # bit 6 set = No Low Limit for this test 
-                    # this case will only run for the first record, limit and scale should be valid numbers to compute
-                    testDict["LL"] = valueDict["LO_LIMIT"] * 10 ** valueDict["RES_SCAL"] if valueDict["OPT_FLAG"] & 0b01000000 == 0 else None
+                    testDict["LL"] = result_lolimit * 10 ** result_scale if record_flag & 0b01000000 == 0 else None
                     
             if "HL" not in testDict:
                 if recType == V4.ftr:
                     testDict["HL"] = None
                 else:
                     # bit 7 set = No High Limit for this test 
-                    testDict["HL"] = valueDict["HI_LIMIT"] * 10 ** valueDict["RES_SCAL"] if valueDict["OPT_FLAG"] & 0b10000000 == 0 else None
+                    testDict["HL"] = result_hilimit * 10 ** result_scale if record_flag & 0b10000000 == 0 else None
                     
             if "Unit" not in testDict:
                 if recType == V4.ftr:
                     testDict["Unit"] = ""
                 else:
-                    testDict["Unit"] = unit_prefix.get(valueDict["RES_SCAL"], "") + valueDict["UNITS"]
+                    testDict["Unit"] = unit_prefix.get(result_scale, "") + result_unit
                                     
             if recType == V4.ftr:
                 testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["TEST_FLG"]]
             else:
-                # RES_SCAL may not be available in all records, use cached data from the first record instead.
-                result_scale = RecordParser.ocache[valueDict["TEST_NUM"]]["RES_SCAL"]
-                    
                 if recType == V4.ptr:
                     tmpResult = valueDict["RESULT"] * 10 ** result_scale
                     # testDict.setdefault("DataList", []).append(tmpResult)     # list is immutable in python
@@ -312,7 +315,15 @@ class RecordParser:
         
         if recType == V4.ptr:
             result_scale = valueDict["RES_SCAL"]
-            RecordParser.ocache[test_num] = {"RES_SCAL": result_scale}
+            LO_LIMIT = valueDict["LO_LIMIT"]
+            HI_LIMIT = valueDict["HI_LIMIT"]
+            UNITS = valueDict["UNITS"]
+            OPT_FLAG = valueDict["OPT_FLAG"]
+            RecordParser.ocache[test_num] = {"RES_SCAL": result_scale, 
+                                             "LO_LIMIT": LO_LIMIT, 
+                                             "HI_LIMIT": HI_LIMIT, 
+                                             "UNITS": UNITS,
+                                             "OPT_FLAG": OPT_FLAG}
         
         elif recType == V4.mpr:
             result_scale = valueDict["RES_SCAL"]

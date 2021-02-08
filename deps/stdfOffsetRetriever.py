@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Thu Feb 04 2021
+# Last Modified: Mon Feb 08 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -88,6 +88,7 @@ class stdfSummarizer:
         self.onRec[V4.prr] = self.onPRR
         self.onRec[V4.hbr] = self.onHBR
         self.onRec[V4.sbr] = self.onSBR
+        self.onRec[V4.wcr] = self.onWCR
         self.onRec[V4.wir] = self.onWIR
         self.onRec[V4.wrr] = self.onWRR
         
@@ -107,9 +108,10 @@ class stdfSummarizer:
         # File info
         self.fileInfo = {}
         self.endian = "="
-        self.dutIndex = -1  # get 0 as index on first +1 action
+        self.dutIndex = 0  # get 1 as index on first +1 action
         self.dutPassed = 0
         self.dutFailed = 0
+        self.waferIndex = 0
         # Pin dict
         self.pinDict = {}   # key: Pin index, value: Pin name
         
@@ -124,6 +126,8 @@ class stdfSummarizer:
         self.hbinDict = {}  # key: HBIN, value: [HBIN_NAM, HBIN_PF]
         self.sbinDict = {}  # key: SBIN, value: [SBIN_NAM, SBIN_PF]
         self.dutDict = {}   # key: dutIndex, value: {PART_FLG, NUM_TEST, TEST_T, PART_ID, SOFT_BIN, HARD_BIN}, note: for incomplete stdf, KeyError could be raised as the PRR might be missing
+        self.waferInfo = {} # key: center_x, center_y, diameter, size_unit
+        self.waferDict = {} # key: waferIndex, value: {WAFER_ID, dutIndexList, coordList}
     
     
     def sendProgress(self):
@@ -277,6 +281,8 @@ class stdfSummarizer:
         SOFT_BIN = valueDict["SOFT_BIN"]
         PART_FLG = valueDict["PART_FLG"]
         NUM_TEST = valueDict["NUM_TEST"]
+        X_COORD = valueDict["X_COORD"]
+        Y_COORD = valueDict["Y_COORD"]
         TEST_T = valueDict["TEST_T"]
         PART_ID = valueDict["PART_ID"]
         
@@ -298,6 +304,10 @@ class stdfSummarizer:
         tmpDUT["HARD_BIN"] = HARD_BIN
         tmpDUT["SOFT_BIN"] = SOFT_BIN
         tmpDUT["SITE_NUM"] = SITE_NUM
+        # update wafer only if WIR is detected
+        if not self.waferIndex == 0:
+            self.waferDict[self.waferIndex]["dutIndexList"].append(self.dutIndex)
+            self.waferDict[self.waferIndex]["coordList"].append((X_COORD, Y_COORD))
         
         if PART_FLG & 0b00011000 == 0:
             tmpDUT["PART_FLG"] = "Pass"
@@ -364,13 +374,44 @@ class stdfSummarizer:
             if SBIN_PF in ["P", "F"]: self.sbinDict[SBIN_NUM][1] = SBIN_PF
 
 
+    def onWCR(self, **kargs):
+        recType = kargs.get("recType", None)
+        binaryLen = kargs.get("dataLen", 0)
+        rawData = kargs.get("rawData", b'')
+        
+        RecordParser.endian = self.endian
+        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+        # key: center_x, center_y, diameter, size_unit
+        self.waferInfo = {"center_x": valueDict["CENTER_X"],
+                          "center_y": valueDict["CENTER_Y"],
+                          "diameter": valueDict["WAFR_SIZ"],
+                          "size_unit": valueDict["WF_UNITS"]}
+    
+    
     def onWIR(self, **kargs):
-        # placeholder
-        pass
+        recType = kargs.get("recType", None)
+        binaryLen = kargs.get("dataLen", 0)
+        rawData = kargs.get("rawData", b'')
+        
+        RecordParser.endian = self.endian
+        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+        self.waferIndex += 1
+        
+        HEAD_NUM = valueDict["HEAD_NUM"]
+        SITE_GRP = valueDict["SITE_GRP"]
+        START_T = valueDict["START_T"]
+        WAFER_ID = valueDict["WAFER_ID"] if valueDict["WAFER_ID"] else "Missing Name"
+        # init key-value for wafer dict 
+        self.waferDict[self.waferIndex] = {"WAFER_ID": WAFER_ID, "dutIndexList": [], "coordList": []}
     
     
     def onWRR(self, **kargs):
-        # placeholder
+        # recType = kargs.get("recType", None)
+        # binaryLen = kargs.get("dataLen", 0)
+        # rawData = kargs.get("rawData", b'')
+        
+        # RecordParser.endian = self.endian
+        # valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
         pass
     
     

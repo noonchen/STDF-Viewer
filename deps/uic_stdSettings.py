@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Feb 04 2021
+# Last Modified: Mon Feb 08 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -68,6 +68,16 @@ class stdfSettings(QtWidgets.QDialog):
         if parent: 
             self.originalParams = copy(parent.settingParams)
             self.initWithParentParams()
+            currentTab = parent.ui.tabControl.currentIndex()
+            if currentTab == 1:
+                # trend tab
+                currentIndex = 0
+            elif currentTab == 2:
+                # histo tab
+                currentIndex = 1
+            else:
+                currentIndex = 2
+            self.settingsUI.settingBox.setCurrentIndex(currentIndex)
 
         self.exec_()
         

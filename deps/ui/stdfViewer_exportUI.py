@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_exportUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -309,13 +310,13 @@ class Ui_exportUI(object):
         self.Cancel.setFont(font)
         self.Cancel.setStyleSheet("QPushButton {\n"
 "color: white;\n"
-"background-color: rgb(83, 0, 0); \n"
-"border: 1px solid rgb(83, 0, 0); \n"
+"background-color: rgb(120, 120, 120); \n"
+"border: 1px solid rgb(120, 120, 120); \n"
 "border-radius: 5px;}\n"
 "\n"
 "QPushButton:pressed {\n"
-"background-color: rgb(40, 0, 0); \n"
-"border: 1px solid rgb(40, 0, 0);}")
+"background-color: rgb(50, 50, 50); \n"
+"border: 1px solid rgb(50, 50, 50);}")
         self.Cancel.setObjectName("Cancel")
         self.horizontalLayout_button.addWidget(self.Cancel)
         self.verticalLayout_2.addLayout(self.horizontalLayout_button)
