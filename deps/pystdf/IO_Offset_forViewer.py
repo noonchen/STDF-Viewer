@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Tue Feb 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,24 +26,24 @@
 
 
 import sys
-import re
+from time import time
 import struct
 from deps.pystdf.Types import *
 from deps.pystdf import V4
-from deps.pystdf.Pipeline import DataSource
 
 
-class stdIO(DataSource):
+class stdIO:
     
-    def __init__(self, recTypes=V4.records, inp=sys.stdin, flag=None):
-        DataSource.__init__(self)
+    def __init__(self, recTypes=V4.records, inp=sys.stdin, flag=None, q=None):
+        # DataSource.__init__(self)
         self.eof = 1
         # records' instances
         self.recTypes = set(recTypes)
         # python stardard input
         self.inp = inp
-        self.parse_complete = False
         self.flag = flag    # used for controlling parse actions
+        self.q = q  # queue ref
+        
         # {(0, 10):FAR, (50, 30):DTR, ....}
         self.recordMap = dict(
             [ ( (recType.typ, recType.sub), recType )
@@ -69,6 +69,7 @@ class stdIO(DataSource):
                                                                                         V4.ptr, V4.ftr, V4.mpr, 
                                                                                         V4.pir, V4.prr, 
                                                                                         V4.hbr, V4.sbr] ])
+        dataCluster = []    # pack 6000 items before putting into queue
         try:
             while self.eof==0:
                 if self.flag: 
@@ -85,10 +86,18 @@ class stdIO(DataSource):
                         self.eof = 1
                         raise EofException()
                     else:
-                        self.send((recType, offset, header.len, rawData))
+                        if self.q:
+                            if len(dataCluster) < 6000:
+                                dataCluster.append({"recType": (recType.typ, recType.sub), "offset": offset, "length": header.len, "rawData": rawData})
+                            else:
+                                self.q.put(dataCluster)
+                                # don't forget to store the data from current iteration
+                                dataCluster = [{"recType": (recType.typ, recType.sub), "offset": offset, "length": header.len, "rawData": rawData}]
                 else:
                     self.inp.seek(header.len, 1) # skip other records
-        except EofException: pass
+        except EofException: 
+            if self.q:
+                self.q.put(dataCluster)
 
 
     def detect_endian(self):
@@ -113,18 +122,28 @@ class stdIO(DataSource):
         self.inp.seek(0)
         # re-precompile struct for header
         self.StructHeader = struct.Struct(self.endian + packFormatMap["U2"]+packFormatMap["U1"]+packFormatMap["U1"])
+        
+        
+    def send_endian(self):
+        if self.q:
+            self.q.put([self.endian])
 
 
     def parse(self):
         try:
+            # start = time()
             self.detect_endian()
-            self.begin((self.endian))     # send endian before start
+            self.send_endian()     # send endian before start
             self.get_records_offset()
-            self.complete()
-        except Exception as exception:
-            self.cancel(exception)
+            # end = time()
+            # print("parse time %f"%(end-start))
+        except Exception:
             raise
         finally:
-            self.parse_complete = True
+            if self.q:
+                self.q.put([])
 
 
+if __name__ == "__main__":
+    fd = open("", "rb")
+    stdIO(inp=fd).parse()

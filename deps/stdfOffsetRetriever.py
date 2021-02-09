@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Tue Feb 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,6 +28,7 @@ import os
 import time, datetime
 import struct
 from threading import Thread
+from multiprocessing import Process
 from deps.pystdf import V4
 from deps.pystdf.IO_Offset_forViewer import stdIO
 from deps.pystdf.RecordParser import RecordParser
@@ -58,6 +59,8 @@ scale_char = {15: "f",
               -9: "G",
               -12: "T"}
 
+objDict = dict([((obj.typ, obj.sub), obj) for obj in V4.records])
+
 def getFileSize(fd):
     # assume fd has attr "name"
     path = fd.name
@@ -75,7 +78,7 @@ def getFileSize(fd):
 
 class stdfSummarizer:
     
-    def __init__(self, fileHandle, QSignal=None, flag=None):
+    def __init__(self, QSignal=None, flag=None, q=None, fileSize=1):
         # Func
         self.onRec = dict((recType, lambda **kargs: None)
                  for recType in V4.records)
@@ -95,12 +98,13 @@ class stdfSummarizer:
         # pyqt signal
         self.flag = flag
         self.QSignal = QSignal
+        self.q = q
         # get file size in Bytes
         self.offset = 0     # current position
         self.reading = True
         # no need to update progressbar if signal is None
         if self.QSignal: 
-            self.fileSize = getFileSize(fileHandle)
+            self.fileSize = fileSize
             self.QSignal.emit(0)
             self.pb_thread = Thread(target=self.sendProgress)
             self.pb_thread.start()
@@ -128,6 +132,8 @@ class stdfSummarizer:
         self.dutDict = {}   # key: dutIndex, value: {PART_FLG, NUM_TEST, TEST_T, PART_ID, SOFT_BIN, HARD_BIN}, note: for incomplete stdf, KeyError could be raised as the PRR might be missing
         self.waferInfo = {} # key: center_x, center_y, diameter, size_unit
         self.waferDict = {} # key: waferIndex, value: {WAFER_ID, dutIndexList, coordList}
+        
+        self.analyze()  # start
     
     
     def sendProgress(self):
@@ -140,7 +146,7 @@ class stdfSummarizer:
                 self.QSignal.emit(int(10000 * self.offset / self.fileSize))     # times additional 100 to save 2 decimal
         
         
-    def before_begin(self, DataSource, endian_from_parser):
+    def set_endian(self, endian_from_parser):
         # update endian for info parse, input is a tuple
         self.endian, = endian_from_parser
         # pre compile standard format and 0s-255s
@@ -150,12 +156,29 @@ class stdfSummarizer:
             self.cplStruct["%ds"%i] = struct.Struct("%ds"%i)
         
         
-    def before_send(self, DataSource, data_from_parser):
-        recType, self.offset, binaryLen, rawData = data_from_parser
-        self.onRec[recType](recType=recType, dataLen=binaryLen, rawData=rawData)
+    def analyze(self):
+        while self.q:
+            queueDataList = self.q.get()
+            if len(queueDataList):
+                if isinstance(queueDataList[0], str):
+                    # queueDataList = [endian]
+                    self.set_endian(queueDataList[0])
+                else:
+                    # queueDataList = [dicts]
+                    for d in queueDataList:
+                        recType = objDict[d["recType"]]
+                        self.offset = d["offset"]
+                        binaryLen = d["length"]
+                        rawData = d["rawData"]
+                        self.onRec[recType](recType=recType, dataLen=binaryLen, rawData=rawData)
+            else:
+                # queueDataList = [], finish
+                break
+        # join progress bar thread if finished
+        self.after_complete()
         
         
-    def after_complete(self, DataSource):
+    def after_complete(self):
         self.reading = False
         if self.QSignal: 
             self.pb_thread.join()
@@ -455,13 +478,34 @@ class stdfSummarizer:
  
  
     
+def parser(path, flag, q):
+    fileHandle = open(path, "rb")
+    P = stdIO(inp=fileHandle, flag=flag, q=q)
+    P.parse()
+    
+    
 class stdfDataRetriever:
     
     def __init__(self, fileHandle, QSignal=None, flag=None):
-        self.summarizer = stdfSummarizer(fileHandle, QSignal, flag=flag)
-        P = stdIO(inp=fileHandle, flag=flag)
-        P.addSink(self.summarizer)
-        P.parse()
+        # read file size may need to seek position (gz), do it first in case mess with parser
+        fileSize = getFileSize(fileHandle)
+        # choose different parsing option based on the file size, for file larger than 15M+, process will be faster
+        useThread = (fileSize <= 15*2**20)
+        if useThread: 
+            from queue import Queue
+            self.q = Queue(0)
+            # if the file is small, use thread for efficiency
+            task = Thread(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
+        else:
+            from multiprocessing import Queue
+            self.q = Queue(0)
+            # if the file is large, use process for high parallelism
+            task = Process(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
+        task.start()
+        # analyze & store data from queue
+        self.summarizer = stdfSummarizer(QSignal=QSignal, flag=flag, q=self.q, fileSize=fileSize)
+        if not useThread: task.terminate()
+        task.join()
             
             
     def __call__(self):

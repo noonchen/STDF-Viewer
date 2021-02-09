@@ -607,6 +607,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.std_handle.seek(offset_1st, 0)
             rawByte_1st = self.std_handle.read(lengthL_1s)
             
+            RecordParser.endian = endian
             RecordParser.updateOCache(recType, lengthL_1s, rawByte_1st)
     
     
@@ -1415,7 +1416,7 @@ class MyWindow(QtWidgets.QMainWindow):
     @Slot(stdfSummarizer)
     def updateData(self, smz):
         if len(smz.data) != 0:
-            # store new std file handler
+            # remove old std file handler
             self.stdHandleList = [self.std_handle]
             
             self.dataSrc = smz.data

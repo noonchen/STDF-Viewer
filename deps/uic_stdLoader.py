@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Tue Feb 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -122,6 +122,8 @@ class stdfLoader(QtWidgets.QDialog):
         if closeUI:
             self.thread.quit()
             self.thread.wait()
+            self.thread = None
+            self.reader = None
             self.close()
                  
         
@@ -156,10 +158,6 @@ class stdReader(QtCore.QObject):
                 
         except InitialSequenceException:
             if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), True)
-                
-        # except Exception as e:
-        #     if self.msgSignal: self.msgSignal.emit("Load Error: " + repr(e), True)
-        #     pass
         
         finally:
             self.dataTransSignal.emit(self.summarizer)
