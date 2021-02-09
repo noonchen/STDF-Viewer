@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Tue Feb 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -257,6 +257,8 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site checkbox objects
         self.site_cb_dict = {}
         self.availableSites = []
+        # enable drop file
+        self.enableDragDrop()
         # init actions
         self.ui.actionOpen.triggered.connect(self.openNewFile)
         self.ui.actionFailMarker.triggered.connect(self.onFailMarker)
@@ -289,10 +291,11 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.tabControl.setTabEnabled(4, False)
         
         
-    def openNewFile(self):
-        f, _typ = QFileDialog.getOpenFileName(self, 
-                                             caption="Select a STD File To Open", 
-                                             filter="STDF (*.std; *.stdf);;Compressed STDF (*.gz; *.bz2);;All Files (*.*)",)
+    def openNewFile(self, f):
+        if not f:
+            f, _typ = QFileDialog.getOpenFileName(self, 
+                                                  caption="Select a STD File To Open", 
+                                                  filter="STDF (*.std; *.stdf);;Compressed STDF (*.gz; *.bz2);;All Files (*.*)",)
         if os.path.isfile(f):
             if f.endswith("gz"):
                 self.std_handle = gzip.open(f, 'rb')
@@ -345,6 +348,12 @@ class MyWindow(QtWidgets.QMainWindow):
             selectedDutIndex = [self.Row_DutIndexDict[r.row()] for r in selectedRows]   # if row(s) is selected, self.Row_DutIndexDict is already updated in self.prepareDataForDUTSummary()
             DutDataReader(self, selectedDutIndex, StyleDelegateForTable_List())     # pass styleDelegate because I don't want to copy the code...
     
+    
+    def enableDragDrop(self):
+        for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
+            obj.setAcceptDrops(True)
+            obj.installEventFilter(self)
+
     
     def updateIcons(self):
         self.ui.actionOpen.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Open"], format = 'SVG'))))
@@ -1467,8 +1476,28 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateStatus(self, new_msg, popUp=False):
         self.statusBar().showMessage(new_msg)
         if popUp: QtWidgets.QMessageBox.warning(self, "Warning", new_msg)
-            
         
+    
+    def eventFilter(self, object, event):
+        # modified from https://stackoverflow.com/questions/18001944/pyqt-drop-event-without-subclassing
+        if object in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
+            if (event.type() == QtCore.QEvent.DragEnter):
+                if event.mimeData().hasUrls():
+                    event.accept()   # must accept the dragEnterEvent or else the dropEvent can't occur !!!
+                    return True
+                else:
+                    event.ignore()
+                    return False
+                    
+            if (event.type() == QtCore.QEvent.Drop):
+                if event.mimeData().hasUrls():   # if file or link is dropped
+                    url = event.mimeData().urls()[0]   # get first url
+                    event.accept()  # doesnt appear to be needed
+                    print(url.path())
+                    self.openNewFile(url.path())
+                    return True
+        return False         
+      
         
 if __name__ == '__main__':
     # sys.argv.append("Test path")
