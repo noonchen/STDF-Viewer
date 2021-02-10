@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Dec 20 2020
+# Last Modified: Wed Feb 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -64,7 +64,7 @@ class FailMarker(QtWidgets.QWidget):
         for i in range(self.total):
             if self.stopFlag: 
                 end_time = time.time()
-                self.parent.signals.statusSignal.emit("Fail Marker aborted, time elapsed %.2f sec."%(end_time - start_time), False)
+                self.parent.signals.statusSignal.emit("Fail Marker aborted, time elapsed %.2f sec."%(end_time - start_time), False, False, False)
                 return
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
@@ -92,7 +92,7 @@ class FailMarker(QtWidgets.QWidget):
                 msg += "%d failed test items found, "%failCount
             if cpkFailCount != 0:
                 msg += "%d passed test items found with low Cpk, "%cpkFailCount
-        self.parent.signals.statusSignal.emit("%stime elapsed %.2f sec."%(msg, end_time - start_time), False)
+        self.parent.signals.statusSignal.emit("%stime elapsed %.2f sec."%(msg, end_time - start_time), False, False, False)
 
     
         

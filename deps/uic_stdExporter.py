@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Wed Feb 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,6 +28,7 @@ import re
 import os
 # import io
 # import threading
+from enum import IntEnum
 from xlsxwriter import Workbook
 from datetime import datetime
 # pyqt5
@@ -47,8 +48,15 @@ from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 #     print("Thread: %s, function name: %s" % (threading.currentThread().getName(), fname))
     
 # simulate a Enum in python
-class Tab(tuple): __getattr__ = tuple.index
-tab = Tab(["DUT", "Trend", "Histo", "Bin", "Stat", "FileInfo"])
+# class Tab(tuple): __getattr__ = tuple.index
+# tab = Tab(["DUT", "Trend", "Histo", "Bin", "Stat", "FileInfo"])
+class tab(IntEnum):
+    DUT = 0
+    Trend = 1
+    Histo = 2
+    Bin = 3
+    Stat = 4
+    FileInfo = 5
 
 
 def list_operation(main, method, other):
@@ -586,6 +594,7 @@ class stdfExporter(QtWidgets.QDialog):
     def initTestItems(self):
         self.slm_remain = QtCore.QStringListModel()
         self.exportUI.TestList.setModel(self.slm_remain)
+        self.exportUI.TestList.setSpacing(1)
         self.exportUI.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.exportUI.TestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.exportUI.TestList.doubleClicked.connect(self.onAdd)
@@ -593,6 +602,7 @@ class stdfExporter(QtWidgets.QDialog):
         
         self.slm_export = QtCore.QStringListModel()
         self.exportUI.ExportTestList.setModel(self.slm_export)
+        self.exportUI.TestList.setSpacing(1)
         self.exportUI.ExportTestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.exportUI.ExportTestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.exportUI.ExportTestList.doubleClicked.connect(self.onRM)

@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_exportUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -29,8 +28,8 @@ class Ui_exportUI(object):
         self.verticalLayout_5.setObjectName("verticalLayout_5")
         self.TestList = QtWidgets.QListView(self.test_selection)
         font = QtGui.QFont()
-        font.setFamily("Courier New")
-        font.setPointSize(10)
+        font.setFamily("Courier")
+        font.setPointSize(12)
         self.TestList.setFont(font)
         self.TestList.setObjectName("TestList")
         self.verticalLayout_5.addWidget(self.TestList)
@@ -129,8 +128,8 @@ class Ui_exportUI(object):
         self.verticalLayout_6.setObjectName("verticalLayout_6")
         self.ExportTestList = QtWidgets.QListView(self.exportTest)
         font = QtGui.QFont()
-        font.setFamily("Courier New")
-        font.setPointSize(10)
+        font.setFamily("Courier")
+        font.setPointSize(12)
         self.ExportTestList.setFont(font)
         self.ExportTestList.setObjectName("ExportTestList")
         self.verticalLayout_6.addWidget(self.ExportTestList)
@@ -278,7 +277,7 @@ class Ui_exportUI(object):
         self.Confirm.setMinimumSize(QtCore.QSize(0, 30))
         self.Confirm.setMaximumSize(QtCore.QSize(16777215, 40))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.Confirm.setFont(font)
@@ -304,7 +303,7 @@ class Ui_exportUI(object):
         self.Cancel.setMinimumSize(QtCore.QSize(0, 30))
         self.Cancel.setMaximumSize(QtCore.QSize(16777215, 40))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.Cancel.setFont(font)

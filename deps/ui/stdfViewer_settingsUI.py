@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_settingsUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -245,8 +244,8 @@ class Ui_Setting(object):
         font = QtGui.QFont()
         font.setFamily("Courier New")
         font.setPointSize(18)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.label_5.setFont(font)
         self.label_5.setObjectName("label_5")
         self.horizontalLayout_10.addWidget(self.label_5)
@@ -299,7 +298,7 @@ class Ui_Setting(object):
         self.Confirm.setSizePolicy(sizePolicy)
         self.Confirm.setMinimumSize(QtCore.QSize(0, 25))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.Confirm.setFont(font)
@@ -322,7 +321,7 @@ class Ui_Setting(object):
         self.Cancel.setSizePolicy(sizePolicy)
         self.Cancel.setMinimumSize(QtCore.QSize(0, 25))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.Cancel.setFont(font)

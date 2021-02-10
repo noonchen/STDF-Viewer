@@ -145,19 +145,19 @@ class stdReader(QtCore.QObject):
     @Slot()
     def readBegin(self):
         try:
-            if self.msgSignal: self.msgSignal.emit("Loading STD file...", False)
+            if self.msgSignal: self.msgSignal.emit("Loading STD file...", False, False, False)
             start = time.time()
             self.summarizer = stdfDataRetriever(self.std, QSignal=self.progressBarSignal, flag=self.flag)()
             end = time.time()
             # print(end - start)
             if self.flag.stop:
                 self.summarizer.data = {}   # empty its data in order to force fail the content check
-                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False)
+                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False, False, False)
             else:
-                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False)
+                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
                 
         except InitialSequenceException:
-            if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), True)
+            if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), False, True, False)
         
         finally:
             self.dataTransSignal.emit(self.summarizer)
