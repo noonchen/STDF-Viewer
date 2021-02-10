@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Feb 09 2021
+# Last Modified: Wed Feb 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import os
+import os, sys
 import time, datetime
 import struct
 from threading import Thread
@@ -32,6 +32,7 @@ from multiprocessing import Process
 from deps.pystdf import V4
 from deps.pystdf.IO_Offset_forViewer import stdIO
 from deps.pystdf.RecordParser import RecordParser
+from deps.pystdf.Types import InitialSequenceException
 
 formatMap = {
   "C1": "c",
@@ -60,6 +61,27 @@ scale_char = {15: "f",
               -12: "T"}
 
 objDict = dict([((obj.typ, obj.sub), obj) for obj in V4.records])
+
+
+def catch_thread_process_exceptions():
+    pc_old = Process.run
+    tr_old = Thread.run
+    
+    def pc_new(*args, **kargs):
+        try:
+            pc_old(*args, **kargs)
+        except Exception:
+            sys.excepthook(*sys.exc_info())
+            
+    def tr_new(*args2, **kargs2):
+        try:
+            tr_old(*args2, **kargs2)
+        except Exception:
+            sys.excepthook(*sys.exc_info())
+            
+    Process.run = pc_new
+    Thread.run = tr_new
+
 
 def getFileSize(fd):
     # assume fd has attr "name"
@@ -487,10 +509,12 @@ def parser(path, flag, q):
 class stdfDataRetriever:
     
     def __init__(self, fileHandle, QSignal=None, flag=None):
-        # read file size may need to seek position (gz), do it first in case mess with parser
-        fileSize = getFileSize(fileHandle)
-        # choose different parsing option based on the file size, for file larger than 15M+, process will be faster
-        useThread = (fileSize <= 15*2**20)
+        self.error = None
+        sys.excepthook = self.onException
+        catch_thread_process_exceptions()
+        
+        fileSize = getFileSize(fileHandle)        # read file size may need to seek position (gz), do it first in case mess with parser
+        useThread = (fileSize <= 15*2**20)        # choose different parsing option based on the file size, for file larger than 15M+, process will be faster
         if useThread: 
             from queue import Queue
             self.q = Queue(0)
@@ -501,12 +525,26 @@ class stdfDataRetriever:
             self.q = Queue(0)
             # if the file is large, use process for high parallelism
             task = Process(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
-        task.start()
-        # analyze & store data from queue
-        self.summarizer = stdfSummarizer(QSignal=QSignal, flag=flag, q=self.q, fileSize=fileSize)
-        if not useThread: task.terminate()
-        task.join()
+        
+        try:
+            task.start()
+            # analyze & store data from queue
+            self.summarizer = stdfSummarizer(QSignal=QSignal, flag=flag, q=self.q, fileSize=fileSize)
+            if not useThread: task.terminate()
+            task.join()
+            self.checkError()
+        except:
+            raise
             
             
     def __call__(self):
         return self.summarizer
+    
+    
+    def onException(self, eT, eV, tb):
+        self.error = eT(eV)
+        
+        
+    def checkError(self):
+        if self.error:
+            raise self.error

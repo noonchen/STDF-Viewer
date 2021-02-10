@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Feb 09 2021
+# Last Modified: Wed Feb 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,9 +24,11 @@
 
 
 
-import io, os, sys, gzip, bz2
+import io, os, sys, gzip, bz2, traceback
 import numpy as np
+from enum import IntEnum
 from base64 import b64decode
+from multiprocessing import Process
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.pystdf.RecordParser import RecordParser
 from deps.stdfOffsetRetriever import stdfSummarizer
@@ -84,8 +86,14 @@ def calc_cpk(L, H, data):
 toDCoord = lambda ax, point: ax.transData.inverted().transform(point)
 
 # simulate a Enum in python
-class Tab(tuple): __getattr__ = tuple.index
-tab = Tab(["Info", "Trend", "Histo", "Bin", "Wafer"])
+# class Tab(tuple): __getattr__ = tuple.index
+# tab = Tab(["Info", "Trend", "Histo", "Bin", "Wafer"])
+class tab(IntEnum):
+    Info = 0
+    Trend = 1
+    Histo = 2
+    Bin = 3
+    Wafer = 4
 
 # MIR field name to Description Dict
 mirFieldNames = ["SETUP_T", "START_T", "STAT_NUM", "MODE_COD", "RTST_COD", "PROT_COD", "BURN_TIM", "CMOD_COD", "LOT_ID", "PART_TYP", "NODE_NAM", "TSTR_TYP",
@@ -215,7 +223,7 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
 
 class signals4MainUI(QtCore.QObject):
     dataSignal = Signal(stdfSummarizer)  # get std data from loader
-    statusSignal = Signal(str, bool)   # status bar
+    statusSignal = Signal(str, bool, bool, bool)   # status bar
 
 
 class MyWindow(QtWidgets.QMainWindow):
@@ -223,6 +231,8 @@ class MyWindow(QtWidgets.QMainWindow):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        
+        sys.excepthook = self.onException
         
         self.preTab = None              # used for detecting tab changes
         self.preSiteSelection = None    # used for detecting site selection changes
@@ -377,6 +387,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.proxyModel_list.setSourceModel(self.sim_list)
         self.proxyModel_list.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.ui.TestList.setModel(self.proxyModel_list)
+        self.ui.TestList.setSpacing(1)
         self.ui.TestList.setItemDelegate(StyleDelegateForTable_List(self.ui.TestList))
         
         self.sim_list_wafer = QtGui.QStandardItemModel()
@@ -384,6 +395,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.proxyModel_list_wafer.setSourceModel(self.sim_list_wafer)
         self.proxyModel_list_wafer.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.ui.WaferList.setModel(self.proxyModel_list_wafer)        
+        self.ui.WaferList.setSpacing(1)
         self.ui.WaferList.setItemDelegate(StyleDelegateForTable_List(self.ui.WaferList))
         # enable multi selection
         self.ui.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -463,7 +475,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Name: ", os.path.basename(absPath)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["Directory Path: ", os.path.dirname(absPath)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Size: ", "%.2f MB"%(os.stat(self.std_handle.name).st_size / 2**20)]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Tested: ", str(self.dataInfo.dutIndex + 1)]])    # PIR #
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Tested: ", str(self.dataInfo.dutIndex)]])    # PIR #
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Passed: ", str(self.dataInfo.dutPassed)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Failed: ", str(self.dataInfo.dutFailed)]])
 
@@ -1473,10 +1485,15 @@ class MyWindow(QtWidgets.QMainWindow):
             self.stdHandleList = [self.std_handle]
 
     
-    @Slot(str, bool)
-    def updateStatus(self, new_msg, popUp=False):
+    @Slot(str, bool, bool, bool)
+    def updateStatus(self, new_msg, info=False, warning=False, error=False):
         self.statusBar().showMessage(new_msg)
-        if popUp: QtWidgets.QMessageBox.warning(self, "Warning", new_msg)
+        if info: 
+            QtWidgets.QMessageBox.information(None, "Info", new_msg)
+        elif warning: 
+            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+        elif error:
+            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
         
     
     def eventFilter(self, object, event):
@@ -1500,8 +1517,14 @@ class MyWindow(QtWidgets.QMainWindow):
         return False         
       
         
-if __name__ == '__main__':
-    # sys.argv.append("Test path")
+    def onException(self, errorType, errorValue, tb):
+        errMsg = traceback.format_exception(errorType, errorValue, tb)
+        self.updateStatus("\n".join(errMsg), False, False, True)
+    
+    
+
+# application entry point
+def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication([])
     app.setStyle('Fusion')
@@ -1516,3 +1539,6 @@ if __name__ == '__main__':
     window.callFileLoader(window.std_handle)
     sys.exit(app.exec_())
     
+if __name__ == '__main__':
+    task = Process(target=run, daemon=False)
+    task.start()

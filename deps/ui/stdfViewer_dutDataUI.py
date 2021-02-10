@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_dutDataUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -14,7 +13,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_dutData(object):
     def setupUi(self, dutData):
         dutData.setObjectName("dutData")
-        dutData.resize(659, 390)
+        dutData.resize(993, 385)
         self.verticalLayout = QtWidgets.QVBoxLayout(dutData)
         self.verticalLayout.setObjectName("verticalLayout")
         self.tableView_dutData = QtWidgets.QTableView(dutData)
@@ -25,7 +24,7 @@ class Ui_dutData(object):
         self.save = QtWidgets.QPushButton(dutData)
         self.save.setMinimumSize(QtCore.QSize(0, 25))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.save.setFont(font)
@@ -43,7 +42,7 @@ class Ui_dutData(object):
         self.close = QtWidgets.QPushButton(dutData)
         self.close.setMinimumSize(QtCore.QSize(0, 25))
         font = QtGui.QFont()
-        font.setFamily("Menlo")
+        font.setFamily("Tahoma")
         font.setBold(True)
         font.setWeight(75)
         self.close.setFont(font)
