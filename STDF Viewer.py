@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Feb 10 2021
+# Last Modified: Sat Feb 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -53,6 +53,7 @@ from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
 import matplotlib
 matplotlib.use('QT5Agg')
 import matplotlib.pyplot as plt
+from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
@@ -144,10 +145,16 @@ class MagCursor(object):
             # set visible
             self.marker.set_visible(True)
             self.dcp.set_visible(True)
+            # self.ax.draw_artist(self.marker)
+            # self.ax.draw_artist(self.dcp)
+            # self.ax.figure.canvas.blit(self.ax.bbox)
             self.ax.figure.canvas.draw()
         else:
             self.marker.set_visible(False)
             self.dcp.set_visible(False)
+            # self.ax.draw_artist(self.marker)
+            # self.ax.draw_artist(self.dcp)
+            # self.ax.figure.canvas.blit(self.ax.bbox)
             self.ax.figure.canvas.draw()
             
     def canvas_resize(self, event):
@@ -290,7 +297,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tab_dict = {tab.Trend: {"scroll": self.ui.scrollArea_trend, "layout": self.ui.verticalLayout_trend},
                          tab.Histo: {"scroll": self.ui.scrollArea_histo, "layout": self.ui.verticalLayout_histo},
                          tab.Bin: {"scroll": self.ui.scrollArea_bin, "layout": self.ui.verticalLayout_bin},
-                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_bin}}
+                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer}}
         self.ui.tabControl.currentChanged.connect(self.onSelect)    # table should be updated as well
         # add a toolbar action at the right side
         self.ui.spaceWidgetTB = QtWidgets.QWidget()
@@ -387,7 +394,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.proxyModel_list.setSourceModel(self.sim_list)
         self.proxyModel_list.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.ui.TestList.setModel(self.proxyModel_list)
-        self.ui.TestList.setSpacing(1)
         self.ui.TestList.setItemDelegate(StyleDelegateForTable_List(self.ui.TestList))
         
         self.sim_list_wafer = QtGui.QStandardItemModel()
@@ -395,7 +401,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.proxyModel_list_wafer.setSourceModel(self.sim_list_wafer)
         self.proxyModel_list_wafer.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.ui.WaferList.setModel(self.proxyModel_list_wafer)        
-        self.ui.WaferList.setSpacing(1)
         self.ui.WaferList.setItemDelegate(StyleDelegateForTable_List(self.ui.WaferList))
         # enable multi selection
         self.ui.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -661,11 +666,14 @@ class MyWindow(QtWidgets.QMainWindow):
         for site in self.dataSrc.keys():
             if site == -1:
                 continue     # manually skip 
-            uo_offsetL += self.dataSrc[site][test_num]["Offset"]
-            uo_lengthL += self.dataSrc[site][test_num]["Length"]
-            uo_dutIndex += self.dataSrc[site][test_num]["DUTIndex"]        
-            recType = self.dataSrc[site][test_num]["RecType"]
-            endian = self.dataSrc[site][test_num]["Endian"]
+            try:
+                uo_offsetL += self.dataSrc[site][test_num]["Offset"]
+                uo_lengthL += self.dataSrc[site][test_num]["Length"]
+                uo_dutIndex += self.dataSrc[site][test_num]["DUTIndex"]        
+                recType = self.dataSrc[site][test_num]["RecType"]
+                endian = self.dataSrc[site][test_num]["Endian"]
+            except KeyError:
+                self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, True, False)
         sorted_lists = sorted(zip(uo_dutIndex, uo_offsetL, uo_lengthL), key=lambda x: x[0])
         dutIndex, offsetL, lengthL = [[x[i] for x in sorted_lists] for i in range(3)]
         return recType, endian, dutIndex, offsetL, lengthL
@@ -681,11 +689,16 @@ class MyWindow(QtWidgets.QMainWindow):
                     if site == -1:
                         recType, endian, dutIndex, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
                     else:
-                        offsetL = self.dataSrc[site][test_num]["Offset"]
-                        lengthL = self.dataSrc[site][test_num]["Length"]
-                        recType = self.dataSrc[site][test_num]["RecType"]
-                        endian = self.dataSrc[site][test_num]["Endian"]
-                        dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
+                        try:
+                            offsetL = self.dataSrc[site][test_num]["Offset"]
+                            lengthL = self.dataSrc[site][test_num]["Length"]
+                            recType = self.dataSrc[site][test_num]["RecType"]
+                            endian = self.dataSrc[site][test_num]["Endian"]
+                            dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
+                        except KeyError:
+                            self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, True, False)
+                            tempSelDict[test_num] = {}
+                            continue
                     # parse data on-the-fly
                     RecordParser.endian = endian    # specify the parse endian
                     testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle)
@@ -708,114 +721,20 @@ class MyWindow(QtWidgets.QMainWindow):
         if tab is changed, clear all and then add canvas
         '''
         tabType = self.ui.tabControl.currentIndex()
-        # check if redraw is required, but if previous tab is Wafer, no need to redraw as they are independent
-        reDrawTab = (tabType != self.preTab) and (self.preTab != tab.Wafer)
+        # check if redraw is required
+        # if previous tab or current tab is Wafer, no need to redraw as it has an independent listView
+        reDrawTab = (tabType != self.preTab) and (self.preTab != tab.Wafer) and (tabType != tab.Wafer)
         
         self.preTab = tabType       # save tab index everytime tab updates
-        selTestNums = self.getSelectedNums()
+        selTestNums = self.getSelectedNums()    # test num in trend/histo, wafer index in wafer
         siteList = sorted(self.getCheckedSites())
         
-        # generate wafer maps
-        if tabType == tab.Wafer:
-            pass
-        
-        # generate drawings in trend , histo and bin, but bin doesn't require test items selection
-        elif tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo] and selTestNums != None):
-            # get scroll area and layout to draw plot
-            '''
-            tabLayout only contans 1 widgets -- qfigWidget, which is the parent of all matplot canvas and toolbars
-            qfigWidget.children(): 1st is qfigLayout, others are canvas
-            qfigLayout contains the references to all canvas and toolbars
-            qfigLayout.itemAt(index).widget(): canvas or toolbars
-            canvas and toolbars can be deleted by  qfigLayout.itemAt(index).widget().setParent(None)
-            '''
-            canvasIndexDict = {}
-            canvasPriorityDict = {}
-            # get tab layout
-            tabLayout = self.tab_dict[tabType]["layout"]
-            
-            if reDrawTab or forceUpdate:
-                # clear all contents
-                [tabLayout.itemAt(i).widget().setParent(None) for i in range(tabLayout.count())[::-1]]
-                # add new widget
-                qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
-                qfigWidget.setStyleSheet("background-color: transparent")    # prevent plot flicking when updating
-                qfigLayout = QtWidgets.QVBoxLayout()
-                qfigWidget.setLayout(qfigLayout)
-                tabLayout.addWidget(qfigWidget)
-                # clear cursor dict used in trend chart
-                self.cursorDict = {}
-                
-            else:
-                try:
-                    # get testnum/site of current canvas/toolbars and corresponding widget index
-                    qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
-                    qfigLayout = qfigWidget.children()[0]
-                except AttributeError:
-                    # add new widget
-                    qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
-                    qfigWidget.setStyleSheet("background-color: transparent")    # prevent plot flicking when updating
-                    qfigLayout = QtWidgets.QVBoxLayout()
-                    qfigWidget.setLayout(qfigLayout)
-                    tabLayout.addWidget(qfigWidget)
-                    
-                def getCanvasDicts(qfigLayout):
-                    canvasIndexDict = {}
-                    canvasPriorityDict = {}
-                    for index in range(qfigLayout.count()):
-                        mp_widget = qfigLayout.itemAt(index).widget()
-                        if mp_widget.isCanvas:
-                            # skip toolbar widget
-                            mp_test_num = mp_widget.test_num
-                            mp_site = mp_widget.site
-                            priority = float("%d.%03d"%(mp_test_num, mp_site+1))    # use test_num.site as priority to sort the images based on test number and sites in ascending order, assuming site number < 1000
-                            canvasIndexDict[(mp_test_num, mp_site)] = index
-                            canvasPriorityDict[priority] = index
-                    return canvasIndexDict, canvasPriorityDict
-                
-                canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # get current indexes
-                        
-                # delete canvas/toolbars that are not selected
-                canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}     # must delete from large index, invert dict to loop from large index
-                for index in sorted(canvasIndexDict_reverse.keys(), reverse=True):
-                    (mp_test_num, mp_site) = canvasIndexDict_reverse[index]
-                    if (tabType != tab.Bin and not mp_test_num in selTestNums) or (not mp_site in siteList):
-                        # bin don't care about testNum
-                        qfigLayout.itemAt(index+1).widget().setParent(None)     # must delete toolbar first (index+1)
-                        qfigLayout.itemAt(index).widget().setParent(None)
-                        
-                canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # update after deleting some images
-                        
-            def calculateCanvasIndex(test_num, site, canvasPriorityDict):
-                # get index to which the new plot should be inserted
-                Pr = float("%d.%03d"%(test_num, site+1))
-                PrList = list(canvasPriorityDict.keys())
-                PrList.append(Pr)
-                PrIndex = sorted(PrList).index(Pr)
-                calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
-                return calculatedIndex
-                            
-            if tabType == tab.Bin:
-                # bin chart is independent of test items
-                for site in siteList[::-1]:
-                    if (0, site) in canvasIndexDict:
-                        # no need to draw image for a existed testnum and site
-                        continue
-                    calIndex = calculateCanvasIndex(0, site, canvasPriorityDict)
-                    # draw
-                    self.genPlot(site, 0, tabType, updateTab=True, insertIndex=calIndex)
-            else:
-                for test_num in selTestNums[::-1]:
-                    for site in siteList[::-1]:
-                        if (test_num, site) in canvasIndexDict:
-                            # no need to draw image for a existed testnum and site
-                            continue
-                        calIndex = calculateCanvasIndex(test_num, site, canvasPriorityDict)
-                        # draw
-                        self.genPlot(site, test_num, tabType, updateTab=True, insertIndex=calIndex)
-            
-        # update Raw Data table in info tab only when test items are selected
-        elif tabType == tab.Info and selTestNums != None:
+        # update Test Data table in info tab only when test items are selected
+        if tabType == tab.Info:
+            if selTestNums == None:
+                # clear rawDataTable in info tab if no test item is selected
+                self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
+                return
             """
             1st col: Part ID
             2nd col: site
@@ -870,17 +789,112 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.rawDataTable.verticalHeader().setVisible(True)
                         
             self.resizeCellWidth(self.ui.rawDataTable, stretchToFit=False)
-                                    
-        # remaining cases are: no test items in tab trend, histo, info
+            return
+        
+        '''
+        ***This following code is used for finding the index of the new image to add or old image to delete.***
+                
+        tabLayout only contans 1 widgets -- qfigWidget, which is the parent of all matplot canvas and toolbars
+        qfigWidget.children(): 1st is qfigLayout, others are canvas
+        qfigLayout contains the references to all canvas and toolbars
+        qfigLayout.itemAt(index).widget(): canvas or toolbars
+        canvas and toolbars can be deleted by  qfigLayout.itemAt(index).widget().setParent(None)
+        '''
+        canvasIndexDict = {}
+        canvasPriorityDict = {}
+        # get tab layout
+        tabLayout = self.tab_dict[tabType]["layout"]
+        
+        if reDrawTab or forceUpdate:
+            # clear all contents
+            [tabLayout.itemAt(i).widget().setParent(None) for i in range(tabLayout.count())[::-1]]
+            # add new widget
+            qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
+            qfigWidget.setStyleSheet("background-color: transparent")    # prevent plot flicking when updating
+            qfigLayout = QtWidgets.QVBoxLayout()
+            qfigWidget.setLayout(qfigLayout)
+            tabLayout.addWidget(qfigWidget)
+            # clear cursor dict used in trend chart
+            if tabType == tab.Trend: self.cursorDict = {}
         else:
-            # when no test item is selected, clear trend & histo tab content
-            if tabType in [tab.Trend, tab.Histo]:
+            try:
+                # get testnum/site of current canvas/toolbars and corresponding widget index
+                qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
+                qfigLayout = qfigWidget.children()[0]
+            except AttributeError:
+                # in case there are no canvas (e.g. initial state), add new widget
+                qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
+                qfigWidget.setStyleSheet("background-color: transparent")    # prevent plot flicking when updating
+                qfigLayout = QtWidgets.QVBoxLayout()
+                qfigWidget.setLayout(qfigLayout)
+                tabLayout.addWidget(qfigWidget)
+                
+            def getCanvasDicts(qfigLayout):
+                canvasIndexDict = {}
+                canvasPriorityDict = {}
+                for index in range(qfigLayout.count()):
+                    mp_widget = qfigLayout.itemAt(index).widget()
+                    if mp_widget.isCanvas:
+                        # skip toolbar widget
+                        mp_test_num = mp_widget.test_num
+                        mp_site = mp_widget.site
+                        priority = float("%d.%03d"%(mp_test_num, mp_site+1))    # use test_num.site as priority to sort the images based on test number and sites in ascending order, assuming site number < 1000
+                        canvasIndexDict[(mp_test_num, mp_site)] = index
+                        canvasPriorityDict[priority] = index
+                return canvasIndexDict, canvasPriorityDict
+            
+            canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # get current indexes
+                    
+            # delete canvas/toolbars that are not selected
+            canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}     # must delete from large index, invert dict to loop from large index
+            for index in sorted(canvasIndexDict_reverse.keys(), reverse=True):
+                (mp_test_num, mp_site) = canvasIndexDict_reverse[index]
+                # if not in Bin tab: no test item selected/ test item is unselected, remove
+                # if sites are unselected, remove
+                if (tabType != tab.Bin and (selTestNums == None or not mp_test_num in selTestNums)) or (not mp_site in siteList):
+                    # bin don't care about testNum
+                    qfigLayout.itemAt(index+1).widget().setParent(None)     # must delete toolbar first (index+1)
+                    qfigLayout.itemAt(index).widget().setParent(None)
+                    
+            canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # update after deleting some images
+                    
+        def calculateCanvasIndex(test_num, site, canvasPriorityDict):
+            # get index to which the new plot should be inserted
+            Pr = float("%d.%03d"%(test_num, site+1))
+            PrList = list(canvasPriorityDict.keys())
+            PrList.append(Pr)
+            PrIndex = sorted(PrList).index(Pr)
+            calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
+            return calculatedIndex
+    
+        # generate drawings in trend , histo and bin, but bin doesn't require test items selection
+        if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and selTestNums != None):
+            if tabType == tab.Bin:
+                # bin chart is independent of test items
+                for site in siteList[::-1]:
+                    if (0, site) in canvasIndexDict:
+                        # no need to draw image for a existed testnum and site
+                        continue
+                    calIndex = calculateCanvasIndex(0, site, canvasPriorityDict)
+                    # draw
+                    self.genPlot(site, 0, tabType, updateTab=True, insertIndex=calIndex)
+            else:
+                for test_num in selTestNums[::-1]:
+                    for site in siteList[::-1]:
+                        if (test_num, site) in canvasIndexDict:
+                            # no need to draw image for a existed testnum and site
+                            continue
+                        calIndex = calculateCanvasIndex(test_num, site, canvasPriorityDict)
+                        # draw
+                        self.genPlot(site, test_num, tabType, updateTab=True, insertIndex=calIndex)
+            
+        # remaining cases are: no test items in tab trend, histo, wafer
+        else:
+            # when no test item is selected, clear trend, histo & wafer tab content
+            if tabType in [tab.Trend, tab.Histo, tab.Wafer]:
                 tabLayout = self.tab_dict[tabType]["layout"]
                 # clear current content in the layout in reverse order - no use
                 [tabLayout.itemAt(i).widget().setParent(None) for i in range(tabLayout.count())]
-            else:
-                # clear rawDataTable in info tab
-                self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
             
             
     def prepareTableContent(self, tabType, **kargs):
@@ -1179,7 +1193,8 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def genPlot(self, site, test_num, tabType, **kargs):
         # create fig & canvas
-        fig = plt.Figure((9, 4))
+        figsize = (9, 9) if tabType == tab.Wafer else (9, 4) 
+        fig = plt.Figure(figsize=figsize)
         # fig.tight_layout()
         fig.set_tight_layout(True)
         canvas = FigureCanvas(fig)
@@ -1188,20 +1203,20 @@ class MyWindow(QtWidgets.QMainWindow):
         canvas.setMinimumSize(canvas.size())
         # binds to widget
         if "updateTab" in kargs and kargs["updateTab"] and "insertIndex" in kargs:
-                qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
-                qfigLayout = qfigWidget.children()[0]
-                
-                canvas.setParent(qfigWidget)
-                toolbar = NavigationToolbar(canvas, qfigWidget)
-                setattr(canvas, "test_num", test_num)
-                setattr(canvas, "site", site)
-                setattr(canvas, "priority", float("%d.%03d"%(test_num, site+1)))
-                setattr(canvas, "isCanvas", True)
-                setattr(toolbar, "isCanvas", False)
-                # place the fig and toolbar in the layout
-                index = kargs["insertIndex"]
-                qfigLayout.insertWidget(index, canvas)
-                qfigLayout.insertWidget(index+1, toolbar)
+            qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
+            qfigLayout = qfigWidget.children()[0]
+            
+            canvas.setParent(qfigWidget)
+            toolbar = NavigationToolbar(canvas, qfigWidget)
+            setattr(canvas, "test_num", test_num)
+            setattr(canvas, "site", site)
+            setattr(canvas, "priority", float("%d.%03d"%(test_num, site+1)))
+            setattr(canvas, "isCanvas", True)
+            setattr(toolbar, "isCanvas", False)
+            # place the fig and toolbar in the layout
+            index = kargs["insertIndex"]
+            qfigLayout.insertWidget(index, canvas)
+            qfigLayout.insertWidget(index+1, toolbar)
         
         # customize plot
         site_color = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 3: "#00FFFF",
@@ -1398,7 +1413,62 @@ class MyWindow(QtWidgets.QMainWindow):
             ax_r.set_ylim(top=max(SCnt)*1.2)
             ax_r.set_xlabel("Software Bin", fontsize=12, fontname="Tahoma")
             ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
-
+            
+        elif tabType == tab.Wafer:   # Wafermap
+            waferDict = self.dataInfo.waferDict[test_num]
+            ax = fig.add_subplot(111, aspect=1)
+            ax.set_title("Wafer ID: %s - %s"%(waferDict["WAFER_ID"], "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            
+            xmin = ymin =  99999
+            xmax = ymax = -99999
+            # group coords by soft bin, 
+            coordsDict = {}
+            # filter duts by selected sites
+            for dut, coords in zip(waferDict["dutIndexList"], waferDict["coordList"]):
+                # skip duts that not selected
+                if site != -1 and site != self.dataInfo.dutDict[dut]["SITE_NUM"]: continue
+                sbin = self.dataInfo.dutDict[dut]["SOFT_BIN"]
+                coordsDict.setdefault(sbin, []).append(coords)
+            # draw
+            bin_color_dict = {1: "#00CC00"}
+            dutCnt = sum(self.dataInfo.sbinSUM[site].values())
+            legendHandles = []
+            for sbin in sorted(coordsDict.keys()):
+                sbinName = self.dataInfo.sbinDict[sbin][0]
+                sbinCnt = self.dataInfo.sbinSUM[site][sbin]
+                percent = 100 * sbinCnt / dutCnt
+                label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
+                rects = []
+                # skip dut with invalid coords
+                for (x, y) in coordsDict[sbin]:
+                    if x == -32768 or y == -32768: continue
+                    if x <= xmin: xmin = x
+                    if y <= ymin: ymin = y
+                    if x >= xmax: xmax = x
+                    if y >= ymax: ymax = y
+                    rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
+                pc = PatchCollection(patches=rects, match_original=False, edgecolors="b", facecolors=bin_color_dict.get(sbin, "#CC0000"), label=label)
+                ax.add_collection(pc)
+                proxyArtist = matplotlib.patches.Patch(color=bin_color_dict.get(sbin, "#CC0000"), label=label)
+                legendHandles.append(proxyArtist)
+            # set limits
+            ax.set_xlim(xmin-1, xmax+1)
+            ax.set_ylim(ymin-1, ymax+1)
+            # set ticks & draw coord lines
+            ax.set_xticks(range(xmin, xmax+1, 1))
+            ax.set_yticks(range(ymin, ymax+1, 1))
+            Tsize = lambda barNum: 12 if barNum <= 10 else round(4 + 8 * 2 ** (0.4*(10-barNum)))  # adjust fontsize based on bar count
+            labelsize = Tsize(max(xmax-xmin, ymax-ymin))
+            ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
+            # Turn spines off and create white grid.
+            for edge, spine in ax.spines.items():
+                spine.set_visible(False)
+            ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
+            ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
+            ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=-100)
+            # legend
+            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(-0.1, -0.02, 1.2, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            
         if "exportImg" in kargs and kargs["exportImg"] == True:
             imgData = io.BytesIO()
             fig.savefig(imgData, format="png", dpi=200, bbox_inches="tight")
@@ -1427,6 +1497,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
     @Slot(stdfSummarizer)
     def updateData(self, smz):
+        sys.excepthook = self.onException
         if len(smz.data) != 0:
             # remove old std file handler
             self.stdHandleList = [self.std_handle]
@@ -1540,5 +1611,6 @@ def run():
     sys.exit(app.exec_())
     
 if __name__ == '__main__':
-    task = Process(target=run, daemon=False)
-    task.start()
+    # task = Process(target=run, daemon=False)
+    # task.start()
+    run()

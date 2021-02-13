@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Wed Feb 10 2021
+# Last Modified: Thu Feb 11 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -594,7 +594,6 @@ class stdfExporter(QtWidgets.QDialog):
     def initTestItems(self):
         self.slm_remain = QtCore.QStringListModel()
         self.exportUI.TestList.setModel(self.slm_remain)
-        self.exportUI.TestList.setSpacing(1)
         self.exportUI.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.exportUI.TestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.exportUI.TestList.doubleClicked.connect(self.onAdd)
@@ -602,7 +601,6 @@ class stdfExporter(QtWidgets.QDialog):
         
         self.slm_export = QtCore.QStringListModel()
         self.exportUI.ExportTestList.setModel(self.slm_export)
-        self.exportUI.TestList.setSpacing(1)
         self.exportUI.ExportTestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.exportUI.ExportTestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.exportUI.ExportTestList.doubleClicked.connect(self.onRM)
