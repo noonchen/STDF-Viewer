@@ -44,7 +44,8 @@ class Ui_MainWindow(object):
 "height: 0 px;\n"
 "subcontrol-position: top;\n"
 "subcontrol-origin: margin;\n"
-"}")
+"}\n"
+"QListView::item { height: 20px; }")
         MainWindow.setIconSize(QtCore.QSize(30, 30))
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
