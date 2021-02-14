@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Wed Feb 10 2021
+# Last Modified: Mon Feb 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -353,6 +353,13 @@ class stdfSummarizer:
         if not self.waferIndex == 0:
             self.waferDict[self.waferIndex]["dutIndexList"].append(self.dutIndex)
             self.waferDict[self.waferIndex]["coordList"].append((X_COORD, Y_COORD))
+            if X_COORD == -32768 or Y_COORD == -32768:
+                pass
+            else:
+                if X_COORD < self.waferInfo.get("xmin",  32768): self.waferInfo["xmin"] = X_COORD
+                if Y_COORD < self.waferInfo.get("ymin",  32768): self.waferInfo["ymin"] = Y_COORD
+                if X_COORD > self.waferInfo.get("xmax", -32768): self.waferInfo["xmax"] = X_COORD
+                if Y_COORD > self.waferInfo.get("ymax", -32768): self.waferInfo["ymax"] = Y_COORD
         
         if PART_FLG & 0b00011000 == 0:
             tmpDUT["PART_FLG"] = "Pass"

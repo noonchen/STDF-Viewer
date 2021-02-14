@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Feb 13 2021
+# Last Modified: Mon Feb 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,9 +26,10 @@
 
 import io, os, sys, gzip, bz2, traceback
 import numpy as np
+import multiprocessing
 from enum import IntEnum
+from random import choice
 from base64 import b64decode
-from multiprocessing import Process
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.pystdf.RecordParser import RecordParser
 from deps.stdfOffsetRetriever import stdfSummarizer
@@ -58,7 +59,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 #-------------------------
-
+multiprocessing.freeze_support()
 if hasattr(QtCore.Qt, 'AA_EnableHighDpiScaling'):
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
 if hasattr(QtCore.Qt, 'AA_UseHighDpiPixmaps'):
@@ -108,6 +109,7 @@ mirDescriptions = ["Setup Time", "Start Time", "Station Number", "Test Mode Code
 
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
+rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
 
 class MagCursor(object):
 
@@ -181,6 +183,10 @@ class SettingParams:
     dataNotation = "G"  # F E G stand for float, Scientific, automatic
     dataPrecision = 3
     cpkThreshold = 1.33
+    # colors
+    siteColor = {}
+    sbinColor = {}
+    hbinColor = {}
     
 
 class StyleDelegateForTable_List(QStyledItemDelegate):
@@ -249,8 +255,6 @@ class MyWindow(QtWidgets.QMainWindow):
         ### we cache the data in RecordParser, self.dataCache is not used anymore
         # self.dataCache = {}     # dict for storing data of selected test items
         self.cursorDict = {}    # init/clear a dict to store cursors instance to prevent garbage collection
-        self.settingParams = SettingParams()    # used for storing setting parameters
-        
         # std handler
         self.stdHandleList = [None]
         self.std_handle = None
@@ -267,10 +271,13 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 self.std_handle = open(f, 'rb')
             self.stdHandleList.append(self.std_handle)
+            
+        self.init_SettingParams()
         # update icons for actions and widgets
         self.updateIcons()
         self.init_TestList()
         self.init_DataTable()
+        self.init_SettingUI()
         # dict to store site checkbox objects
         self.site_cb_dict = {}
         self.availableSites = []
@@ -344,7 +351,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onSettings(self):
-        stdfSettings(self)
+        self.settingUI.showUI()
     
     
     def onAbout(self):
@@ -456,6 +463,30 @@ class MyWindow(QtWidgets.QMainWindow):
         # bind functions to check/uncheck all buttons
         self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+        
+        
+    def init_SettingParams(self):
+        """
+        Read config file if exist, else use default params & file data (for bin color init)"""
+        if False:
+            #TODO placeholder for config file
+            pass
+        else:
+            self.settingParams = SettingParams()
+            self.settingParams.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
+            # init bin color by bin info
+            if self.dataInfo:
+                for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.dataInfo.sbinDict), 
+                                            (self.settingParams.hbinColor, self.dataInfo.hbinDict)]:
+                    for bin in bin_info.keys():
+                        info = bin_info.get(bin, " ")
+                        binType = info[1]   # P, F or Unknown
+                        color = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
+                        binColorDict[bin] = color
+            
+    
+    def init_SettingUI(self):
+        self.settingUI = stdfSettings(self)
         
         
     def updateModelContent(self, model, newList):
@@ -673,7 +704,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 recType = self.dataSrc[site][test_num]["RecType"]
                 endian = self.dataSrc[site][test_num]["Endian"]
             except KeyError:
-                self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, True, False)
+                self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, False, False)
         sorted_lists = sorted(zip(uo_dutIndex, uo_offsetL, uo_lengthL), key=lambda x: x[0])
         dutIndex, offsetL, lengthL = [[x[i] for x in sorted_lists] for i in range(3)]
         return recType, endian, dutIndex, offsetL, lengthL
@@ -696,7 +727,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             endian = self.dataSrc[site][test_num]["Endian"]
                             dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
                         except KeyError:
-                            self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, True, False)
+                            self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, False, False)
                             tempSelDict[test_num] = {}
                             continue
                     # parse data on-the-fly
@@ -951,10 +982,9 @@ class MyWindow(QtWidgets.QMainWindow):
                 rowList.append("%s / %s" % ("Hardware Bin", "All Sites" if site == -1 else "Site%d"%site))
                 for bin_num, cnt in zip(HList, HCnt):
                     if cnt == 0: continue
-                    item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(HCnt)), "Unknown"]
+                    item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(HCnt)), bin_num]
                     if bin_num in hbin_info:
-                        item[0] = hbin_info[bin_num][0] + "\n" + item[0]
-                        item[1] = hbin_info[bin_num][1]
+                        item[0] = hbin_info[bin_num][0] + "\n" + item[0]    # add bin name
                     rowList.append(item)
                         
             elif bin == "SBIN":
@@ -966,10 +996,9 @@ class MyWindow(QtWidgets.QMainWindow):
                 rowList.append("%s / %s" % ("Software Bin", "All Sites" if site == -1 else "Site%d"%site))
                 for bin_num, cnt in zip(SList, SCnt):
                     if cnt == 0: continue
-                    item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(SCnt)), "Unknown"]
+                    item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(SCnt)), bin_num]
                     if bin_num in sbin_info:
                         item[0] = sbin_info[bin_num][0] + "\n" + item[0]
-                        item[1] = sbin_info[bin_num][1]
                     rowList.append(item)
                                     
             return rowList
@@ -1166,6 +1195,7 @@ class MyWindow(QtWidgets.QMainWindow):
             rowHeader = []
             colSize = 0
             for binType in ["HBIN", "SBIN"]:
+                color_dict = self.settingParams.hbinColor if binType == "HBIN" else self.settingParams.sbinColor
                 for site in sorted(self.getCheckedSites()):
                     rowList = self.prepareTableContent(tabType, bin=binType, site=site)
                     qitemList = []
@@ -1176,11 +1206,12 @@ class MyWindow(QtWidgets.QMainWindow):
                         qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                         qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                         # set color
-                        if item[1] == "P":      bc = "#00CC00"; fc = "#000000"
-                        elif item[1] == "F":    bc = "#CC0000"; fc = "#FFFFFF"
-                        else:                   bc = "#FE7B00"; fc = "#000000"
-                        qitem.setData(QtGui.QColor(bc), QtCore.Qt.BackgroundRole)
-                        qitem.setData(QtGui.QColor(fc), QtCore.Qt.ForegroundRole)
+                        bin_num = item[1]
+                        bc = QtGui.QColor(color_dict[bin_num])
+                        # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
+                        fc = QtGui.QColor("#000000") if bc.red()*0.299 + bc.green()*0.587 + bc.blue()*0.114 > 186 else QtGui.QColor("#FFFFFF")
+                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
+                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
                         qitemList.append(qitem)
                     self.tmodel.appendRow(qitemList)
                     
@@ -1217,10 +1248,6 @@ class MyWindow(QtWidgets.QMainWindow):
             index = kargs["insertIndex"]
             qfigLayout.insertWidget(index, canvas)
             qfigLayout.insertWidget(index+1, toolbar)
-        
-        # customize plot
-        site_color = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 3: "#00FFFF",
-                      4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
                 
         if tabType == tab.Trend:   # Trend
             ax = fig.add_subplot(111)
@@ -1233,7 +1260,7 @@ class MyWindow(QtWidgets.QMainWindow):
             med = self.selData[site][test_num]["Median"]
             avg = self.selData[site][test_num]["Mean"]
             # plot            
-            trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.5, markeredgecolor="black", linewidth=0.5, color=site_color[site if site<0 else site%8], zorder = 0, label="Data")
+            trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.5, markeredgecolor="black", linewidth=0.5, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
             # connect magnet cursor
             cursorKey = "%d_%d"%(test_num, site)
             self.cursorDict[cursorKey] = MagCursor(trendLine, self.settingParams.dataPrecision)
@@ -1301,7 +1328,7 @@ class MyWindow(QtWidgets.QMainWindow):
             hist, bin_edges = np.histogram(dataList, bins = bin_num)
             bin_width = bin_edges[1]-bin_edges[0]
             # use bar to draw histogram, only for its "align" option 
-            ax.bar(bin_edges[:len(hist)], hist, width=bin_width, color=site_color[site if site<0 else site%8], edgecolor="black", zorder = 0, label="Histo Chart")
+            ax.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label="Histo Chart")
             # draw boxplot
             if self.settingParams.showBoxp_histo:
                 ax_box = ax.twinx()
@@ -1352,7 +1379,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 position_neg = avg - sd * n
                 ax.axvline(x = position_pos, linewidth=1, ls='-.', color='gray', zorder = 2, label="%dσ"%n)
                 ax.axvline(x = position_neg, linewidth=1, ls='-.', color='gray', zorder = 2, label="-%dσ"%n)
-                _, ypos = axis_to_data.transform([0, 0.98])
+                _, ypos = axis_to_data.transform([0, 0.97])
                 ax.text(x = position_pos, y = ypos, s="%dσ"%n, c="gray", ha="center", va="top", backgroundcolor="white", fontname="Courier New", fontsize=10)
                 ax.text(x = position_neg, y = ypos, s="-%dσ"%n, c="gray", ha="center", va="top", backgroundcolor="white", fontname="Courier New", fontsize=10)
             # med avg text labels / lines
@@ -1372,7 +1399,6 @@ class MyWindow(QtWidgets.QMainWindow):
             fig.suptitle("%s - %s"%("Bin Summary", "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
             ax_l = fig.add_subplot(121)
             ax_r = fig.add_subplot(122)
-            binColorDict = {"P": "#00CC00", "F": "#CC0000"}
             Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
             # HBIN plot
             hbin_count = self.dataInfo.hbinSUM[site]
@@ -1383,7 +1409,8 @@ class MyWindow(QtWidgets.QMainWindow):
             HColor = []
             for ind, i in enumerate(HList):
                 HLable.append(hbin_info.get(i, [str(i)])[0])  # get bin name if dict is not empty, else use bin number
-                HColor.append(binColorDict.get(hbin_info.get(i, "  ")[1], "#FE7B00"))    # if dict is empty, use orange as default, if Bin type is unknown, use orange
+                # HColor.append(binColorDict.get(hbin_info.get(i, "  ")[1], "#FE7B00"))    # if dict is empty, use orange as default, if Bin type is unknown, use orange
+                HColor.append(self.settingParams.hbinColor[i])
                 ax_l.text(x=ind, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
                 
             ax_l.bar(np.arange(len(HCnt)), HCnt, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary")
@@ -1403,7 +1430,8 @@ class MyWindow(QtWidgets.QMainWindow):
             SColor = []
             for ind, i in enumerate(SList):
                 SLable.append(sbin_info.get(i, [str(i)])[0])  # get bin name if dict is not empty, else use bin number
-                SColor.append(binColorDict.get(sbin_info.get(i, "  ")[1], "#FE7B00"))    # if dict is empty, use orange as default, if Bin type is unknown, use orange
+                # SColor.append(binColorDict.get(sbin_info.get(i, "  ")[1], "#FE7B00"))    # if dict is empty, use orange as default, if Bin type is unknown, use orange
+                SColor.append(self.settingParams.sbinColor[i])
                 ax_r.text(x=ind, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
                 
             ax_r.bar(np.arange(len(SCnt)), SCnt, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary")
@@ -1419,8 +1447,10 @@ class MyWindow(QtWidgets.QMainWindow):
             ax = fig.add_subplot(111, aspect=1)
             ax.set_title("Wafer ID: %s - %s"%(waferDict["WAFER_ID"], "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
             
-            xmin = ymin =  99999
-            xmax = ymax = -99999
+            xmin = self.dataInfo.waferInfo.get("xmin", -32768)
+            ymin = self.dataInfo.waferInfo.get("ymin", -32768)
+            xmax = self.dataInfo.waferInfo.get("xmax", -32768)
+            ymax = self.dataInfo.waferInfo.get("ymax", -32768)
             # group coords by soft bin, 
             coordsDict = {}
             # filter duts by selected sites
@@ -1430,7 +1460,6 @@ class MyWindow(QtWidgets.QMainWindow):
                 sbin = self.dataInfo.dutDict[dut]["SOFT_BIN"]
                 coordsDict.setdefault(sbin, []).append(coords)
             # draw
-            bin_color_dict = {1: "#00CC00"}
             dutCnt = sum(self.dataInfo.sbinSUM[site].values())
             legendHandles = []
             for sbin in sorted(coordsDict.keys()):
@@ -1441,15 +1470,10 @@ class MyWindow(QtWidgets.QMainWindow):
                 rects = []
                 # skip dut with invalid coords
                 for (x, y) in coordsDict[sbin]:
-                    if x == -32768 or y == -32768: continue
-                    if x <= xmin: xmin = x
-                    if y <= ymin: ymin = y
-                    if x >= xmax: xmax = x
-                    if y >= ymax: ymax = y
                     rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
-                pc = PatchCollection(patches=rects, match_original=False, edgecolors="b", facecolors=bin_color_dict.get(sbin, "#CC0000"), label=label)
+                pc = PatchCollection(patches=rects, match_original=False, edgecolors="b", facecolors=self.settingParams.sbinColor[sbin], label=label)
                 ax.add_collection(pc)
-                proxyArtist = matplotlib.patches.Patch(color=bin_color_dict.get(sbin, "#CC0000"), label=label)
+                proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
                 legendHandles.append(proxyArtist)
             # set limits
             ax.set_xlim(xmin-1, xmax+1)
@@ -1457,7 +1481,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # set ticks & draw coord lines
             ax.set_xticks(range(xmin, xmax+1, 1))
             ax.set_yticks(range(ymin, ymax+1, 1))
-            Tsize = lambda barNum: 12 if barNum <= 10 else round(4 + 8 * 2 ** (0.4*(10-barNum)))  # adjust fontsize based on bar count
+            Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
             labelsize = Tsize(max(xmax-xmin, ymax-ymin))
             ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
             # Turn spines off and create white grid.
@@ -1543,6 +1567,9 @@ class MyWindow(QtWidgets.QMainWindow):
             # set max height in order to resize site selection groupbox
             self.ui.site_selection.setMaximumHeight(60 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*(2 + siteNum//4))   # 2 + siteNum//4 == total row in grid layout
             
+            self.init_SettingUI()   # remove existing color btns
+            self.settingUI.initColorBtns()
+            self.init_SettingParams()
             self.init_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummary()
