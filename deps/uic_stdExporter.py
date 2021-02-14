@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Feb 11 2021
+# Last Modified: Mon Feb 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -52,11 +52,12 @@ from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 # tab = Tab(["DUT", "Trend", "Histo", "Bin", "Stat", "FileInfo"])
 class tab(IntEnum):
     DUT = 0
-    Trend = 1
-    Histo = 2
-    Bin = 3
-    Stat = 4
-    FileInfo = 5
+    Trend = 1   # Do not change
+    Histo = 2   # Int number
+    Bin = 3     # of these items
+    Wafer = 4   # It should match tab order of the main window
+    Stat = 5
+    FileInfo = 6
 
 
 def list_operation(main, method, other):
@@ -105,7 +106,7 @@ class reportGenerator(QtCore.QObject):
         self.forceQuit = False
         self.mutex = mutex
         self.condWait = conditionWait
-        self.contL, self.numL, self.siteL, self.path, self.totalLoopCnt = settings
+        self.contL, self.numL, self.siteL, self.path, self.numWafer, self.totalLoopCnt = settings
         # for sharing data from gui thread
         self.channel = channel
         # signals for updating progress bar dialog
@@ -348,7 +349,27 @@ class reportGenerator(QtCore.QObject):
                             currentCol += 1
                             loopCnt += 1
                             sendProgress(loopCnt)
-                                                                     
+                            
+                    elif cont == tab.Wafer:
+                        imageHeight_in_rowHeight = 45
+                        x_scale = imageHeight_in_rowHeight * 0.21 / 9
+                        # Sheet for wafer map
+                        WaferSheet = wb.add_worksheet("Wafer Map")
+                        currentRow = 0
+                        startCol = 0
+                        for wafer in self.numWafer:
+                            for site in self.siteL:
+                                if self.forceQuit: return
+                                image_io = self.waitForImage(site=site, test_num=wafer, chartType=tab.Wafer)
+                                WaferSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                currentRow += imageHeight_in_rowHeight + 1
+                                # dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
+                                # WaferSheet.write_row(currentRow, startCol, dataList_HB)
+                                # currentRow += 1
+                                loopCnt += 1
+                                sendProgress(loopCnt)
+                            currentRow += 1
+                                                                                             
         self.closeSignal.emit(True)
         
           
@@ -380,7 +401,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.rg = reportGenerator(self.signals, 
                                   self.mutex, 
                                   self.condWait, 
-                                  (parent.contL, parent.numL, parent.siteL, parent.path, parent.totalLoopCnt),
+                                  (parent.contL, parent.numL, parent.siteL, parent.path, parent.numWafer, parent.totalLoopCnt),
                                   self.channel)
         # send data from parent to qthread, bind before moveToThread
         # -- Deprecated --
@@ -652,6 +673,7 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.Stat_cb.isChecked(): selectedContents.append(tab.Stat)
         if self.exportUI.DUT_cb.isChecked(): selectedContents.append(tab.DUT)
         if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(tab.FileInfo)
+        if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(tab.Wafer)
         
         return selectedContents
     
@@ -676,6 +698,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.siteL = self.getSites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()
+        self.numWafer = sorted([i for i in self.parent.dataInfo.waferDict.keys()])
        
         if len(self.numL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path == None:
             # input not complete
@@ -702,6 +725,8 @@ class stdfExporter(QtWidgets.QDialog):
                     self.totalLoopCnt += 1
                 elif cont == tab.DUT:
                     self.totalLoopCnt += len(self.numL)
+                elif cont == tab.Wafer:
+                    self.totalLoopCnt += len(self.numWafer) * len(self.siteL)
                 elif False:
                     # Update loopcnt if more contents are added
                     # self.totalLoopCnt += len(self.siteL)
