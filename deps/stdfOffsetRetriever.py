@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Feb 15 2021
+# Last Modified: Tue Feb 16 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -349,6 +349,7 @@ class stdfSummarizer:
         tmpDUT["HARD_BIN"] = HARD_BIN
         tmpDUT["SOFT_BIN"] = SOFT_BIN
         tmpDUT["SITE_NUM"] = SITE_NUM
+        tmpDUT["PART_FLG"] = PART_FLG
         # update wafer only if WIR is detected
         if not self.waferIndex == 0:
             self.waferDict[self.waferIndex]["dutIndexList"].append(self.dutIndex)
@@ -362,7 +363,7 @@ class stdfSummarizer:
                 if Y_COORD > self.waferInfo.get("ymax", -32768): self.waferInfo["ymax"] = Y_COORD
         
         if PART_FLG & 0b00011000 == 0:
-            tmpDUT["PART_FLG"] = "Pass"
+            tmpDUT["PART_STAT"] = "Pass"
             self.dutPassed += 1
             # we can determine the type of hard/soft bin based on the part_flag
             # it is helpful if the std is incomplete and lack of HBR/SBR
@@ -371,14 +372,14 @@ class stdfSummarizer:
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "P"]
             
         elif PART_FLG & 0b00010000 == 0:
-            tmpDUT["PART_FLG"] = "Failed"
+            tmpDUT["PART_STAT"] = "Failed"
             self.dutFailed += 1
             if not HARD_BIN in self.hbinDict: self.hbinDict[HARD_BIN] = [str(HARD_BIN), "F"]
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "F"]
                     
         else:
             # no pass/fail info
-            tmpDUT["PART_FLG"] = ""
+            tmpDUT["PART_STAT"] = "None"
             if not HARD_BIN in self.hbinDict: self.hbinDict[HARD_BIN] = [str(HARD_BIN), "U"]
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "U"]
             

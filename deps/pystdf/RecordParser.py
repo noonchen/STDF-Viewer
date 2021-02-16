@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Sun Feb 07 2021
+# Last Modified: Tue Feb 16 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -252,10 +252,12 @@ class RecordParser:
                 RecordParser.cache[(offset, length)] = valueDict    # cache value dict for speed
 
             # bit7-6: 00 pass; 10 fail; x1 none;
-            Pass = True if valueDict["TEST_FLG"] & 0b11000000 == 0 else (False if valueDict["TEST_FLG"] & 0b01000000 == 0 else None)
-            testDict["StatList"] = testDict.setdefault("StatList", []) + [Pass]
+            flag = valueDict["TEST_FLG"]
+            # Pass = True if flag & 0b11000000 == 0 else (False if flag & 0b01000000 == 0 else None)
+            # testDict["StatList"] = testDict.setdefault("StatList", []) + [Pass]
+            testDict["FlagList"] = testDict.setdefault("FlagList", []) + [flag]
             
-            if "failCheck" in kargs and kargs["failCheck"] and (Pass == False):
+            if "failCheck" in kargs and kargs["failCheck"] and (flag & 0b11000000 == 0b10000000):
                 # only StatList is interested in failCheck mode, return immediately if a Fail is found to improve speed
                 return testDict
             

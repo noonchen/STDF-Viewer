@@ -24,6 +24,7 @@
 
 
 
+import sys, toml
 from random import choice
 from copy import deepcopy
 from deps.ui.ImgSrc_svg import ImgDict
@@ -40,10 +41,10 @@ from deps.ui.stdfViewer_settingsUI import Ui_Setting
 class Tab(tuple): __getattr__ = tuple.index
 tab = Tab(["Info", "Trend", "Histo", "Bin"])
 
-indexDic_sigma = {0: frozenset(),
-                  1: frozenset([3]), 
-                  2: frozenset([3, 6]), 
-                  3: frozenset([3, 6, 9])}
+indexDic_sigma = {0: "",
+                  1: "3", 
+                  2: "3, 6", 
+                  3: "3, 6, 9"}
 indexDic_sigma_reverse = {v:k for k, v in indexDic_sigma.items()}
 
 indexDic_notation = {0: "G",
@@ -136,7 +137,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.showGaus_histo.setChecked(self.originalParams.showGaus_histo)
         self.settingsUI.showBoxp_histo.setChecked(self.originalParams.showBoxp_histo)
         self.settingsUI.lineEdit_binCount.setText(str(self.originalParams.binCount))
-        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse[self.originalParams.showSigma])
+        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
         # table
         self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
@@ -203,6 +204,30 @@ class stdfSettings(QtWidgets.QDialog):
         # color
         for group in ["site", "sbin", "hbin"]:
             self.currentColorDict(get=False, group=group)
+        # save data to toml config
+        configData = {"Trend Plot": {},
+                      "Histo Plot": {},
+                      "Statistic Table": {},
+                      "Color Setting": {}}
+        configName = dict(sys.CONFIG_NAME)
+        for k, v in self.parent.settingParams.__dict__.items():
+            if k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
+                # Trend
+                configData["Trend Plot"][configName[k]] = v
+            elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
+                # Histo
+                configData["Histo Plot"][configName[k]] = v
+            elif k in ["dataNotation", "dataPrecision", "cpkThreshold"]:
+                # Table
+                configData["Statistic Table"][configName[k]] = v
+            elif k in ["siteColor", "sbinColor", "hbinColor"]:
+                # Color
+                # change Int key to string, since toml only support string keys
+                v = dict([(str(intKey), color) for intKey, color in v.items()])
+                configData["Color Setting"][configName[k]] = v
+
+        with open(sys.CONFIG_PATH, "w+") as fd:
+            toml.dump(configData, fd)
         
         
     def isTrendChanged(self):
@@ -232,6 +257,7 @@ class stdfSettings(QtWidgets.QDialog):
             self.updateSettings()
             refreshTab = False
             refreshTable = False
+            refreshList = False
             refreshCursor = False
             if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
                 refreshTab = True
@@ -245,6 +271,9 @@ class stdfSettings(QtWidgets.QDialog):
                 # if raw data table is active, update as well
                 if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
                     refreshTab = True
+                # if cpk threshold changed, clear listView backgrounds
+                if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold:
+                    refreshList = True
                     
             if self.isColorChanged():
                 refreshTab = True
@@ -252,6 +281,7 @@ class stdfSettings(QtWidgets.QDialog):
                 
             if refreshTab: self.parent.updateTabContent(forceUpdate=True)
             if refreshTable: self.parent.updateTableContent()
+            if refreshList: self.parent.clearTestItemBG()
             if refreshCursor: self.parent.updateCursorPrecision()
                 
             # need to update orignal params after updating parent settings
