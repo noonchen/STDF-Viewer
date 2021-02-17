@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Mon Feb 08 2021
+# Last Modified: Tue Feb 16 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -67,19 +67,22 @@ class DutDataReader(QtWidgets.QWidget):
         self.total = len(self.test_number_List)
         dutInfo = self.parent.prepareDataForDUTSummary(siteList=[], selectedDutIndex=self.selectedDutIndex)
         dutData = []
-        dutFlag = []
+        dutStat = []
+        dutFlagInfo = []
         for i, test_num in enumerate(self.test_number_List):
             if self.stopFlag: return
 
-            dutData_perTest, flag_perTest = self.parent.prepareDataForDUTSummary(siteList=[], selectedDutIndex=self.selectedDutIndex, test_num=test_num, exportTestFlag=True)
+            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.prepareDataForDUTSummary(siteList=[], selectedDutIndex=self.selectedDutIndex, test_num=test_num, exportTestFlag=True)
             dutData.append(dutData_perTest)
-            dutFlag.append(flag_perTest)
+            dutStat.append(stat_perTest)
+            dutFlagInfo.append(flagInfo_perTest)
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
             QApplication.processEvents()    # force refresh UI to update progress bar
         self.UI.progressBar.setFormat("Filling table with data...")
         QApplication.processEvents()
-        dutDataDisplayer(self.parent, (dutInfo, dutData, dutFlag), self.sd, self.signal.hideSignal)
+        dutDataDisplayer(self, (dutInfo, dutData, dutStat, dutFlagInfo), self.sd, self.signal.hideSignal)
+        self.close()
             
         
     def closeEvent(self, event):
@@ -99,15 +102,17 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
         self.parent = parent
-        self.dutInfo, self.dutData, self.dutFlag = content
+        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = content
         self.sd = styleDelegate
         self.hideSignal = hideSignal
         
         self.UI.save.clicked.connect(self.onSave)
         self.UI.close.clicked.connect(self.close)
         self.init_Table()
+        self.parent.parent.updateStatus("Please wait for data filling in the table...")
         self.refresh_Table()
         self.hideSignal.emit()
+        self.parent.parent.updateStatus("")
         self.exec_()
         
         
@@ -131,27 +136,36 @@ class dutDataDisplayer(QtWidgets.QDialog):
         vh_len = len(vh_base)
 
         # append value
+        # get dut pass/fail list
+        statIndex = self.hh.index("DUT Flag")
+        dutStatus = [True] * vh_len + [dutInfo_perDUT[statIndex].split(" ", 1)[0] != "Failed" for dutInfo_perDUT in self.dutInfo]
         for col_tuple in zip(*self.dutInfo):
             tmpCol = ["N/A"] * vh_len + list(col_tuple)
             qitemCol = []
-            for i, item in enumerate(tmpCol):
+            for i, (item, flag) in enumerate(zip(tmpCol, dutStatus)):
                 qitem = QtGui.QStandardItem(item)
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
+                if not flag: 
+                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                 qitemCol.append(qitem)                        
             self.tmodel.appendColumn(qitemCol)
         
-        for dataCol, flagCol in zip(self.dutData, self.dutFlag):
+        for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.dutFlagInfo):
             qitemCol = []
-            for i, (item, flag) in enumerate(zip(dataCol[1:], flagCol[1:])):    # remove 1st element: test name
+            for i, (item, stat, flagInfo) in enumerate(zip(dataCol, statCol, flagInfoCol)):    # remove 1st element: test name
+                if i == 0: continue     # skip test name
                 qitem = QtGui.QStandardItem(item)
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                if flag == False:
+                if stat == False:
                     qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                     qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
+                if flagInfo != "":
+                    qitem.setToolTip(flagInfo)
+                if i <= vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
                 qitemCol.append(qitem)                        
             self.tmodel.appendColumn(qitemCol)
         
@@ -159,9 +173,10 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.setVerticalHeaderLabels(self.vh)
         self.UI.tableView_dutData.horizontalHeader().setVisible(True)
         self.UI.tableView_dutData.verticalHeader().setVisible(True)        
-        
-        # call parent method to adjust table width
-        self.parent.resizeCellWidth(self.UI.tableView_dutData)        
+        # resize cells
+        header = self.UI.tableView_dutData.horizontalHeader()
+        for column in range(header.model().columnCount()):
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
         
         
     def onSave(self):

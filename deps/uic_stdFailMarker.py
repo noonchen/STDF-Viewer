@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Feb 10 2021
+# Last Modified: Tue Feb 16 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -93,19 +93,15 @@ class FailMarker(QtWidgets.QWidget):
             if cpkFailCount != 0:
                 msg += "%d passed test items found with low Cpk, "%cpkFailCount
         self.parent.signals.statusSignal.emit("%stime elapsed %.2f sec."%(msg, end_time - start_time), False, False, False)
-
-    
         
     def closeEvent(self, event):
         # close by clicking X
         self.stopFlag = True
         event.accept()
              
-                    
     def updateProgressBar(self, num):
         self.UI.progressBar.setValue(num)
       
-        
         
 if __name__ == "__main__":
     import sys

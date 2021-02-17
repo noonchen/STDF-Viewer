@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Feb 15 2021
+# Last Modified: Wed Feb 17 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import io, os, sys, gzip, bz2, traceback
+import io, os, sys, gzip, bz2, traceback, toml, logging
 import numpy as np
 import multiprocessing
 from enum import IntEnum
@@ -65,6 +65,26 @@ if hasattr(QtCore.Qt, 'AA_EnableHighDpiScaling'):
 if hasattr(QtCore.Qt, 'AA_UseHighDpiPixmaps'):
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     
+# save config path to sys
+rootFolder = os.path.dirname(sys.argv[0])
+base = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
+# setting attr to human string
+settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
+                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
+                   ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"),
+                   ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
+setattr(sys, "CONFIG_NAME", settingNamePair)
+
+#-------------------------
+logger = logging.getLogger("STDF Viewer")
+logger.setLevel(logging.WARNING)
+logPath = os.path.join(rootFolder, "logs", f"{base}.log")
+os.makedirs(os.path.dirname(logPath), exist_ok=True)
+logFD = logging.FileHandler(logPath, mode="a+")
+logFD.setFormatter(logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s'))
+logger.addHandler(logFD)
+
 
 def calc_cpk(L, H, data):
     sdev = np.std(data)
@@ -86,6 +106,24 @@ def calc_cpk(L, H, data):
 
 # convert from pixel coords to data coords
 toDCoord = lambda ax, point: ax.transData.inverted().transform(point)
+# check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass;
+isPass = lambda flag: True if flag & 0b11000000 == 0 else (False if flag & 0b01000000 == 0 else True)
+# test flag parser
+def flag_parser(flag: int):
+    flagString = f"{flag:>08b}"
+    bitInfo = {7: "Bit7: Test failed",
+               6: "Bit6: Test completed with no pass/fail indication",
+               5: "Bit5: Test aborted",
+               4: "Bit4: Test not executed",
+               3: "Bit3: Timeout occurred",
+               2: "Bit2: Test result is unreliable",
+               1: "Bit1: The test was executed, but no dataloagged value was taken",
+               0: "Bit0: Alarm detected during testing"}
+    infoList = []
+    for pos, bit in enumerate(reversed(flagString)):
+        if bit == "1":
+            infoList.append(bitInfo[pos])
+    return "\n".join(reversed(infoList))
 
 # simulate a Enum in python
 # class Tab(tuple): __getattr__ = tuple.index
@@ -110,6 +148,19 @@ mirDescriptions = ["Setup Time", "Start Time", "Station Number", "Test Mode Code
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+# check if a hex color string
+def isHexColor(color: str):
+    color = color.lower()
+    if color.startswith("#") and len(color) in [7, 9]:
+        hexNum = list(map(lambda num: f'{num:x}', range(16)))
+        for hex in color[1:]:
+            if not hex in hexNum:
+                return False
+        return True
+    else:
+        return False
+
+
 
 class MagCursor(object):
 
@@ -165,28 +216,30 @@ class MagCursor(object):
 
 
 class SettingParams:
-    # trend
-    showHL_trend = True
-    showLL_trend = True
-    showMed_trend = True
-    showMean_trend = True
-    # histo
-    showHL_histo = True
-    showLL_histo = True
-    showMed_histo = True
-    showMean_histo = True
-    showGaus_histo = True
-    showBoxp_histo = True
-    binCount = 30
-    showSigma = frozenset([3, 6, 9])    # for hashability
-    # table
-    dataNotation = "G"  # F E G stand for float, Scientific, automatic
-    dataPrecision = 3
-    cpkThreshold = 1.33
-    # colors
-    siteColor = {}
-    sbinColor = {}
-    hbinColor = {}
+    def __init__(self):
+        # trend
+        self.showHL_trend = True
+        self.showLL_trend = True
+        self.showMed_trend = True
+        self.showMean_trend = True
+        # histo
+        self.showHL_histo = True
+        self.showLL_histo = True
+        self.showMed_histo = True
+        self.showMean_histo = True
+        self.showGaus_histo = True
+        self.showBoxp_histo = True
+        self.binCount = 30
+        self.showSigma = "3, 6, 9"    # for hashability
+        # table
+        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
+        self.dataPrecision = 3
+        self.cpkThreshold = 1.33
+        # colors
+        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
+                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
+        self.sbinColor = {}
+        self.hbinColor = {}
     
 
 class StyleDelegateForTable_List(QStyledItemDelegate):
@@ -467,22 +520,47 @@ class MyWindow(QtWidgets.QMainWindow):
         
     def init_SettingParams(self):
         """
-        Read config file if exist, else use default params & file data (for bin color init)"""
-        if False:
-            #TODO placeholder for config file
+        Read config file if exist, else use default params & file data (for bin color init)
+        """
+        # write default setting params
+        self.settingParams = SettingParams()
+        # init bin color by bin info
+        if self.dataInfo:
+            for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.dataInfo.sbinDict), 
+                                                (self.settingParams.hbinColor, self.dataInfo.hbinDict)]:
+                for bin in bin_info.keys():
+                    info = bin_info.get(bin, " ")
+                    binType = info[1]   # P, F or Unknown
+                    color = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
+                    binColorDict[bin] = color
+                    
+        # if config file is found, update setting params
+        try:
+            configData = toml.load(sys.CONFIG_PATH)
+            configString = dict([(v, k) for (k, v) in sys.CONFIG_NAME])
+            for sec, secDict in configData.items():
+                if sec == "Color Setting":
+                    # convert string key (site/sbin/hbin) to int
+                    for humanString, colorDict in secDict.items():
+                        if humanString in configString:
+                            attr = configString[humanString]    # e.g. siteColor
+                            oldColorDict = getattr(self.settingParams, attr)
+                            for numString, hexColor in colorDict.items():
+                                try:
+                                    num = int(numString)
+                                except ValueError:
+                                    continue        # skip the invalid site or bin
+                                if isHexColor(hexColor): 
+                                    oldColorDict[num] = hexColor
+                else:
+                    for humanString, param in secDict.items():
+                        if humanString in configString:
+                            attr = configString[humanString]    # e.g. showHL_trend
+                            if type(param) == type(getattr(self.settingParams, attr)):
+                                setattr(self.settingParams, attr, param)
+        except (FileNotFoundError, TypeError, toml.TomlDecodeError):
+            # any error occurs in config file reading, simply ignore
             pass
-        else:
-            self.settingParams = SettingParams()
-            self.settingParams.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
-            # init bin color by bin info
-            if self.dataInfo:
-                for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.dataInfo.sbinDict), 
-                                            (self.settingParams.hbinColor, self.dataInfo.hbinDict)]:
-                    for bin in bin_info.keys():
-                        info = bin_info.get(bin, " ")
-                        binType = info[1]   # P, F or Unknown
-                        color = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
-                        binColorDict[bin] = color
             
     
     def init_SettingUI(self):
@@ -551,7 +629,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 # mark red when failed
-                if tmpRow[-1] == "Failed": 
+                if tmpRow[-1].split(" ", 1)[0] == "Failed": 
                     qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                     qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                 qitemRow.append(qitem)                        
@@ -671,19 +749,25 @@ class MyWindow(QtWidgets.QMainWindow):
         RecordParser.endian = endian    # specify the parse endian
         testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle, failCheck=True)
         
-        try:
-            testDict["StatList"].index(False)
-            return "testFailed"     # no error indicates False is found, aka, test failed
-        except ValueError:
-            # if the test passed, check if cpk is lower than the threshold
-            threshold = self.settingParams.cpkThreshold
+        for stat in map(isPass, testDict["FlagList"]):
+            if stat == False:
+                return "testFailed"
+        else:
+            # if all tests passed, check if cpk is lower than the threshold
             _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
             if cpk != np.nan:
                 # check cpk only if it's valid
-                if cpk < threshold:
+                if cpk < self.settingParams.cpkThreshold:
                     return "cpkFailed"
-
             return "testPassed"
+        
+        
+    def clearTestItemBG(self):
+        # reset test item background color when cpk threshold is reset
+        for i in range(self.sim_list.rowCount()):
+            qitem = self.sim_list.item(i)
+            qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.ForegroundRole)
+            qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.BackgroundRole)
                         
             
     def mergeAllSiteTestData(self, test_num):
@@ -715,8 +799,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.selData = {}
         
         if selectItemNums:
+            self.updateStatus("Reading test data...")
             for test_num in selectItemNums:
                 for site in selectSites:
+                    tempSelDict = self.selData.setdefault(site, {})
                     if site == -1:
                         recType, endian, dutIndex, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
                     else:
@@ -740,9 +826,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     testDict["Max"] = np.max(testDict["DataList"])
                     testDict["Median"] = np.median(testDict["DataList"])
                     testDict["Mean"], testDict["SDev"], testDict["Cpk"] = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
-                    # keys in testDict: TestName / TestNum / StatList / LL / HL / Unit / DataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
-                    tempSelDict = self.selData.setdefault(site, {})
+                    # keys in testDict: TestName / TestNum / [deleted: StatList] / FlagList / LL / HL / Unit / DataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
                     tempSelDict[test_num] = testDict
+            self.updateStatus("")
                 
                 
     def updateTabContent(self, forceUpdate=False):
@@ -800,17 +886,22 @@ class MyWindow(QtWidgets.QMainWindow):
             
             # Append Test data
             for test_num in selTestNums:
-                test_data_list, test_flag_list = self.prepareDataForDUTSummary(siteList, test_num=test_num, exportTestFlag=True)
-                hheaderLabels.append(test_data_list[0])  # add test number to header list
+                test_data_list, test_stat_list, test_flagInfo_list = self.prepareDataForDUTSummary(siteList, test_num=test_num, exportTestFlag=True)
+                hheaderLabels.append(test_data_list[0])  # add test name to header list
                 
                 qitemCol = []
-                for i, (item, flag) in enumerate(zip(test_data_list[1:], test_flag_list[1:])):
+                for i, (item, stat, flagInfo) in enumerate(zip(test_data_list, test_stat_list, test_flagInfo_list)):
+                    if i == 0: continue     # skip 1st element: test name
                     qitem = QtGui.QStandardItem(item)
                     qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                     qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                     # mark red when failed, flag == False == Fail
-                    if flag == False: qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                    if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
+                    if stat == False: 
+                        qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+                        qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                    if flagInfo != "":
+                        qitem.setToolTip(flagInfo)
+                    if i <= vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
                     qitemCol.append(qitem)
                 self.tmodel_raw.appendColumn(qitemCol)
                         
@@ -898,6 +989,7 @@ class MyWindow(QtWidgets.QMainWindow):
             calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
             return calculatedIndex
     
+        self.updateStatus("Generating images...")
         # generate drawings in trend , histo and bin, but bin doesn't require test items selection
         if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and selTestNums != None):
             if tabType == tab.Bin:
@@ -918,7 +1010,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         calIndex = calculateCanvasIndex(test_num, site, canvasPriorityDict)
                         # draw
                         self.genPlot(site, test_num, tabType, updateTab=True, insertIndex=calIndex)
-            
+            self.updateStatus("")
         # remaining cases are: no test items in tab trend, histo, wafer
         else:
             # when no test item is selected, clear trend, histo & wafer tab content
@@ -939,9 +1031,9 @@ class MyWindow(QtWidgets.QMainWindow):
                 testDict = self.selData[site][test_num]
                 DUTIndex = testDict["DUTIndex"]
                 DataList = testDict["DataList"]
-                StatList = testDict["StatList"]
+                FlagList = testDict["FlagList"]
                 rowList = []    # 2d list
-                for index, value, status in zip(DUTIndex, DataList, StatList):
+                for index, value, test_flag in zip(DUTIndex, DataList, FlagList):
                     tmpRow = [self.dataInfo.dutDict.get(index, {"PART_ID": "MissingID"})["PART_ID"],
                                 "%d / %s" % (test_num, "All Sites" if site == -1 else "Site%d"%site),
                                 "%s" % testDict["TestName"],
@@ -949,23 +1041,28 @@ class MyWindow(QtWidgets.QMainWindow):
                                 "" if self.selData[site][test_num]["LL"] == None else valueFormat % self.selData[site][test_num]["LL"],
                                 "" if self.selData[site][test_num]["HL"] == None else valueFormat % self.selData[site][test_num]["HL"],
                                 valueFormat % value,
-                                "%s" % "Pass" if status else ("Fail" if status == False else "")]            
+                                f"{test_flag:>08b}"]            
                     rowList.append(tmpRow)
             
             else:
                 # return data for statistic table
-                rowList = ["%d / %s" % (test_num, "All Sites" if site == -1 else "Site%d"%site),
-                        self.selData[site][test_num]["TestName"],
-                        self.selData[site][test_num]["Unit"],
-                        "" if self.selData[site][test_num]["LL"] == None else valueFormat % self.selData[site][test_num]["LL"],
-                        "" if self.selData[site][test_num]["HL"] == None else valueFormat % self.selData[site][test_num]["HL"],
-                        "%d" % self.selData[site][test_num]["StatList"].count(False),
-                        "%s" % "∞" if self.selData[site][test_num]["Cpk"] == np.inf else ("" if self.selData[site][test_num]["Cpk"] is np.nan else valueFormat % self.selData[site][test_num]["Cpk"]),
-                        valueFormat % self.selData[site][test_num]["Mean"],
-                        valueFormat % self.selData[site][test_num]["Median"],
-                        valueFormat % self.selData[site][test_num]["SDev"],
-                        valueFormat % self.selData[site][test_num]["Min"],
-                        valueFormat % self.selData[site][test_num]["Max"]]
+                if self.selData[site][test_num]:
+                    rowList = ["%d / %s" % (test_num, "All Sites" if site == -1 else "Site%d"%site),
+                            self.selData[site][test_num]["TestName"],
+                            self.selData[site][test_num]["Unit"],
+                            "" if self.selData[site][test_num]["LL"] == None else valueFormat % self.selData[site][test_num]["LL"],
+                            "" if self.selData[site][test_num]["HL"] == None else valueFormat % self.selData[site][test_num]["HL"],
+                            "%d" % list(map(isPass, self.selData[site][test_num]["FlagList"])).count(False),
+                            "%s" % "∞" if self.selData[site][test_num]["Cpk"] == np.inf else ("" if self.selData[site][test_num]["Cpk"] is np.nan else valueFormat % self.selData[site][test_num]["Cpk"]),
+                            valueFormat % self.selData[site][test_num]["Mean"],
+                            valueFormat % self.selData[site][test_num]["Median"],
+                            valueFormat % self.selData[site][test_num]["SDev"],
+                            valueFormat % self.selData[site][test_num]["Min"],
+                            valueFormat % self.selData[site][test_num]["Max"]]
+                else:
+                    # some weird files might in this case, in which the number of 
+                    # test items in different sites are not the same
+                    rowList = [""] * 12
             return rowList
         
         elif tabType == tab.Bin or tabType == tab.Wafer:
@@ -1014,8 +1111,8 @@ class MyWindow(QtWidgets.QMainWindow):
         """
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         dutDict = self.dataInfo.dutDict
-        dut_data_dict = None
-        dut_status_dict = None
+        dut_data_dict = {}
+        dut_flag_dict = {}
         data = []
         flag = []
         selectedDutIndex = []
@@ -1057,11 +1154,11 @@ class MyWindow(QtWidgets.QMainWindow):
             
             if testDict:
                 dut_data_dict = dict(zip([dutIndexList[i] for i in ind_tested], testDict["DataList"]))   # used for search test data by dutIndex
-                dut_status_dict = dict(zip([dutIndexList[i] for i in ind_tested], testDict["StatList"]))   # used for search status by dutIndex
+                dut_flag_dict = dict(zip([dutIndexList[i] for i in ind_tested], testDict["FlagList"]))   # used for search status by dutIndex
             else:
                 # if selectedOffsetL is empty, testDict is also empty
                 dut_data_dict = {}
-                dut_status_dict = {}
+                dut_flag_dict = {}
                 # find test name in self.completeTestList
                 testDict["TestName"] = ""
                 for t_num, t_name in map(lambda x: x.split("\t", 1), self.completeTestList):
@@ -1078,17 +1175,19 @@ class MyWindow(QtWidgets.QMainWindow):
                     "" if testDict["HL"] == None else valueFormat % testDict["HL"],
                     "" if testDict["LL"] == None else valueFormat % testDict["LL"],
                     testDict["Unit"]]
-            flag = [True] * len(data)     # append True (Pass) at beginning to match with data
+            flag = [0] * len(data)     # append 0 (Pass test flag) at beginning to match with data
 
         for dutIndex in selectedDutIndex:
             hbin = dutDict[dutIndex]["HARD_BIN"]
             sbin = dutDict[dutIndex]["SOFT_BIN"]
             site = dutDict[dutIndex]["SITE_NUM"]
+            prrStat = dutDict[dutIndex]["PART_STAT"]
+            prrFlag = dutDict[dutIndex]["PART_FLG"]
             
             if "test_num" in kargs:
                 # append data of test_num for all selected dutIndex
                 data.append("Not Tested" if not dutIndex in dut_data_dict else valueFormat % dut_data_dict[dutIndex])
-                flag.append(True if not dutIndex in dut_status_dict else dut_status_dict[dutIndex])
+                flag.append(0 if not dutIndex in dut_flag_dict else dut_flag_dict[dutIndex])
             else:
                 # dut info without any test data    
                 tmpRow = [dutDict.get(dutIndex, {"PART_ID": "MissingID"})["PART_ID"], 
@@ -1097,7 +1196,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         "%d ms" % dutDict[dutIndex]["TEST_T"],
                         "Bin %d - %s" % (hbin, self.dataInfo.hbinDict[hbin][0]),
                         "Bin %d - %s" % (sbin, self.dataInfo.sbinDict[sbin][0]),
-                        "%s" % dutDict[dutIndex]["PART_FLG"]]
+                        f"{prrStat} / 0x{prrFlag:02x}"]
                 data.append(tmpRow)
                 
         if updateRow_dutIndex_dict:
@@ -1107,7 +1206,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.Row_DutIndexDict = dict(zip(range(len(selectedDutIndex)), selectedDutIndex))
                 
         if "exportTestFlag" in kargs and kargs["exportTestFlag"]:
-            data = [data, flag]
+            data = [data, map(isPass, flag), map(flag_parser, flag)]
         return data
     
     
@@ -1372,7 +1471,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.set_ylim(top=max(hist)*1.1)
                 
             # vertical lines for n * σ
-            sigmaList = self.settingParams.showSigma
+            sigmaList = [int(i) for i in self.settingParams.showSigma.split(",")]
             axis_to_data = ax.transAxes + ax.transData.inverted()
             for n in sigmaList:
                 position_pos = avg + sd * n
@@ -1492,7 +1591,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=-100)
             # legend
             ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(-0.1, -0.02, 1.2, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
-            
+                    
         if "exportImg" in kargs and kargs["exportImg"] == True:
             imgData = io.BytesIO()
             fig.savefig(imgData, format="png", dpi=200, bbox_inches="tight")
@@ -1585,13 +1684,20 @@ class MyWindow(QtWidgets.QMainWindow):
     
     @Slot(str, bool, bool, bool)
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
-        self.statusBar().showMessage(new_msg)
-        if info: 
-            QtWidgets.QMessageBox.information(None, "Info", new_msg)
-        elif warning: 
-            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
-        elif error:
-            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
+        try:
+            self.statusBar().showMessage(new_msg)
+            if info: 
+                QtWidgets.QMessageBox.information(None, "Info", new_msg)
+            elif warning: 
+                QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+                logger.warning(new_msg)
+            elif error:
+                QtWidgets.QMessageBox.critical(None, "Error", new_msg)
+                sys.exit()
+            QApplication.processEvents()
+        except:
+            logger.exception("Error occurred when updating status")
+            sys.exit()
         
     
     def eventFilter(self, object, event):
@@ -1616,7 +1722,8 @@ class MyWindow(QtWidgets.QMainWindow):
       
         
     def onException(self, errorType, errorValue, tb):
-        errMsg = traceback.format_exception(errorType, errorValue, tb)
+        logger.error("Uncaught Error occurred", exc_info=(errorType, errorValue, tb))
+        errMsg = traceback.format_exception(errorType, errorValue, tb, limit=0)
         self.updateStatus("\n".join(errMsg), False, False, True)
     
     

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Feb 15 2021
+# Last Modified: Wed Feb 17 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,15 +24,17 @@
 
 
 
-import os, sys
+import os, sys, logging
 import time, datetime
 import struct
-from threading import Thread
-from multiprocessing import Process
+import threading as th
+import multiprocessing as mp
 from deps.pystdf import V4
 from deps.pystdf.IO_Offset_forViewer import stdIO
 from deps.pystdf.RecordParser import RecordParser
 from deps.pystdf.Types import InitialSequenceException
+
+logger = logging.getLogger("STDF Viewer")
 
 formatMap = {
   "C1": "c",
@@ -63,24 +65,24 @@ scale_char = {15: "f",
 objDict = dict([((obj.typ, obj.sub), obj) for obj in V4.records])
 
 
-def catch_thread_process_exceptions():
-    pc_old = Process.run
-    tr_old = Thread.run
-    
-    def pc_new(*args, **kargs):
+class Process(mp.Process):
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        self._pcon, self._ccon = mp.Pipe()
+        self._exception = None
+        
+    def run(self):
         try:
-            pc_old(*args, **kargs)
-        except Exception:
-            sys.excepthook(*sys.exc_info())
+            mp.Process.run(self)
+            self._ccon.send(None)
+        except:
+            self._ccon.send(sys.exc_info()[:2])
             
-    def tr_new(*args2, **kargs2):
-        try:
-            tr_old(*args2, **kargs2)
-        except Exception:
-            sys.excepthook(*sys.exc_info())
-            
-    Process.run = pc_new
-    Thread.run = tr_new
+    @property
+    def exception(self):
+        if self._pcon.poll():
+            self._exception = self._pcon.recv()
+        return self._exception
 
 
 def getFileSize(fd):
@@ -128,7 +130,7 @@ class stdfSummarizer:
         if self.QSignal: 
             self.fileSize = fileSize
             self.QSignal.emit(0)
-            self.pb_thread = Thread(target=self.sendProgress)
+            self.pb_thread = th.Thread(target=self.sendProgress)
             self.pb_thread.start()
 
         # File info
@@ -349,6 +351,7 @@ class stdfSummarizer:
         tmpDUT["HARD_BIN"] = HARD_BIN
         tmpDUT["SOFT_BIN"] = SOFT_BIN
         tmpDUT["SITE_NUM"] = SITE_NUM
+        tmpDUT["PART_FLG"] = PART_FLG
         # update wafer only if WIR is detected
         if not self.waferIndex == 0:
             self.waferDict[self.waferIndex]["dutIndexList"].append(self.dutIndex)
@@ -362,7 +365,7 @@ class stdfSummarizer:
                 if Y_COORD > self.waferInfo.get("ymax", -32768): self.waferInfo["ymax"] = Y_COORD
         
         if PART_FLG & 0b00011000 == 0:
-            tmpDUT["PART_FLG"] = "Pass"
+            tmpDUT["PART_STAT"] = "Pass"
             self.dutPassed += 1
             # we can determine the type of hard/soft bin based on the part_flag
             # it is helpful if the std is incomplete and lack of HBR/SBR
@@ -371,14 +374,14 @@ class stdfSummarizer:
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "P"]
             
         elif PART_FLG & 0b00010000 == 0:
-            tmpDUT["PART_FLG"] = "Failed"
+            tmpDUT["PART_STAT"] = "Failed"
             self.dutFailed += 1
             if not HARD_BIN in self.hbinDict: self.hbinDict[HARD_BIN] = [str(HARD_BIN), "F"]
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "F"]
                     
         else:
             # no pass/fail info
-            tmpDUT["PART_FLG"] = ""
+            tmpDUT["PART_STAT"] = "None"
             if not HARD_BIN in self.hbinDict: self.hbinDict[HARD_BIN] = [str(HARD_BIN), "U"]
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "U"]
             
@@ -517,16 +520,16 @@ class stdfDataRetriever:
     
     def __init__(self, fileHandle, QSignal=None, flag=None):
         self.error = None
-        sys.excepthook = self.onException
-        catch_thread_process_exceptions()
+        sys.excepthook = self.onProcessException
+        th.excepthook = self.onThreadException
         
         fileSize = getFileSize(fileHandle)        # read file size may need to seek position (gz), do it first in case mess with parser
-        useThread = (fileSize <= 15*2**20)        # choose different parsing option based on the file size, for file larger than 15M+, process will be faster
-        if useThread: 
+        self.useThread = (fileSize <= 15*2**20)        # choose different parsing option based on the file size, for file larger than 15M+, process will be faster
+        if self.useThread: 
             from queue import Queue
             self.q = Queue(0)
             # if the file is small, use thread for efficiency
-            task = Thread(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
+            task = th.Thread(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
         else:
             from multiprocessing import Queue
             self.q = Queue(0)
@@ -537,9 +540,9 @@ class stdfDataRetriever:
             task.start()
             # analyze & store data from queue
             self.summarizer = stdfSummarizer(QSignal=QSignal, flag=flag, q=self.q, fileSize=fileSize)
-            if not useThread: task.terminate()
+            if not self.useThread: task.terminate()
             task.join()
-            self.checkError()
+            self.checkError(task)
         except:
             raise
             
@@ -548,10 +551,21 @@ class stdfDataRetriever:
         return self.summarizer
     
     
-    def onException(self, eT, eV, tb):
+    def onProcessException(self, eT, eV, tb):
         self.error = eT(eV)
         
         
-    def checkError(self):
-        if self.error:
-            raise self.error
+    def onThreadException(self, hookArgs):
+        eT = hookArgs.exc_type
+        eV = hookArgs.exc_value
+        self.error = eT(eV)
+        
+        
+    def checkError(self, process_task):
+        if self.useThread:
+            if self.error:
+                raise self.error
+        else:
+            if process_task.exception:
+                eT, eV = process_task.exception
+                raise eT(eV)
