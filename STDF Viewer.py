@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Feb 16 2021
+# Last Modified: Wed Feb 17 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import io, os, sys, gzip, bz2, traceback, toml
+import io, os, sys, gzip, bz2, traceback, toml, logging
 import numpy as np
 import multiprocessing
 from enum import IntEnum
@@ -66,14 +66,25 @@ if hasattr(QtCore.Qt, 'AA_UseHighDpiPixmaps'):
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     
 # save config path to sys
+rootFolder = os.path.dirname(sys.argv[0])
 base = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-setattr(sys, "CONFIG_PATH", os.path.join(os.path.dirname(sys.argv[0]), base + ".config"))
+setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
 # setting attr to human string
 settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
                    ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
                    ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
+
+#-------------------------
+logger = logging.getLogger("STDF Viewer")
+logger.setLevel(logging.WARNING)
+logPath = os.path.join(rootFolder, "logs", f"{base}.log")
+os.makedirs(os.path.dirname(logPath), exist_ok=True)
+logFD = logging.FileHandler(logPath, mode="a+")
+logFD.setFormatter(logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s'))
+logger.addHandler(logFD)
+
 
 def calc_cpk(L, H, data):
     sdev = np.std(data)
@@ -738,12 +749,11 @@ class MyWindow(QtWidgets.QMainWindow):
         RecordParser.endian = endian    # specify the parse endian
         testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle, failCheck=True)
         
-        try:
-            for stat in map(isPass, testDict["FlagList"]):
-                if stat == False:
-                    return "testFailed"     # no error indicates False is found, aka, test failed
-        except ValueError:
-            # if the test passed, check if cpk is lower than the threshold
+        for stat in map(isPass, testDict["FlagList"]):
+            if stat == False:
+                return "testFailed"
+        else:
+            # if all tests passed, check if cpk is lower than the threshold
             _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
             if cpk != np.nan:
                 # check cpk only if it's valid
@@ -979,6 +989,7 @@ class MyWindow(QtWidgets.QMainWindow):
             calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
             return calculatedIndex
     
+        self.updateStatus("Generating images...")
         # generate drawings in trend , histo and bin, but bin doesn't require test items selection
         if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and selTestNums != None):
             if tabType == tab.Bin:
@@ -999,7 +1010,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         calIndex = calculateCanvasIndex(test_num, site, canvasPriorityDict)
                         # draw
                         self.genPlot(site, test_num, tabType, updateTab=True, insertIndex=calIndex)
-            
+            self.updateStatus("")
         # remaining cases are: no test items in tab trend, histo, wafer
         else:
             # when no test item is selected, clear trend, histo & wafer tab content
@@ -1311,7 +1322,6 @@ class MyWindow(QtWidgets.QMainWindow):
                 
     
     def genPlot(self, site, test_num, tabType, **kargs):
-        self.updateStatus("Generating images...")
         # create fig & canvas
         figsize = (9, 9) if tabType == tab.Wafer else (9, 4) 
         fig = plt.Figure(figsize=figsize)
@@ -1581,9 +1591,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=-100)
             # legend
             ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(-0.1, -0.02, 1.2, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
-            
-        self.updateStatus("")
-        
+                    
         if "exportImg" in kargs and kargs["exportImg"] == True:
             imgData = io.BytesIO()
             fig.savefig(imgData, format="png", dpi=200, bbox_inches="tight")
@@ -1676,14 +1684,20 @@ class MyWindow(QtWidgets.QMainWindow):
     
     @Slot(str, bool, bool, bool)
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
-        self.statusBar().showMessage(new_msg)
-        if info: 
-            QtWidgets.QMessageBox.information(None, "Info", new_msg)
-        elif warning: 
-            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
-        elif error:
-            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
-        QApplication.processEvents()
+        try:
+            self.statusBar().showMessage(new_msg)
+            if info: 
+                QtWidgets.QMessageBox.information(None, "Info", new_msg)
+            elif warning: 
+                QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+                logger.warning(new_msg)
+            elif error:
+                QtWidgets.QMessageBox.critical(None, "Error", new_msg)
+                sys.exit()
+            QApplication.processEvents()
+        except:
+            logger.exception("Error occurred when updating status")
+            sys.exit()
         
     
     def eventFilter(self, object, event):
@@ -1708,7 +1722,8 @@ class MyWindow(QtWidgets.QMainWindow):
       
         
     def onException(self, errorType, errorValue, tb):
-        errMsg = traceback.format_exception(errorType, errorValue, tb)
+        logger.error("Uncaught Error occurred", exc_info=(errorType, errorValue, tb))
+        errMsg = traceback.format_exception(errorType, errorValue, tb, limit=0)
         self.updateStatus("\n".join(errMsg), False, False, True)
     
     
