@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_dutDataUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -30,6 +31,24 @@ class Ui_dutData(object):
         self.save.setFont(font)
         self.save.setStyleSheet("QPushButton {\n"
 "color: white;\n"
+"background-color: rgb(0, 100, 200); \n"
+"border: 1px solid rgb(0, 100, 200); \n"
+"border-radius: 5px;}\n"
+"\n"
+"QPushButton:pressed {\n"
+"background-color: rgb(0, 50, 100); \n"
+"border: 1px solid rgb(0, 50, 100);}")
+        self.save.setObjectName("save")
+        self.horizontalLayout.addWidget(self.save)
+        self.save_xlsx = QtWidgets.QPushButton(dutData)
+        self.save_xlsx.setMinimumSize(QtCore.QSize(0, 25))
+        font = QtGui.QFont()
+        font.setFamily("Tahoma")
+        font.setBold(True)
+        font.setWeight(75)
+        self.save_xlsx.setFont(font)
+        self.save_xlsx.setStyleSheet("QPushButton {\n"
+"color: white;\n"
 "background-color: rgb(0, 120, 0); \n"
 "border: 1px solid rgb(0, 120, 0); \n"
 "border-radius: 5px;}\n"
@@ -37,8 +56,8 @@ class Ui_dutData(object):
 "QPushButton:pressed {\n"
 "background-color: rgb(0, 50, 0); \n"
 "border: 1px solid rgb(0, 50, 0);}")
-        self.save.setObjectName("save")
-        self.horizontalLayout.addWidget(self.save)
+        self.save_xlsx.setObjectName("save_xlsx")
+        self.horizontalLayout.addWidget(self.save_xlsx)
         self.close = QtWidgets.QPushButton(dutData)
         self.close.setMinimumSize(QtCore.QSize(0, 25))
         font = QtGui.QFont()
@@ -66,4 +85,5 @@ class Ui_dutData(object):
         _translate = QtCore.QCoreApplication.translate
         dutData.setWindowTitle(_translate("dutData", "STDF Viewer - DUT Data Table"))
         self.save.setText(_translate("dutData", "Save to CSV"))
+        self.save_xlsx.setText(_translate("dutData", "Save to XLSX"))
         self.close.setText(_translate("dutData", "Close"))

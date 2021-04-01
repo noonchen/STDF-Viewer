@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue Feb 16 2021
+# Last Modified: Wed Mar 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -73,7 +73,7 @@ class FailMarker(QtWidgets.QWidget):
             qitem = self.sim.item(i)
             test_num = int(qitem.text().split("\t")[0])
             
-            status = self.parent.isTestFail(test_num, -1)
+            status = self.parent.isTestFail(test_num)
             if status == "testFailed":
                 failCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
