@@ -17,11 +17,10 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-import sys
+# import sys
 
-from deps.pystdf import TableTemplate
-
-import pdb
+# from . import TableTemplate
+# import pdb
 
 logicalTypeMap = {
   "C1": "Char",
@@ -73,19 +72,12 @@ class RecordHeader:
   def __repr__(self):
     return "<STDF Header, REC_TYP=%d REC_SUB=%d REC_LEN=%d>" % (self.typ, self.sub, self.len) 
 
-class RecordType(TableTemplate):
+class RecordType:
   def __init__(self):
-    # columnNames: the list of data names in a record, e.g.: [CPU_TYP, ...]
-    # columntypes: the list of data types in a record, e.g.: [U1, ...]
-    TableTemplate.__init__(self, 
-      [name for name, stdfType in self.fieldMap], 
-      [stdfToLogicalType(stdfTyp) for name, stdfTyp in self.fieldMap])
-  
-class UnknownRecord(TableTemplate):
-  def __init__(self, rec_typ, rec_sub):
-    TableTemplate.__init__(self, [], [], 'UnknownRecord')
-    self.rec_typ = rec_typ
-    self.rec_sub = rec_sub
+    pass
+    
+  def header(self):
+    return (self.typ << 8) | self.sub
 
 class EofException(Exception): pass
 

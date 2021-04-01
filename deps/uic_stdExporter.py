@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Feb 15 2021
+# Last Modified: Thu Apr 01 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,6 +24,8 @@
 
 
 
+import enum
+from operator import truediv
 import re
 import os
 # import io
@@ -89,11 +91,11 @@ class signals(QtCore.QObject):
     # get close signal
     closeSignal = Signal(bool)
     # signals from report generation thread for requesting data
-    prepareDataSignal = Signal(int, int)    # site, test_num
-    retrieveImageSignal = Signal(int, int, int)     # site, test_num, chartType
+    prepareDataSignal = Signal(int, int, int)    # head, site, test_num
+    retrieveImageSignal = Signal(int, int, int, int)     # head, site, test_num, chartType
     retrieveDataListSignal = Signal(int, dict)      # chartType, {site, test_num} / {site, bin} / {site, test_num, RawData}
     retrieveTableDataSignal = Signal(int)           # FileInfo table
-    retrieveDutSummarySignal = Signal(list, dict)   # selected sites, {test_num}, get dut info or dut test data
+    retrieveDutSummarySignal = Signal(list, list, dict)   # selected heads, selected sites, {test_num}, get dut info or dut test data
     # signals for sending data to qthread
     # sendImage = Signal(io.BytesIO)
     # sendDataList = Signal(list)
@@ -106,7 +108,7 @@ class reportGenerator(QtCore.QObject):
         self.forceQuit = False
         self.mutex = mutex
         self.condWait = conditionWait
-        self.contL, self.numL, self.siteL, self.path, self.numWafer, self.totalLoopCnt = settings
+        self.contL, self.numL, self.headL, self.siteL, self.path, self.numWafer, self.totalLoopCnt = settings
         # for sharing data from gui thread
         self.channel = channel
         # signals for updating progress bar dialog
@@ -131,11 +133,11 @@ class reportGenerator(QtCore.QObject):
     #     self.tmp_dataList = datalist
     
     
-    def waitForImage(self, site, test_num, chartType):
+    def waitForImage(self, head, site, test_num, chartType):
         # print_thread("waitForImage")
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveImageSignal.emit(site, test_num, chartType)
+        self.retrieveImageSignal.emit(head, site, test_num, chartType)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         # by the time the thread is waked, the data is already published in imageChannel in mainthread
@@ -143,6 +145,7 @@ class reportGenerator(QtCore.QObject):
             
             
     def waitForDataList(self, chartType, kargs):
+        #FIXME
         # print_thread("waitForDataList")
         # pause thread until the data is received from gui thread
         self.mutex.lock()        
@@ -155,6 +158,7 @@ class reportGenerator(QtCore.QObject):
     
     
     def waitForTableData(self, conType):
+        #FIXME
         self.mutex.lock()        
         self.retrieveTableDataSignal.emit(conType)
 
@@ -163,9 +167,10 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel        
     
     
-    def waitForDutSummary(self, selectedSites, kargs):
+    def waitForDutSummary(self, selectedHeads, selectedSites, kargs):
+        #FIXME
         self.mutex.lock()        
-        self.retrieveDutSummarySignal.emit(selectedSites, kargs)
+        self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, kargs)
 
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
@@ -175,25 +180,26 @@ class reportGenerator(QtCore.QObject):
     @Slot()
     def generate_report(self):
         # print_thread("generate_report")
-        def write_row(sheet, row, scol, dataL):
+        def write_row(sheet, row, scol, dataL, format):
             # write as number in default, otherwise as string
             for i in range(len(dataL)):
                 try:
-                    sheet.write_number(row, scol+i, float(dataL[i]))
+                    sheet.write_number(row, scol+i, float(dataL[i]), format)
                 except (TypeError, ValueError):
-                    sheet.write_string(row, scol+i, dataL[i])
+                    sheet.write_string(row, scol+i, dataL[i], format)
                     
-        def write_col(sheet, row, scol, dataL):
+        def write_col(sheet, row, scol, dataL, format):
             # write as number in default, otherwise as string
             for i in range(len(dataL)):
                 try:
-                    sheet.write_number(row+i, scol, float(dataL[i]))
+                    sheet.write_number(row+i, scol, float(dataL[i]), format)
                 except (TypeError, ValueError):
-                    sheet.write_string(row+i, scol, dataL[i])                    
+                    sheet.write_string(row+i, scol, dataL[i], format)                    
                     
         sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
         
         with Workbook(self.path) as wb:
+            centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             header_stat = ["Test Number / Site", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Count", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
             imageHeight_in_rowHeight = 20
             x_scale = imageHeight_in_rowHeight * 0.21 / 4      # default cell height = 0.21 inches, image height = 4 inches
@@ -206,55 +212,63 @@ class reportGenerator(QtCore.QObject):
                         TrendSheet = wb.add_worksheet("Trend Chart")
                         currentRow = 0
                         startCol = 0
+                        col_width = [len(s) for s in header_stat]
                         for test_num in self.numL:
                             for site in self.siteL:
-                                if self.forceQuit: return
-                                # self.ExportWind.parent.prepareData([test_num], [site])
-                                self.prepareDataSignal.emit(site, test_num)
-                                # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Trend, exportImg=True)
-                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
-                                image_io = self.waitForImage(site, test_num, tab.Trend)
-                                dataList = self.waitForDataList(tab.Trend, {"site": site, "test_num": test_num})
-                                rawDataList = self.waitForDataList(tab.Trend, {"site": site, "test_num": test_num, "RawData": True})
-                                TrendSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                                currentRow += imageHeight_in_rowHeight
-                                TrendSheet.write_row(currentRow, startCol, header_stat)
-                                currentRow += 1
-                                write_row(TrendSheet, currentRow, startCol, dataList)
-                                # Add raw data source of trend chart below
-                                currentRow += 1
-                                TrendSheet.write_row(currentRow, startCol, ["Raw data:"])
-                                currentRow += 1
-                                write_row(TrendSheet, currentRow, startCol, [row[6] for row in rawDataList])   # data in index 6
-                                currentRow += 2
-                                loopCnt += 1
-                                sendProgress(loopCnt)
+                                for head in self.headL:
+                                    if self.forceQuit: return
+                                    # self.ExportWind.parent.prepareData([test_num], [site])
+                                    self.prepareDataSignal.emit(head, site, test_num)
+                                    # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Trend, exportImg=True)
+                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
+                                    image_io = self.waitForImage(head, site, test_num, tab.Trend)
+                                    dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
+                                    rawDataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num, "RawData": True})
+                                    TrendSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                    currentRow += imageHeight_in_rowHeight
+                                    TrendSheet.write_row(currentRow, startCol, header_stat, centerStyle)
+                                    currentRow += 1
+                                    write_row(TrendSheet, currentRow, startCol, dataList, centerStyle)
+                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                    # Add raw data source of trend chart below
+                                    currentRow += 1
+                                    TrendSheet.write_row(currentRow, startCol, ["Raw data:"])
+                                    currentRow += 1
+                                    write_row(TrendSheet, currentRow, startCol, [row[6] for row in rawDataList], centerStyle)   # data in index 6
+                                    currentRow += 2
+                                    loopCnt += 1
+                                    sendProgress(loopCnt)
                             currentRow += 2     # add gap between different test items
+                        [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                                                         
                     elif cont == tab.Histo:
                         # Sheet for histogram plot and test data
                         HistoSheet = wb.add_worksheet("Histogram")
                         currentRow = 0
                         startCol = 0
+                        col_width = [len(s) for s in header_stat]
                         for test_num in self.numL:
                             for site in self.siteL:
-                                if self.forceQuit: return
-                                # self.ExportWind.parent.prepareData([test_num], [site])
-                                self.prepareDataSignal.emit(site, test_num)
-                                # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Histo, exportImg=True)
-                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Histo, site=site, test_num=test_num)
-                                image_io = self.waitForImage(site, test_num, tab.Histo)
-                                dataList = self.waitForDataList(tab.Histo, {"site": site, "test_num": test_num})                                
-                                HistoSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                                currentRow += imageHeight_in_rowHeight
-                                HistoSheet.write_row(currentRow, startCol, header_stat)
-                                currentRow += 1                                     
-                                write_row(HistoSheet, currentRow, startCol, dataList)
-                                # HistoSheet.write_row(currentRow, startCol, dataList)
-                                currentRow += 2
-                                loopCnt += 1
-                                sendProgress(loopCnt)
+                                for head in self.headL:
+                                    if self.forceQuit: return
+                                    # self.ExportWind.parent.prepareData([test_num], [site])
+                                    self.prepareDataSignal.emit(head, site, test_num)
+                                    # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Histo, exportImg=True)
+                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Histo, site=site, test_num=test_num)
+                                    image_io = self.waitForImage(head, site, test_num, tab.Histo)
+                                    dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "test_num": test_num})                                
+                                    HistoSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                    currentRow += imageHeight_in_rowHeight
+                                    HistoSheet.write_row(currentRow, startCol, header_stat, centerStyle)
+                                    currentRow += 1                                     
+                                    write_row(HistoSheet, currentRow, startCol, dataList, centerStyle)
+                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                    # HistoSheet.write_row(currentRow, startCol, dataList)
+                                    currentRow += 2
+                                    loopCnt += 1
+                                    sendProgress(loopCnt)
                             currentRow += 2     # add gap between different test items                            
+                        [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                         
                     elif cont == tab.Bin:
                         # Sheet for bin distribution
@@ -262,113 +276,133 @@ class reportGenerator(QtCore.QObject):
                         currentRow = 0
                         startCol = 0
                         extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]
+                        col_width = []
                         for site in self.siteL:
-                            if self.forceQuit: return
-                            # image_io = self.ExportWind.parent.genPlot(None, None, site, 0, tab.Bin, exportImg=True)
-                            image_io = self.waitForImage(site=site, test_num=0, chartType=tab.Bin)
-                            BinSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                            currentRow += imageHeight_in_rowHeight
-                            # dataList_HB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="HBIN", site=site))
-                            dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
-                            BinSheet.write_row(currentRow, startCol, dataList_HB)
-                            currentRow += 1
-                            # dataList_SB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="SBIN", site=site))
-                            dataList_SB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "SBIN"}))
-                            BinSheet.write_row(currentRow, startCol, dataList_SB)
-                            currentRow += 1
-                            loopCnt += 1
-                            sendProgress(loopCnt)
+                            for head in self.headL:
+                                if self.forceQuit: return
+                                # image_io = self.ExportWind.parent.genPlot(None, None, site, 0, tab.Bin, exportImg=True)
+                                image_io = self.waitForImage(head=head, site=site, test_num=0, chartType=tab.Bin)
+                                BinSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                currentRow += imageHeight_in_rowHeight
+                                # dataList_HB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="HBIN", site=site))
+                                dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
+                                BinSheet.write_row(currentRow, startCol, dataList_HB, centerStyle)
+                                col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
+                                currentRow += 1
+                                # dataList_SB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="SBIN", site=site))
+                                dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
+                                BinSheet.write_row(currentRow, startCol, dataList_SB, centerStyle)
+                                col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
+                                currentRow += 3
+                                loopCnt += 1
+                                sendProgress(loopCnt)
+                        [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                         
                     elif cont == tab.Stat:
                         # Sheet for statistics of test items, e.g. cpk, mean, etc.
                         StatSheet = wb.add_worksheet("Test Statistics")
                         currentRow = 0
                         startCol = 0
-                        StatSheet.write_row(currentRow, startCol, header_stat)
+                        StatSheet.write_row(currentRow, startCol, header_stat, centerStyle)
+                        col_width = [len(s) for s in header_stat]
                         currentRow += 1
                         for test_num in self.numL:
                             for site in self.siteL:
-                                if self.forceQuit: return
-                                # self.ExportWind.parent.prepareData([test_num], [site])
-                                self.prepareDataSignal.emit(site, test_num)
-                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
-                                dataList = self.waitForDataList(tab.Trend, {"site": site, "test_num": test_num})
-                                write_row(StatSheet, currentRow, startCol, dataList)
-                                # StatSheet.write_row(currentRow, startCol, dataList)
-                                currentRow += 1
-                                loopCnt += 1
-                                sendProgress(loopCnt)
+                                for head in self.headL:
+                                    if self.forceQuit: return
+                                    # self.ExportWind.parent.prepareData([test_num], [site])
+                                    self.prepareDataSignal.emit(head, site, test_num)
+                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
+                                    dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
+                                    write_row(StatSheet, currentRow, startCol, dataList, centerStyle)
+                                    # StatSheet.write_row(currentRow, startCol, dataList)
+                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                    currentRow += 1
+                                    loopCnt += 1
+                                    sendProgress(loopCnt)
                             currentRow += 1     # add gap between different test items
+                        [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
 
                     elif cont == tab.FileInfo:
                         # Sheet for file information
                         FileInfoSheet = wb.add_worksheet("File Info")
                         headerLabels = ["Property Name", "Value"]
+                        col_width = [len(s) for s in headerLabels]
                         
                         currentRow = 0
                         startCol = 0
-                        FileInfoSheet.write_row(currentRow, startCol, headerLabels)
+                        FileInfoSheet.write_row(currentRow, startCol, headerLabels, centerStyle)
                         currentRow += 1
                         data = self.waitForTableData(cont)   
                                              
                         for row in data:
                             if self.forceQuit: return
-                            write_row(FileInfoSheet, currentRow, startCol, row)
+                            write_row(FileInfoSheet, currentRow, startCol, row, centerStyle)
+                            col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
                             currentRow += 1
                             
                         loopCnt += 1
                         sendProgress(loopCnt)
+                        [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                             
                     elif cont == tab.DUT:
                         # Sheet for DUT summary & Test raw data
                         DutSheet = wb.add_worksheet("DUT Summary")
-                        headerLabelList = [["", "Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
+                        headerLabelList = [["", "Part ID", "Test Head", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
                                            ["Test Number"],
                                            ["Upper Limit"],
                                            ["Lower Limit"],
                                            ["Unit"]]
-                                                
+                        col_width = [len(s) for s in headerLabelList[0]]
+                        col_width[0] = max([len(row[0]) for row in headerLabelList])
                         currentRow = 0
                         startCol = 0
                         # write headers
                         for h in headerLabelList:
-                            DutSheet.write_row(currentRow, startCol, h)
+                            DutSheet.write_row(currentRow, startCol, h, centerStyle)
                             currentRow += 1
                         # write DUT info
-                        DutInfoList = self.waitForDutSummary(self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
+                        DutInfoList = self.waitForDutSummary(self.headL, self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
                         for count, infoRow in enumerate(DutInfoList):
-                            write_row(DutSheet, currentRow, startCol, ["#%d" % (count+1)] + infoRow)
+                            L = ["#%d" % (count+1)] + infoRow
+                            write_row(DutSheet, currentRow, startCol, L, centerStyle)
+                            col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(L)]
                             currentRow += 1                            
+                        [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                         #append test raw data to the last column
                         startRow = 0
                         currentCol = len(headerLabelList[0])
                         for test_num in self.numL:
                             if self.forceQuit: return
-                            DutDataList = self.waitForDutSummary(self.siteL, {"test_num": test_num})
-                            write_col(DutSheet, startRow, currentCol, DutDataList)
+                            max_width = 0
+                            DutDataList = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num})
+                            write_col(DutSheet, startRow, currentCol, DutDataList, centerStyle)
+                            max_width = max([len(s) for s in DutDataList])
+                            DutSheet.set_column(currentCol, currentCol, max_width*1.1)
                             currentCol += 1
                             loopCnt += 1
                             sendProgress(loopCnt)
                             
                     elif cont == tab.Wafer:
-                        imageHeight_in_rowHeight = 45
-                        x_scale = imageHeight_in_rowHeight * 0.21 / 9
+                        imageHeight_in_rowHeight = 50
+                        y_scale = imageHeight_in_rowHeight * 0.21 / 10
                         # Sheet for wafer map
                         WaferSheet = wb.add_worksheet("Wafer Map")
                         currentRow = 0
                         startCol = 0
                         for wafer in self.numWafer:
                             for site in self.siteL:
-                                if self.forceQuit: return
-                                image_io = self.waitForImage(site=site, test_num=wafer, chartType=tab.Wafer)
-                                WaferSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                                currentRow += imageHeight_in_rowHeight + 1
-                                # dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
-                                # WaferSheet.write_row(currentRow, startCol, dataList_HB)
-                                # currentRow += 1
-                                loopCnt += 1
-                                sendProgress(loopCnt)
-                            currentRow += 1
+                                for head in self.headL:
+                                    if self.forceQuit: return
+                                    image_io = self.waitForImage(head=head, site=site, test_num=wafer, chartType=tab.Wafer)
+                                    WaferSheet.insert_image(currentRow, startCol, "", {'x_scale': y_scale, 'y_scale': y_scale, 'image_data': image_io})
+                                    currentRow += imageHeight_in_rowHeight + 1
+                                    # dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
+                                    # WaferSheet.write_row(currentRow, startCol, dataList_HB)
+                                    # currentRow += 1
+                                    loopCnt += 1
+                                    sendProgress(loopCnt)
+                            currentRow += 3
                                                                                              
         self.closeSignal.emit(True)
         
@@ -401,7 +435,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.rg = reportGenerator(self.signals, 
                                   self.mutex, 
                                   self.condWait, 
-                                  (parent.contL, parent.numL, parent.siteL, parent.path, parent.numWafer, parent.totalLoopCnt),
+                                  (parent.contL, parent.numL, parent.headL, parent.siteL, parent.path, parent.numWafer, parent.totalLoopCnt),
                                   self.channel)
         # send data from parent to qthread, bind before moveToThread
         # -- Deprecated --
@@ -446,14 +480,14 @@ class progressDisplayer(QtWidgets.QDialog):
             self.close()
 
 
-    @Slot(int, int)
-    def prepareData(self, site, test_num):
-        # print_thread("prepareData")
-        self.parent().parent.prepareData([test_num], [site])
-    
-    
     @Slot(int, int, int)
-    def getImageFromParentMethod(self, site, test_num, chartType):
+    def prepareData(self, head, site, test_num):
+        # print_thread("prepareData")
+        self.parent().parent.prepareData([test_num], [site], [head])
+    
+    
+    @Slot(int, int, int, int)
+    def getImageFromParentMethod(self, head, site, test_num, chartType):
         '''
         Lessons:
         1. Never access GUI objects from another thread, it will raise a segfault which is nearly not debuggable.
@@ -462,7 +496,7 @@ class progressDisplayer(QtWidgets.QDialog):
         3. the mutex.lock() is used for preventing wakeAll() is called before wait().
         '''
         # print_thread("getImageFromParentMethod")
-        self.channel.imageChannel = self.parent().parent.genPlot(site, test_num, chartType, exportImg=True)
+        self.channel.imageChannel = self.parent().parent.genPlot(head, site, test_num, chartType, exportImg=True)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         # self.signals.sendImage.emit(imageIO)
         self.condWait.wakeAll()
@@ -501,9 +535,9 @@ class progressDisplayer(QtWidgets.QDialog):
         self.mutex.unlock()              
         
         
-    @Slot(list, dict)
-    def getDutSummaryFromParent(self, seletedSites, kargs):
-        self.channel.dataListChannel = self.parent().parent.prepareDataForDUTSummary(seletedSites, **kargs)
+    @Slot(list, list, dict)
+    def getDutSummaryFromParent(self, selectedHeads, seletedSites, kargs):
+        self.channel.dataListChannel = self.parent().parent.prepareDataForDUTSummary(selectedHeads, seletedSites, **kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         # self.signals.sendDataList.emit(dataList)
         self.condWait.wakeAll()
@@ -521,7 +555,8 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI = Ui_exportUI()
         self.exportUI.setupUi(self)
         self.parent = parent
-        # store site cb objects
+        # store head, site cb objects
+        self.head_cb_dict = {}
         self.site_cb_dict = {}
         self.AllTestItems = None
         self.remainTestItems = []
@@ -631,15 +666,25 @@ class stdfExporter(QtWidgets.QDialog):
     
     
     def initSiteCBs(self):
+        # add & enable checkboxes for each heads
+        for i, headNum in enumerate(self.parent.availableHeads):
+            headName = "Head %d" % headNum
+            self.head_cb_dict[headNum] = QtWidgets.QCheckBox(self.exportUI.site_selection)
+            self.head_cb_dict[headNum].setObjectName(headName)
+            self.head_cb_dict[headNum].setText(headName)
+            row = i
+            col = 0
+            self.exportUI.gridLayout_head.addWidget(self.head_cb_dict[headNum], row, col)
+                    
         # add & enable checkboxes for each sites
-        for siteNum in [i for i in self.parent.dataSrc.keys() if i != -1]:
+        for siteNum in self.parent.availableSites:
             siteName = "Site %d" % siteNum
             self.site_cb_dict[siteNum] = QtWidgets.QCheckBox(self.exportUI.site_selection)
             self.site_cb_dict[siteNum].setObjectName(siteName)
             self.site_cb_dict[siteNum].setText(siteName)
             row = 1 + siteNum//8
             col = siteNum % 8
-            self.exportUI.gridLayout.addWidget(self.site_cb_dict[siteNum], row, col)
+            self.exportUI.gridLayout_site.addWidget(self.site_cb_dict[siteNum], row, col)
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
@@ -651,18 +696,22 @@ class stdfExporter(QtWidgets.QDialog):
             cb.setChecked(on)
        
        
-    def getSites(self):
+    def getHeads_Sites(self):
+        checkedHeads = []
         checkedSites = []
         
         if self.exportUI.All.isChecked():
             checkedSites.append(-1)
-        
-        for site_num, cb in self.site_cb_dict.items():
-            if cb.isChecked():
+            
+        for head_num, cb_h in self.head_cb_dict.items():
+            if cb_h.isChecked():
+                checkedHeads.append(head_num)        
+        for site_num, cb_s in self.site_cb_dict.items():
+            if cb_s.isChecked():
                 checkedSites.append(site_num)
         
         checkedSites.sort()
-        return checkedSites
+        return [checkedHeads, checkedSites]
     
     
     def getSelectedContents(self):
@@ -695,15 +744,16 @@ class stdfExporter(QtWidgets.QDialog):
   
     def check_inputs(self):
         self.numL = self.getExportTestNums()
-        self.siteL = self.getSites()
+        self.headL, self.siteL = self.getHeads_Sites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()
         self.numWafer = sorted([i for i in self.parent.dataInfo.waferDict.keys()])
        
-        if len(self.numL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path == None:
+        if len(self.numL) == 0 or len(self.headL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path == None:
             # input not complete
             message = ""
             if len(self.numL) == 0: message += "No test item is selected\n\n"
+            if len(self.headL) == 0: message += "No head is selected\n\n"
             if len(self.siteL) == 0: message += "No site is selected\n\n"
             if len(self.contL) == 0: message += "No content is selected\n\n"
             if self.path == None: message += "Output directory is invalid, not writable or not existed\n"
@@ -718,15 +768,15 @@ class stdfExporter(QtWidgets.QDialog):
             self.totalLoopCnt = 0
             for cont in self.contL:
                 if cont == tab.Trend or cont == tab.Histo or cont == tab.Stat:
-                    self.totalLoopCnt += len(self.numL) * len(self.siteL)
+                    self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
                 elif cont == tab.Bin:
-                    self.totalLoopCnt += len(self.siteL)
+                    self.totalLoopCnt += len(self.siteL) * len(self.headL)
                 elif cont == tab.FileInfo:
                     self.totalLoopCnt += 1
                 elif cont == tab.DUT:
                     self.totalLoopCnt += len(self.numL)
                 elif cont == tab.Wafer:
-                    self.totalLoopCnt += len(self.numWafer) * len(self.siteL)
+                    self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
                 elif False:
                     # Update loopcnt if more contents are added
                     # self.totalLoopCnt += len(self.siteL)
@@ -736,18 +786,49 @@ class stdfExporter(QtWidgets.QDialog):
             # self.generate_report()
             if self.pd.closeEventByThread:
                 # end normally
-                msg = "Export completed! Report path:"
+                title = "Export completed!"
+                msg = "Report path:"
             else:
                 # aborted
-                msg = "Process Aborted! Partial report is saved in:"
+                title = "Process Aborted!"
+                msg = "Partial report is saved in:"
                 
-            close = QtWidgets.QMessageBox.information(None, "Export Status", 
-                                                    '%s\n\n%s\n'%(msg, self.path), 
-                                                    QtWidgets.QMessageBox.Ok, 
-                                                    defaultButton=QtWidgets.QMessageBox.Ok)
-            # if close == QtWidgets.QMessageBox.No: self.close()
+            msgbox = QtWidgets.QMessageBox(None)
+            msgbox.setText(title)
+            msgbox.setInformativeText('%s\n\n%s\n'%(msg, self.path))
+            msgbox.setIcon(QtWidgets.QMessageBox.Information)
+            revealBtn = msgbox.addButton(" Reveal in folder ", QtWidgets.QMessageBox.ApplyRole)
+            openBtn = msgbox.addButton("Open...", QtWidgets.QMessageBox.ActionRole)
+            okBtn = msgbox.addButton("OK", QtWidgets.QMessageBox.YesRole)
+            msgbox.setDefaultButton(okBtn)
+            msgbox.exec_()
+            if msgbox.clickedButton() == revealBtn:
+                self.revealFile(self.path)
+            elif msgbox.clickedButton() == openBtn:
+                self.openFileInOS(self.path)
+                
+                
+    def openFileInOS(self, filepath):
+        # https://stackoverflow.com/a/435669
+        import subprocess, os, platform
+        if platform.system() == 'Darwin':       # macOS
+            subprocess.call(('open', filepath))
+        elif platform.system() == 'Windows':    # Windows
+            os.startfile(filepath)
+        else:                                   # linux variants
+            subprocess.call(('xdg-open', filepath))        
         
-    
+        
+    def revealFile(self, filepath):
+        import subprocess, os, platform
+        if platform.system() == 'Darwin':       # macOS
+            subprocess.call(('open', '-R', filepath))
+        elif platform.system() == 'Windows':    # Windows
+            subprocess.Popen(f'explorer /select,{filepath}')
+        else:                                   # linux variants
+            subprocess.call(('xdg-open', os.path.dirname(filepath)))
+            
+                
     def closeEvent(self, event):
         # close by clicking X
         # close = QtWidgets.QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)

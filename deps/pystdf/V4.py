@@ -105,11 +105,8 @@ kxTYPE  Array of data of the type specified.                 TYPE[]
 ======  ===================================================  ===================
 
 """
-import sys
-from deps.pystdf.Types import StdfRecordMeta, RecordType, stdfToLogicalType
-from deps.pystdf import TableTemplate
+from .Types import StdfRecordMeta, RecordType
 
-import pdb
 
 class Far(RecordType, metaclass=StdfRecordMeta):
   """

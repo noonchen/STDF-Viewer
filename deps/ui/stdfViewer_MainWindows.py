@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_MainWindows.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.2
 #
@@ -25,12 +26,12 @@ class Ui_MainWindow(object):
 "QScrollBar:vertical {\n"
 "border: 0px;\n"
 "background:transparent;\n"
-"width:3px;\n"
+"width:5px;\n"
 "margin: 0px 0px 0px 0px;\n"
 "}\n"
 " QScrollBar::handle:vertical {\n"
 "background: rgb(128, 128, 128);\n"
-"min-height: 0px;\n"
+"min-height: 10px;\n"
 "}\n"
 "\n"
 "QScrollBar::add-line:vertical {\n"
@@ -45,6 +46,29 @@ class Ui_MainWindow(object):
 "subcontrol-position: top;\n"
 "subcontrol-origin: margin;\n"
 "}\n"
+"QScrollBar:horizontal {\n"
+"border: 0px;\n"
+"background:transparent;\n"
+"height:5px;\n"
+"margin: 0px 0px 0px 0px;\n"
+"}\n"
+" QScrollBar::handle:horizontal {\n"
+"background: rgb(128, 128, 128);\n"
+"min-width: 10px;\n"
+"}\n"
+"\n"
+"QScrollBar::add-line:horizontal {\n"
+"background: transparent;\n"
+"height: 0px;\n"
+"subcontrol-position: right;\n"
+"subcontrol-origin: margin;\n"
+"}\n"
+"QScrollBar::sub-line:horizontal {\n"
+"background: transparent;\n"
+"height: 0 px;\n"
+"subcontrol-position: left;\n"
+"subcontrol-origin: margin;\n"
+"}\n"
 "QListView::item { height: 20px; }")
         MainWindow.setIconSize(QtCore.QSize(30, 30))
         self.centralwidget = QtWidgets.QWidget(MainWindow)
@@ -53,12 +77,13 @@ class Ui_MainWindow(object):
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.LR_splitter = QtWidgets.QSplitter(self.centralwidget)
         self.LR_splitter.setOrientation(QtCore.Qt.Horizontal)
+        self.LR_splitter.setOpaqueResize(False)
         self.LR_splitter.setHandleWidth(10)
-        self.LR_splitter.setChildrenCollapsible(False)
+        self.LR_splitter.setChildrenCollapsible(True)
         self.LR_splitter.setObjectName("LR_splitter")
         self.Selection_splitter = QtWidgets.QSplitter(self.LR_splitter)
         self.Selection_splitter.setOrientation(QtCore.Qt.Vertical)
-        self.Selection_splitter.setHandleWidth(5)
+        self.Selection_splitter.setHandleWidth(10)
         self.Selection_splitter.setChildrenCollapsible(False)
         self.Selection_splitter.setObjectName("Selection_splitter")
         self.Selection_stackedWidget = QtWidgets.QStackedWidget(self.Selection_splitter)
@@ -154,20 +179,22 @@ class Ui_MainWindow(object):
         self.verticalLayout_14.addWidget(self.WaferList)
         self.verticalLayout_15.addWidget(self.wafer_selection)
         self.Selection_stackedWidget.addWidget(self.CP_page)
-        self.site_selection = QtWidgets.QGroupBox(self.Selection_splitter)
-        self.site_selection.setEnabled(True)
+        self.site_head_selection = QtWidgets.QTabWidget(self.Selection_splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(10)
-        sizePolicy.setHeightForWidth(self.site_selection.sizePolicy().hasHeightForWidth())
-        self.site_selection.setSizePolicy(sizePolicy)
-        self.site_selection.setMaximumSize(QtCore.QSize(16777215, 81))
-        self.site_selection.setObjectName("site_selection")
-        self.horizontalLayout_2 = QtWidgets.QHBoxLayout(self.site_selection)
-        self.horizontalLayout_2.setContentsMargins(12, 12, 12, 12)
-        self.horizontalLayout_2.setSpacing(0)
-        self.horizontalLayout_2.setObjectName("horizontalLayout_2")
-        self.scrollArea_site_selection = QtWidgets.QScrollArea(self.site_selection)
+        sizePolicy.setHeightForWidth(self.site_head_selection.sizePolicy().hasHeightForWidth())
+        self.site_head_selection.setSizePolicy(sizePolicy)
+        self.site_head_selection.setMaximumSize(QtCore.QSize(16777215, 81))
+        self.site_head_selection.setTabShape(QtWidgets.QTabWidget.Triangular)
+        self.site_head_selection.setObjectName("site_head_selection")
+        self.site_selection_tab = QtWidgets.QWidget()
+        self.site_selection_tab.setObjectName("site_selection_tab")
+        self.horizontalLayout_site_sel = QtWidgets.QHBoxLayout(self.site_selection_tab)
+        self.horizontalLayout_site_sel.setContentsMargins(12, 12, 12, 12)
+        self.horizontalLayout_site_sel.setSpacing(0)
+        self.horizontalLayout_site_sel.setObjectName("horizontalLayout_site_sel")
+        self.scrollArea_site_selection = QtWidgets.QScrollArea(self.site_selection_tab)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -182,15 +209,15 @@ class Ui_MainWindow(object):
         self.scrollArea_site_selection.setWidgetResizable(True)
         self.scrollArea_site_selection.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
         self.scrollArea_site_selection.setObjectName("scrollArea_site_selection")
-        self.scrollAreaWidgetContents_3 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 297, 34))
+        self.site_selection_contents = QtWidgets.QWidget()
+        self.site_selection_contents.setGeometry(QtCore.QRect(0, 0, 297, 34))
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.scrollAreaWidgetContents_3.sizePolicy().hasHeightForWidth())
-        self.scrollAreaWidgetContents_3.setSizePolicy(sizePolicy)
-        self.scrollAreaWidgetContents_3.setObjectName("scrollAreaWidgetContents_3")
-        self.verticalLayout_7 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_3)
+        sizePolicy.setHeightForWidth(self.site_selection_contents.sizePolicy().hasHeightForWidth())
+        self.site_selection_contents.setSizePolicy(sizePolicy)
+        self.site_selection_contents.setObjectName("site_selection_contents")
+        self.verticalLayout_7 = QtWidgets.QVBoxLayout(self.site_selection_contents)
         self.verticalLayout_7.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_7.setSpacing(0)
         self.verticalLayout_7.setObjectName("verticalLayout_7")
@@ -201,11 +228,11 @@ class Ui_MainWindow(object):
         self.gridLayout_site_select.setContentsMargins(0, 0, 0, 0)
         self.gridLayout_site_select.setSpacing(10)
         self.gridLayout_site_select.setObjectName("gridLayout_site_select")
-        self.All = QtWidgets.QCheckBox(self.scrollAreaWidgetContents_3)
+        self.All = QtWidgets.QCheckBox(self.site_selection_contents)
         self.All.setChecked(True)
         self.All.setObjectName("All")
         self.gridLayout_site_select.addWidget(self.All, 0, 0, 1, 1)
-        self.checkAll = QtWidgets.QPushButton(self.scrollAreaWidgetContents_3)
+        self.checkAll = QtWidgets.QPushButton(self.site_selection_contents)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -215,7 +242,7 @@ class Ui_MainWindow(object):
         self.checkAll.setMaximumSize(QtCore.QSize(65, 16777215))
         self.checkAll.setObjectName("checkAll")
         self.gridLayout_site_select.addWidget(self.checkAll, 0, 1, 1, 1)
-        self.cancelAll = QtWidgets.QPushButton(self.scrollAreaWidgetContents_3)
+        self.cancelAll = QtWidgets.QPushButton(self.site_selection_contents)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -231,8 +258,34 @@ class Ui_MainWindow(object):
         self.verticalLayout_7.addLayout(self.horizontalLayout_site_hspacer)
         spacerItem1 = QtWidgets.QSpacerItem(20, 0, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
         self.verticalLayout_7.addItem(spacerItem1)
-        self.scrollArea_site_selection.setWidget(self.scrollAreaWidgetContents_3)
-        self.horizontalLayout_2.addWidget(self.scrollArea_site_selection)
+        self.scrollArea_site_selection.setWidget(self.site_selection_contents)
+        self.horizontalLayout_site_sel.addWidget(self.scrollArea_site_selection)
+        self.site_head_selection.addTab(self.site_selection_tab, "")
+        self.head_selection_tab = QtWidgets.QWidget()
+        self.head_selection_tab.setObjectName("head_selection_tab")
+        self.horizontalLayout_head_sel = QtWidgets.QHBoxLayout(self.head_selection_tab)
+        self.horizontalLayout_head_sel.setContentsMargins(12, 12, 12, 12)
+        self.horizontalLayout_head_sel.setSpacing(0)
+        self.horizontalLayout_head_sel.setObjectName("horizontalLayout_head_sel")
+        self.verticalLayout_header = QtWidgets.QVBoxLayout()
+        self.verticalLayout_header.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_header.setSpacing(0)
+        self.verticalLayout_header.setObjectName("verticalLayout_header")
+        self.horizontalLayout_head_hspacer = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_head_hspacer.setObjectName("horizontalLayout_head_hspacer")
+        self.gridLayout_head_select = QtWidgets.QGridLayout()
+        self.gridLayout_head_select.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
+        self.gridLayout_head_select.setContentsMargins(0, 0, 0, 0)
+        self.gridLayout_head_select.setSpacing(10)
+        self.gridLayout_head_select.setObjectName("gridLayout_head_select")
+        self.horizontalLayout_head_hspacer.addLayout(self.gridLayout_head_select)
+        spacerItem2 = QtWidgets.QSpacerItem(30, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        self.horizontalLayout_head_hspacer.addItem(spacerItem2)
+        self.verticalLayout_header.addLayout(self.horizontalLayout_head_hspacer)
+        spacerItem3 = QtWidgets.QSpacerItem(20, 0, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        self.verticalLayout_header.addItem(spacerItem3)
+        self.horizontalLayout_head_sel.addLayout(self.verticalLayout_header)
+        self.site_head_selection.addTab(self.head_selection_tab, "")
         self.Tab_Table_splitter = QtWidgets.QSplitter(self.LR_splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(3)
@@ -240,9 +293,9 @@ class Ui_MainWindow(object):
         sizePolicy.setHeightForWidth(self.Tab_Table_splitter.sizePolicy().hasHeightForWidth())
         self.Tab_Table_splitter.setSizePolicy(sizePolicy)
         self.Tab_Table_splitter.setOrientation(QtCore.Qt.Vertical)
-        self.Tab_Table_splitter.setOpaqueResize(True)
+        self.Tab_Table_splitter.setOpaqueResize(False)
         self.Tab_Table_splitter.setHandleWidth(5)
-        self.Tab_Table_splitter.setChildrenCollapsible(False)
+        self.Tab_Table_splitter.setChildrenCollapsible(True)
         self.Tab_Table_splitter.setObjectName("Tab_Table_splitter")
         self.tabControl = QtWidgets.QTabWidget(self.Tab_Table_splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -300,7 +353,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_11.addWidget(self.fileInfoTable)
         self.infoBox.addItem(self.fileInfoPage, "")
         self.dutInfoPage = QtWidgets.QWidget()
-        self.dutInfoPage.setGeometry(QtCore.QRect(0, 0, 100, 48))
+        self.dutInfoPage.setGeometry(QtCore.QRect(0, 0, 1013, 410))
         self.dutInfoPage.setObjectName("dutInfoPage")
         self.verticalLayout_12 = QtWidgets.QVBoxLayout(self.dutInfoPage)
         self.verticalLayout_12.setObjectName("verticalLayout_12")
@@ -312,11 +365,12 @@ class Ui_MainWindow(object):
         self.verticalLayout_12.addWidget(self.dutInfoTable)
         self.infoBox.addItem(self.dutInfoPage, "")
         self.rawDataPage = QtWidgets.QWidget()
-        self.rawDataPage.setGeometry(QtCore.QRect(0, 0, 100, 48))
+        self.rawDataPage.setGeometry(QtCore.QRect(0, 0, 1013, 410))
         self.rawDataPage.setObjectName("rawDataPage")
         self.verticalLayout_9 = QtWidgets.QVBoxLayout(self.rawDataPage)
         self.verticalLayout_9.setObjectName("verticalLayout_9")
         self.rawDataTable = QtWidgets.QTableView(self.rawDataPage)
+        self.rawDataTable.setContextMenuPolicy(QtCore.Qt.ActionsContextMenu)
         self.rawDataTable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.rawDataTable.setObjectName("rawDataTable")
         self.rawDataTable.verticalHeader().setVisible(False)
@@ -339,7 +393,7 @@ class Ui_MainWindow(object):
         self.scrollArea_trend.setWidgetResizable(True)
         self.scrollArea_trend.setObjectName("scrollArea_trend")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 100, 30))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 1071, 550))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.verticalLayout_8 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_8.setContentsMargins(0, 0, 0, 0)
@@ -364,7 +418,7 @@ class Ui_MainWindow(object):
         self.scrollArea_histo.setWidgetResizable(True)
         self.scrollArea_histo.setObjectName("scrollArea_histo")
         self.scrollAreaWidgetContents_2 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 100, 30))
+        self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 1071, 550))
         self.scrollAreaWidgetContents_2.setStyleSheet("")
         self.scrollAreaWidgetContents_2.setObjectName("scrollAreaWidgetContents_2")
         self.verticalLayout_6 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_2)
@@ -390,7 +444,7 @@ class Ui_MainWindow(object):
         self.scrollArea_bin.setWidgetResizable(True)
         self.scrollArea_bin.setObjectName("scrollArea_bin")
         self.scrollAreaWidgetContents_4 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_4.setGeometry(QtCore.QRect(0, 0, 100, 30))
+        self.scrollAreaWidgetContents_4.setGeometry(QtCore.QRect(0, 0, 1071, 550))
         self.scrollAreaWidgetContents_4.setObjectName("scrollAreaWidgetContents_4")
         self.horizontalLayout_3 = QtWidgets.QHBoxLayout(self.scrollAreaWidgetContents_4)
         self.horizontalLayout_3.setContentsMargins(0, 0, 0, 0)
@@ -415,7 +469,7 @@ class Ui_MainWindow(object):
         self.scrollArea_wafer.setWidgetResizable(True)
         self.scrollArea_wafer.setObjectName("scrollArea_wafer")
         self.scrollAreaWidgetContents_5 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_5.setGeometry(QtCore.QRect(0, 0, 100, 30))
+        self.scrollAreaWidgetContents_5.setGeometry(QtCore.QRect(0, 0, 1071, 550))
         self.scrollAreaWidgetContents_5.setObjectName("scrollAreaWidgetContents_5")
         self.verticalLayout_16 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_5)
         self.verticalLayout_16.setContentsMargins(0, 0, 0, 0)
@@ -515,8 +569,10 @@ class Ui_MainWindow(object):
         font.setWeight(50)
         self.actionFailMarker.setFont(font)
         self.actionFailMarker.setObjectName("actionFailMarker")
-        self.actionReadDutData = QtWidgets.QAction(MainWindow)
-        self.actionReadDutData.setObjectName("actionReadDutData")
+        self.actionReadDutData_DS = QtWidgets.QAction(MainWindow)
+        self.actionReadDutData_DS.setObjectName("actionReadDutData_DS")
+        self.actionReadDutData_TS = QtWidgets.QAction(MainWindow)
+        self.actionReadDutData_TS.setObjectName("actionReadDutData_TS")
         self.toolBar.addAction(self.actionOpen)
         self.toolBar.addAction(self.actionFailMarker)
         self.toolBar.addAction(self.actionExport)
@@ -524,6 +580,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
         self.Selection_stackedWidget.setCurrentIndex(0)
+        self.site_head_selection.setCurrentIndex(0)
         self.tabControl.setCurrentIndex(0)
         self.infoBox.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
@@ -535,10 +592,11 @@ class Ui_MainWindow(object):
         self.Search.setText(_translate("MainWindow", "Search: "))
         self.ClearButton.setText(_translate("MainWindow", "Clear"))
         self.wafer_selection.setTitle(_translate("MainWindow", "Wafer Selection"))
-        self.site_selection.setTitle(_translate("MainWindow", "Site Selection"))
         self.All.setText(_translate("MainWindow", "All Sites"))
         self.checkAll.setText(_translate("MainWindow", "✓ All"))
         self.cancelAll.setText(_translate("MainWindow", "✕ All"))
+        self.site_head_selection.setTabText(self.site_head_selection.indexOf(self.site_selection_tab), _translate("MainWindow", "Site Selection"))
+        self.site_head_selection.setTabText(self.site_head_selection.indexOf(self.head_selection_tab), _translate("MainWindow", "Test Head Selection"))
         self.infoBox.setItemText(self.infoBox.indexOf(self.fileInfoPage), _translate("MainWindow", "File Info"))
         self.infoBox.setItemText(self.infoBox.indexOf(self.dutInfoPage), _translate("MainWindow", "DUT Summary"))
         self.infoBox.setItemText(self.infoBox.indexOf(self.rawDataPage), _translate("MainWindow", "Test Summary"))
@@ -562,4 +620,5 @@ class Ui_MainWindow(object):
         self.actionSettings.setToolTip(_translate("MainWindow", "Configure the plot & table"))
         self.actionFailMarker.setText(_translate("MainWindow", "Fail Marker"))
         self.actionFailMarker.setToolTip(_translate("MainWindow", "Mark failed test items in Test Selection"))
-        self.actionReadDutData.setText(_translate("MainWindow", "Read selected DUT data"))
+        self.actionReadDutData_DS.setText(_translate("MainWindow", "Read selected DUT data"))
+        self.actionReadDutData_TS.setText(_translate("MainWindow", "Read selected DUT data"))

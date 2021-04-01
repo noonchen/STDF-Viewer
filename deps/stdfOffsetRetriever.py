@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Wed Feb 17 2021
+# Last Modified: Tue Mar 30 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,12 +27,14 @@
 import os, sys, logging
 import time, datetime
 import struct
+from array import array
 import threading as th
 import multiprocessing as mp
-from deps.pystdf import V4
-from deps.pystdf.IO_Offset_forViewer import stdIO
-from deps.pystdf.RecordParser import RecordParser
-from deps.pystdf.Types import InitialSequenceException
+from .stdfData import stdfData
+from .pystdf import V4
+from .pystdf.IO_Offset_forViewer import stdIO
+from .pystdf.RecordParser import RecordParser
+# import sqlite3
 
 logger = logging.getLogger("STDF Viewer")
 
@@ -62,8 +64,14 @@ scale_char = {15: "f",
               -9: "G",
               -12: "T"}
 
-objDict = dict([((obj.typ, obj.sub), obj) for obj in V4.records])
-
+def getIntType(num):
+    for t in ["H", "I", "L", "Q"]:
+        try:
+            array(t, [num])
+            return t
+        except OverflowError:
+            continue
+    return "Q"
 
 class Process(mp.Process):
     def __init__(self, *args, **kargs):
@@ -89,11 +97,10 @@ def getFileSize(fd):
     # assume fd has attr "name"
     path = fd.name
     if path.endswith("gz"):
-        # a gzip
-        curPos = fd.tell()
-        fd.seek(-4, 2)
-        fsize = struct.unpack('I', fd.read(4))[0]
-        fd.seek(curPos)     # restore position
+        # open gzip file as a binary file, not a gz obj
+        with open(path, "rb") as f:
+            f.seek(-4, 2)
+            fsize = struct.unpack('I', f.read(4))[0]
     else:
         # bzip file size is not known before uncompressing, return compressed file size instead
         fsize = os.stat(fd.name).st_size
@@ -103,67 +110,81 @@ def getFileSize(fd):
 class stdfSummarizer:
     
     def __init__(self, QSignal=None, flag=None, q=None, fileSize=1):
-        # Func
-        self.onRec = dict((recType, lambda **kargs: None)
-                 for recType in V4.records)
-        self.onRec[V4.mir] = self.onMIR
-        self.onRec[V4.pmr] = self.onPMR
-        self.onRec[V4.pir] = self.onPIR
-        self.onRec[V4.ptr] = self.onTR
-        self.onRec[V4.ftr] = self.onTR
-        self.onRec[V4.mpr] = self.onTR
-        self.onRec[V4.prr] = self.onPRR
-        self.onRec[V4.hbr] = self.onHBR
-        self.onRec[V4.sbr] = self.onSBR
-        self.onRec[V4.wcr] = self.onWCR
-        self.onRec[V4.wir] = self.onWIR
-        self.onRec[V4.wrr] = self.onWRR
-        
+        # # database
+        # self.dbcon = sqlite3.connect('test.db')
+        # self.dbcur = self.dbcon.cursor()
+        # self.dbcur.execute('''DROP TABLE IF EXISTS DataOffsets''')
+        # self.dbcur.execute(
+        #     '''CREATE TABLE IF NOT EXISTS DataOffsets (
+        #     HEAD_NUM, 
+        #     SITE_NUM, 
+        #     TEST_NUM, 
+        #     DUTIndex,
+        #     recHeader,
+        #     Endian,
+        #     Offset,
+        #     Length)''')
+        # self.dbcur.execute('''PRAGMA synchronous = EXTRA''')
+        # self.dbcur.execute('''PRAGMA journal_mode = WAL''')
         # pyqt signal
         self.flag = flag
         self.QSignal = QSignal
         self.q = q
-        # get file size in Bytes
+        
         self.offset = 0     # current position
         self.reading = True
+        # get file size in Bytes
+        self.fileSize = fileSize
+        self.offsetType = getIntType(fileSize)
         # no need to update progressbar if signal is None
         if self.QSignal: 
-            self.fileSize = fileSize
             self.QSignal.emit(0)
             self.pb_thread = th.Thread(target=self.sendProgress)
             self.pb_thread.start()
 
-        # File info
-        self.fileInfo = {}
-        self.endian = "="
-        self.dutIndex = 0  # get 1 as index on first +1 action
-        self.dutPassed = 0
-        self.dutFailed = 0
-        self.waferIndex = 0
-        # Pin dict
-        self.pinDict = {}   # key: Pin index, value: Pin name
-        
         # precompiled struct
         self.cplStruct = {}
+        # stdf data
+        self.endian = "="
+        self.stdfData = stdfData()
+        # used for recording PTRs, MPRs that already read possibly omitted fields
+        self.readAlreadyTR = {}
+        
+        # File info
+        self.fileInfo = {}
+        self.dutIndex = 0  # get 1 as index on first +1 action, used for counting total DUT number
+        self.waferIndex = 0 # used for counting total wafer number
+        self.dutPassed = 0
+        self.dutFailed = 0
+        # Pin dict
+        self.pinDict = {}   # key: Pin index, value: Pin name
         # site data
-        # when site_num == -1, v = data of all sites
-        self.data = {}   # key: site_num, v = {test_num: DefaultDict}, DefaultDict = {"TestName": "", "Offset": None, "Length": None, "DUTIndex": None}
+        self.testData = {}   # key: head_num, value: {key: site_num, v = {test_num: DefaultDict}}, DefaultDict = {"TestName": "", "Offset": None, "Length": None, "DUTIndex": None}
 
-        self.hbinSUM = {}  # key: site_num, value: {key: HBIN, value: HBIN_count}
-        self.sbinSUM = {}  # key: site_num, value: {key: SBIN, value: SBIN_count}
+        self.hbinSUM = {}  # key: head_num, value: {key: site_num, value: {key: HBIN, value: HBIN_count}}
+        self.sbinSUM = {}  # key: head_num, value: {key: site_num, value: {key: SBIN, value: SBIN_count}}
         self.hbinDict = {}  # key: HBIN, value: [HBIN_NAM, HBIN_PF]
         self.sbinDict = {}  # key: SBIN, value: [SBIN_NAM, SBIN_PF]
-        self.dutDict = {}   # key: dutIndex, value: {PART_FLG, NUM_TEST, TEST_T, PART_ID, SOFT_BIN, HARD_BIN}, note: for incomplete stdf, KeyError could be raised as the PRR might be missing
+        
+        self.head_site_dutIndex = {}    # key: head numb << 8 | site num, value: dutIndex, a tmp dict used to retrieve dut index by head/site info, required by multi head stdf files
+        self.dutDict = {}   # key: dutIndex, value: {HEAD_NUM, SITE_NUM, PART_FLG, NUM_TEST, TEST_T, PART_ID, SOFT_BIN, HARD_BIN}, note: for incomplete stdf, KeyError could be raised as the PRR might be missing
+        
+        self.head_waferIndex = {}  # similar to head_site_dutIndex, but one head per wafer
         self.waferInfo = {} # key: center_x, center_y, diameter, size_unit
         self.waferDict = {} # key: waferIndex, value: {WAFER_ID, dutIndexList, coordList}
         
+        self.globalTestFlag = {}    # key: test number, value: fail count
+                
+        # before analyze, backup the previous ocache in case user terminated 2nd file reading
+        RecordParser.ocache_previous = RecordParser.ocache
+        RecordParser.ocache = {}
         self.analyze()  # start
     
     
     def sendProgress(self):
         while self.reading:
-            if self.flag:
-                if self.flag.stop == True: return
+            if getattr(self.flag, "stop", False):
+                return
                 
             time.sleep(0.1)
             if self.QSignal: 
@@ -173,6 +194,7 @@ class stdfSummarizer:
     def set_endian(self, endian_from_parser):
         # update endian for info parse, input is a tuple
         self.endian, = endian_from_parser
+        RecordParser.endian = endian_from_parser
         # pre compile standard format and 0s-255s
         for stdfmt, cfmt in formatMap.items():
             self.cplStruct[self.endian+cfmt] = struct.Struct(self.endian+cfmt)
@@ -184,17 +206,20 @@ class stdfSummarizer:
         while self.q:
             queueDataList = self.q.get()
             if len(queueDataList):
+                if getattr(self.flag, "stop", False):
+                    return
+            
                 if isinstance(queueDataList[0], str):
                     # queueDataList = [endian]
                     self.set_endian(queueDataList[0])
                 else:
                     # queueDataList = [dicts]
                     for d in queueDataList:
-                        recType = objDict[d["recType"]]
+                        recHeader = d["recHeader"]
                         self.offset = d["offset"]
                         binaryLen = d["length"]
                         rawData = d["rawData"]
-                        self.onRec[recType](recType=recType, dataLen=binaryLen, rawData=rawData)
+                        self.onRec(recHeader=recHeader, binaryLen=binaryLen, rawData=rawData)
             else:
                 # queueDataList = [], finish
                 break
@@ -204,20 +229,74 @@ class stdfSummarizer:
         
     def after_complete(self):
         self.reading = False
+        # copy info to stdfData obj
+        self.stdfData.fileInfo = self.fileInfo
+        self.stdfData.dutIndex = self.dutIndex
+        self.stdfData.waferIndex = self.waferIndex
+        self.stdfData.dutPassed = self.dutPassed
+        self.stdfData.dutFailed = self.dutFailed
+        self.stdfData.pinDict = self.pinDict
+        self.stdfData.testData = self.testData
+        self.stdfData.hbinSUM = self.hbinSUM
+        self.stdfData.sbinSUM = self.sbinSUM
+        self.stdfData.hbinDict = self.hbinDict
+        self.stdfData.sbinDict = self.sbinDict
+        self.stdfData.dutDict = self.dutDict
+        self.stdfData.waferInfo = self.waferInfo
+        self.stdfData.waferDict = self.waferDict
+        self.stdfData.globalTestFlag = self.globalTestFlag
+        
+        # self.dbcon.commit()
+        # self.dbcon.close()
+        
         if self.QSignal: 
             self.pb_thread.join()
             # update once again when finished, ensure the progress bar hits 100%
             self.QSignal.emit(10000)
         
+        
+    def onRec(self, recHeader=0, binaryLen=0, rawData=b""):
+        # most frequent records on top to reduce check times
+        # in Cython it will be replaced by switch case, which will be more efficient than py_dict/if..else
+        if recHeader == 3850 or recHeader == 3855 or recHeader == 3860: # PTR 3850 # MPR 3855 # FTR 3860
+            self.onTR(recHeader, binaryLen, rawData)
+        elif recHeader == 1290: # PIR 1290
+            self.onPIR(recHeader, binaryLen, rawData)
+        elif recHeader == 1300: # PRR 1300
+            self.onPRR(recHeader, binaryLen, rawData)
+        elif recHeader == 522: # WIR 522
+            self.onWIR(recHeader, binaryLen, rawData)
+        elif recHeader == 532: # WRR 532
+            self.onWRR(recHeader, binaryLen, rawData)
+        elif recHeader == 2590: # TSR 2590
+            self.onTSR(recHeader, binaryLen, rawData)
+        elif recHeader == 296: # HBR 296
+            self.onHBR(recHeader, binaryLen, rawData)
+        elif recHeader == 306: # SBR 306
+            self.onSBR(recHeader, binaryLen, rawData)
+        elif recHeader == 316: # PMR 316
+            self.onPMR(recHeader, binaryLen, rawData)
+        elif recHeader == 266: # MIR 266
+            self.onMIR(recHeader, binaryLen, rawData)
+        elif recHeader == 542: # WCR 542
+            self.onWCR(recHeader, binaryLen, rawData)
+            
+        # FAR 10
+        # ATR 20
+        # MRR 276
+        # PCR 286
+        # PGR 318
+        # PLR 319
+        # RDR 326
+        # SDR 336
+        # BPS 5130
+        # EPS 5140
+        # GDR 12810
+        # DTR 12830
+        
 
-    def onMIR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
-        
+    def onMIR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
         unix2Time = lambda unix: str(datetime.datetime.utcfromtimestamp(unix).strftime("%Y-%m-%d %H:%M:%S (UTC)"))
         
         self.fileInfo["SETUP_T"] = unix2Time(valueDict["SETUP_T"])
@@ -260,13 +339,8 @@ class stdfSummarizer:
         self.fileInfo["SUPR_NAM"] = valueDict["SUPR_NAM"]
                 
                 
-    def onPMR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+    def onPMR(self, recHeader, binaryLen, rawData):        
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
                 
         PMR_INDX = valueDict["PMR_INDX"]
         CHAN_NAM = valueDict["CHAN_NAM"]
@@ -276,53 +350,64 @@ class stdfSummarizer:
         self.pinDict[PMR_INDX] = [CHAN_NAM, PHY_NAM, LOG_NAM]
     
     
-    def onPIR(self, **kargs):
+    def onPIR(self, recHeader, binaryLen, rawData):
         # used for linking TRs with PRR
         self.dutIndex += 1
-    
-    
-    def onTR(self, **kargs):
-        # on Test Record: FTR, PTR, MPR
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
         
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
+        SITE_NUM = valueDict["SITE_NUM"]
+        HEAD_NUM = valueDict["HEAD_NUM"]
+        
+        self.head_site_dutIndex[HEAD_NUM<<8 | SITE_NUM] = self.dutIndex
+    
+    
+    def onTR(self, recHeader, binaryLen, rawData):
         # read testNum and siteNum
         THS_struct = self.cplStruct.setdefault("THS", struct.Struct(self.endian + formatMap["U4"]+formatMap["U1"]+formatMap["U1"]))
-        TEST_NUM, _, SITE_NUM = THS_struct.unpack(rawData[:6])
+        TEST_NUM, HEAD_NUM, SITE_NUM = THS_struct.unpack(rawData[:6])
+        currentDutIndex = self.head_site_dutIndex[HEAD_NUM<<8 | SITE_NUM]
         
-        tmpSite = self.data.setdefault(SITE_NUM, {})
-        # tmpSumm = self.data.setdefault(-1, {})
-
+        tmpHead = self.testData.setdefault(HEAD_NUM, {})
+        tmpSite = tmpHead.setdefault(SITE_NUM, {})
         tmp_TestItem_site = tmpSite.setdefault(TEST_NUM, {})
-        # tmp_TestItem_summ = tmpSumm.setdefault(TEST_NUM, {})
         
-        TEST_TXT = self.getTestName(recType, rawData)
+        TEST_TXT = self.getTestName(recHeader, rawData)
         
         tmp_TestItem_site["TestName"] = TEST_TXT
-        # tmp_TestItem_summ["TestName"] = TEST_TXT
         # required for on-the-fly parser
-        tmp_TestItem_site["RecType"] = recType
-        # tmp_TestItem_summ["RecType"] = recType
+        tmp_TestItem_site["recHeader"] = recHeader
         tmp_TestItem_site["Endian"] = self.endian
-        # tmp_TestItem_summ["Endian"] = self.endian
-                
-        tmp_TestItem_site.setdefault("Offset", []).append(self.offset)
-        # tmp_TestItem_summ.setdefault("Offset", []).append(self.offset)
-        tmp_TestItem_site.setdefault("Length", []).append(binaryLen)
-        # tmp_TestItem_summ.setdefault("Length", []).append(binaryLen)
-        tmp_TestItem_site.setdefault("DUTIndex", []).append(self.dutIndex)
-        # tmp_TestItem_summ.setdefault("DUTIndex", []).append(self.dutIndex)
-                    
+             
+        tmp_TestItem_site.setdefault("Length", array("H")).append(binaryLen)
+        tmp_TestItem_site.setdefault("DUTIndex", array("I")).append(currentDutIndex)
+        try:
+            # for high compression file, e.g. bz2 or gz, the offset may way larger than
+            # the compressed file size, and leading to Overflow
+            tmp_TestItem_site.setdefault("Offset", array(self.offsetType)).append(self.offset)
+        except OverflowError:
+            logger.warning(f"Overflow occurred when save file offset, type code changed from {self.offset} to 'Q'")
+            # when overflowed, create a new array to store the offset
+            orig_arr: array = tmp_TestItem_site["Offset"]
+            self.offsetType = "Q"
+            new_arr = array(self.offsetType, orig_arr.tolist())
+            new_arr.append(self.offset)
+            tmp_TestItem_site["Offset"] = new_arr
             
-    def onPRR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
-                
+        # self.dbcur.execute('''INSERT INTO DataOffsets VALUES (?,?,?,?,?,?,?,?)''', 
+        #                    (HEAD_NUM, SITE_NUM, TEST_NUM, currentDutIndex, recHeader, self.endian, self.offset, binaryLen))
+            
+        # cache omitted fields
+        # MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
+        # as it may be omitted in the later record, causing typeError when user directly selects sites where 
+        # no such field value is available in the data preparation.
+        if TEST_NUM not in self.readAlreadyTR:
+            self.readAlreadyTR[TEST_NUM] = ""
+            RecordParser.updateOCache(recHeader, binaryLen, rawData)
+                            
+            
+    def onPRR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
+        HEAD_NUM = valueDict["HEAD_NUM"]
         SITE_NUM = valueDict["SITE_NUM"]
         HARD_BIN = valueDict["HARD_BIN"]
         SOFT_BIN = valueDict["SOFT_BIN"]
@@ -332,13 +417,16 @@ class stdfSummarizer:
         Y_COORD = valueDict["Y_COORD"]
         TEST_T = valueDict["TEST_T"]
         PART_ID = valueDict["PART_ID"]
+        currentDutIndex = self.head_site_dutIndex[HEAD_NUM<<8 | SITE_NUM]
         
+        tmpHHead = self.hbinSUM.setdefault(HEAD_NUM, {})
+        tmpHSite = tmpHHead.setdefault(SITE_NUM, {})
+        tmpHSumm = tmpHHead.setdefault(-1, {})
         
-        tmpHSite = self.hbinSUM.setdefault(SITE_NUM, {})
-        tmpHSumm = self.hbinSUM.setdefault(-1, {})
-        tmpSSite = self.sbinSUM.setdefault(SITE_NUM, {})
-        tmpSSumm = self.sbinSUM.setdefault(-1, {})
-        tmpDUT = self.dutDict.setdefault(self.dutIndex, {})
+        tmpSHead = self.sbinSUM.setdefault(HEAD_NUM, {})
+        tmpSSite = tmpSHead.setdefault(SITE_NUM, {})
+        tmpSSumm = tmpSHead.setdefault(-1, {})
+        tmpDUT = self.dutDict.setdefault(currentDutIndex, {})
         
         tmpHSite[HARD_BIN] = tmpHSite.setdefault(HARD_BIN, 0) + 1
         tmpHSumm[HARD_BIN] = tmpHSumm.setdefault(HARD_BIN, 0) + 1
@@ -350,17 +438,19 @@ class stdfSummarizer:
         tmpDUT["PART_ID"] = PART_ID
         tmpDUT["HARD_BIN"] = HARD_BIN
         tmpDUT["SOFT_BIN"] = SOFT_BIN
+        tmpDUT["HEAD_NUM"] = HEAD_NUM
         tmpDUT["SITE_NUM"] = SITE_NUM
         tmpDUT["PART_FLG"] = PART_FLG
         # update wafer only if WIR is detected
         if not self.waferIndex == 0:
-            self.waferDict[self.waferIndex]["dutIndexList"].append(self.dutIndex)
-            self.waferDict[self.waferIndex]["coordList"].append((X_COORD, Y_COORD))
+            currentWaferIndex = self.head_waferIndex[HEAD_NUM]
+            self.waferDict[currentWaferIndex]["dutIndexList"].append(currentDutIndex)
+            self.waferDict[currentWaferIndex]["coordList"].append(array("h", [X_COORD, Y_COORD]))
             if X_COORD == -32768 or Y_COORD == -32768:
                 pass
             else:
-                if X_COORD < self.waferInfo.get("xmin",  32768): self.waferInfo["xmin"] = X_COORD
-                if Y_COORD < self.waferInfo.get("ymin",  32768): self.waferInfo["ymin"] = Y_COORD
+                if X_COORD < self.waferInfo.get("xmin",  32767): self.waferInfo["xmin"] = X_COORD
+                if Y_COORD < self.waferInfo.get("ymin",  32767): self.waferInfo["ymin"] = Y_COORD
                 if X_COORD > self.waferInfo.get("xmax", -32768): self.waferInfo["xmax"] = X_COORD
                 if Y_COORD > self.waferInfo.get("ymax", -32768): self.waferInfo["ymax"] = Y_COORD
         
@@ -386,13 +476,9 @@ class stdfSummarizer:
             if not SOFT_BIN in self.sbinDict: self.sbinDict[SOFT_BIN] = [str(SOFT_BIN), "U"]
             
         
-    def onHBR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+    def onHBR(self, recHeader, binaryLen, rawData):
+        # This method is used for getting bin num/names/PF
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
                 
         # SITE_NUM = valueDict["SITE_NUM"]
         HBIN_NUM = valueDict["HBIN_NUM"]
@@ -409,13 +495,8 @@ class stdfSummarizer:
             if HBIN_PF in ["P", "F"]: self.hbinDict[HBIN_NUM][1] = HBIN_PF 
        
         
-    def onSBR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)        
+    def onSBR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)        
         
         # SITE_NUM = valueDict["SITE_NUM"]
         SBIN_NUM = valueDict["SBIN_NUM"]
@@ -429,55 +510,58 @@ class stdfSummarizer:
             if SBIN_PF in ["P", "F"]: self.sbinDict[SBIN_NUM][1] = SBIN_PF
 
 
-    def onWCR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+    def onWCR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
         # key: center_x, center_y, diameter, size_unit
         self.waferInfo = {"center_x": valueDict["CENTER_X"],
-                          "center_y": valueDict["CENTER_Y"],
-                          "diameter": valueDict["WAFR_SIZ"],
-                          "size_unit": valueDict["WF_UNITS"]}
+                        "center_y": valueDict["CENTER_Y"],
+                        "diameter": valueDict["WAFR_SIZ"],
+                        "size_unit": valueDict["WF_UNITS"]}
     
     
-    def onWIR(self, **kargs):
-        recType = kargs.get("recType", None)
-        binaryLen = kargs.get("dataLen", 0)
-        rawData = kargs.get("rawData", b'')
-        
-        RecordParser.endian = self.endian
-        valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
+    def onWIR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
         self.waferIndex += 1
-        
+        if valueDict["WAFER_ID"] == "": 
+            valueDict["WAFER_ID"] = "Missing Name"        
         HEAD_NUM = valueDict["HEAD_NUM"]
-        SITE_GRP = valueDict["SITE_GRP"]
-        START_T = valueDict["START_T"]
-        WAFER_ID = valueDict["WAFER_ID"] if valueDict["WAFER_ID"] else "Missing Name"
+        self.head_waferIndex[HEAD_NUM] = self.waferIndex
         # init key-value for wafer dict 
-        self.waferDict[self.waferIndex] = {"WAFER_ID": WAFER_ID, "dutIndexList": [], "coordList": []}
+        self.waferDict[self.waferIndex] = {"dutIndexList": array("I"), "coordList": [], **valueDict}
     
     
-    def onWRR(self, **kargs):
-        # recType = kargs.get("recType", None)
-        # binaryLen = kargs.get("dataLen", 0)
-        # rawData = kargs.get("rawData", b'')
+    def onWRR(self, recHeader, binaryLen, rawData):
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
+        if valueDict["WAFER_ID"] == "": 
+            valueDict["WAFER_ID"] = "Missing Name"
+        HEAD_NUM = valueDict["HEAD_NUM"]
         
-        # RecordParser.endian = self.endian
-        # valueDict = RecordParser.parse_raw(recType, binaryLen, rawData)
-        pass
-    
-    
-    def getTestName(self, recType, rawData):
-        """Read Test Name Efficiently by skipping unrelated bytes"""
-        if recType == V4.ptr:
-            slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[12:13])  # 4+1+1+1+1+4 = 12
-            tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[13 : 13+slen])
-            return tname_binary.decode("ascii")
+        currentWaferIndex = self.head_waferIndex[HEAD_NUM]
+        self.waferDict[currentWaferIndex].update(valueDict)
 
-        elif recType == V4.mpr:
+    
+    def onTSR(self, recHeader, binaryLen, rawData):
+        # for fast find failed test number globally
+        # don't care about head number nor site number
+        valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData)
+        TEST_NUM = valueDict["TEST_NUM"]
+        FAIL_CNT = valueDict["FAIL_CNT"]
+        if FAIL_CNT != 2**32-1: # 2**32-1 invalid number for FAIL_CNT
+            self.globalTestFlag[TEST_NUM] = self.globalTestFlag.get(TEST_NUM, 0) + FAIL_CNT
+    
+    
+    def getTestName(self, recHeader, rawData):
+        """Read Test Name Efficiently by skipping unrelated bytes"""
+        if recHeader == 3850:   # PTR 3850
+            slen_byte = rawData[12:13]  # 4+1+1+1+1+4 = 12
+            if slen_byte == b'':
+                return "Missing Name"
+            else:
+                slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(slen_byte)
+                tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[13 : 13+slen])
+                return tname_binary.decode("ascii")
+
+        elif recHeader == 3855:  # MPR 3855
             if len(rawData) >= 13:  # 4+1+1+1+1+2+2 = 12, +1 to ensure slen isn't omitted
                 RTN_cnt, RSLT_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[8:12])
                 tname_offset = 12 + RTN_cnt*1 + RSLT_cnt*4
@@ -485,9 +569,9 @@ class stdfSummarizer:
                 tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[tname_offset+1 : tname_offset+1+slen])
                 return tname_binary.decode("ascii")
             else:
-                return ""
+                return "Missing Name"
         
-        elif recType == V4.ftr:
+        elif recHeader == 3860:  # FTR 3860
             if len(rawData) >= 44:  # 4+1+1+1+1+4+4+4+4+4+4+2+2+2 = 38 (before array), +6 to ensure slen isn't omitted
                 RTN_cnt, PGM_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[34:38])
                 offset = 38 + RTN_cnt*2 + (RTN_cnt//2 + RTN_cnt%2) + PGM_cnt*2 + (PGM_cnt//2 + PGM_cnt%2)   # U2 + N1, N1 = 4bits
@@ -503,7 +587,7 @@ class stdfSummarizer:
                 tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[offset+1 : offset+1+slen])
                 return  tname_binary.decode("ascii")
             else:
-                return ""
+                return "Missing Name"
         
         else:
             return ""
@@ -511,7 +595,15 @@ class stdfSummarizer:
  
     
 def parser(path, flag, q):
-    fileHandle = open(path, "rb")
+    import gzip, bz2
+    if os.path.isfile(path):
+        if path.endswith("gz"):
+            fileHandle = gzip.open(path, 'rb')
+        elif path.endswith("bz2"):
+            fileHandle = bz2.BZ2File(path, 'rb')
+        else:
+            fileHandle = open(path, 'rb')                
+    
     P = stdIO(inp=fileHandle, flag=flag, q=q)
     P.parse()
     
@@ -540,15 +632,23 @@ class stdfDataRetriever:
             task.start()
             # analyze & store data from queue
             self.summarizer = stdfSummarizer(QSignal=QSignal, flag=flag, q=self.q, fileSize=fileSize)
-            if not self.useThread: task.terminate()
+            
+            if not self.useThread: 
+                # process is used
+                task.terminate()
+                if getattr(flag, "stop", False):
+                    # child process will encounter error if we close the queue
+                    # help us to terminate the process
+                    self.q.close()
+                    
             task.join()
             self.checkError(task)
         except:
             raise
             
             
-    def __call__(self):
-        return self.summarizer
+    def getStdfData(self):
+        return self.summarizer.stdfData
     
     
     def onProcessException(self, eT, eV, tb):

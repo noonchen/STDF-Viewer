@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Feb 17 2021
+# Last Modified: Thu Apr 01 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -32,7 +32,7 @@ from random import choice
 from base64 import b64decode
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.pystdf.RecordParser import RecordParser
-from deps.stdfOffsetRetriever import stdfSummarizer
+from deps.stdfData import stdfData
 
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
@@ -43,7 +43,7 @@ from deps.uic_stdDutData import DutDataReader
 # pyqt5
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QStyledItemDelegate
+from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
 from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
 # pyside2
 # from deps.ui.stdfViewer_MainWindows_side import Ui_MainWindow
@@ -56,7 +56,7 @@ matplotlib.use('QT5Agg')
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_qt5agg import FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 
 #-------------------------
 multiprocessing.freeze_support()
@@ -72,7 +72,7 @@ setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
 # setting attr to human string
 settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
                    ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"),
+                   ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
 
@@ -161,23 +161,125 @@ def isHexColor(color: str):
         return False
 
 
+class NavigationToolbar(NavigationToolbar2QT):
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        
+    def save_figure(self, *args):
+        # reimplement save fig function, because the original one is weird
+        filetypes = self.canvas.get_supported_filetypes_grouped()
+        sorted_filetypes = sorted(filetypes.items())
+        default_filetype = self.canvas.get_default_filetype()
+
+        startpath = os.path.expanduser(
+            matplotlib.rcParams['savefig.directory'])
+        start = os.path.join(startpath, self.canvas.get_default_filename())
+        filters = []
+        selectedFilter = None
+        for name, exts in sorted_filetypes:
+            exts_list = " ".join(['*.%s' % ext for ext in exts])
+            filter = '%s (%s)' % (name, exts_list)
+            if default_filetype in exts:
+                selectedFilter = filter
+            filters.append(filter)
+        filters = ';;'.join(filters)
+
+        fname, filter = QFileDialog.getSaveFileName(
+            self.canvas.parent(), "Choose a filename to save to", start,
+            filters, selectedFilter)
+        if fname:
+            # Save dir for next time, unless empty str (i.e., use cwd).
+            if startpath != "":
+                matplotlib.rcParams['savefig.directory'] = (
+                    os.path.dirname(fname))
+            try:
+                self.canvas.figure.savefig(fname, dpi=200, bbox_inches="tight")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self, "Error saving file", str(e),
+                    QtWidgets.QMessageBox.Ok, QtWidgets.QMessageBox.NoButton)
+
+
+class PlotCanvas(QtWidgets.QWidget):
+    def __init__(self, figure, showToolBar=True, parent=None):
+        super().__init__()
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Fixed)
+        self.Layout = QtWidgets.QHBoxLayout(self)
+        self.Layout.setSpacing(0)
+        
+        self.canvas = FigureCanvas(figure)
+        figw, figh = figure.get_size_inches()
+        self.fig_ratio = figw / figh
+        self.mpl_connect = self.canvas.mpl_connect
+        self.showToolBar = showToolBar
+        # prevent the canvas to shrink beyond a point
+        # original size looks like a good minimum size
+        self.canvas.setMinimumSize(self.size())
+        self.canvas.setFocusPolicy(Qt.ClickFocus)    # required for key_press_event to work
+        self.head = 0
+        self.site = 0
+        self.test_num = 0
+        self.priority = 0
+        if parent:
+            self.bindToUI(parent)
+        
+    def bindToUI(self, parent):
+        self.canvas.setParent(parent)
+        self.Layout.addWidget(self.canvas)
+        if self.showToolBar:
+            self.toolbar = NavigationToolbar(self.canvas, parent, coordinates=False)
+            self.toolbar.setAllowedAreas(QtCore.Qt.RightToolBarArea)
+            self.toolbar.setOrientation(QtCore.Qt.Vertical)
+            self.Layout.addWidget(self.toolbar)
+            self.Layout.setAlignment(self.toolbar, Qt.AlignVCenter)
+            
+    def setParent(self, parent):
+        # only used for delete instance
+        if parent == None:
+            super().setParent(None)
+            self.canvas.setParent(None)
+            if self.showToolBar: self.toolbar.setParent(None)
+            
+    def resizeEvent(self, event):
+        width = event.size().width()
+        self.setFixedHeight(int(width/self.fig_ratio))
+        self.updateGeometry()
+
 
 class MagCursor(object):
 
-    def __init__(self, line, precision):
+    def __init__(self, line, precision, mainGUI=None):
         self.pixRange = 20
         self.line = line
         self.ax = line.axes
         self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
         # create marker and data description tip, hide by default
         self.marker = self.ax.scatter(0, 0, s=40, marker="+", color='k')
-        self.dcp = self.ax.text(s="", x=0, y=0, backgroundcolor="#FFFF00", fontname="Courier New", weight="bold", fontsize=8, zorder=1000)
+        self.dcp = self.ax.text(s="", x=0, y=0, fontname="Courier New", weight="bold", fontsize=8,
+                                bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
         self.marker.set_visible(False)
         self.dcp.set_visible(False)
+        self.background = None
+        # for selection
+        self.shift_pressed = False
+        self.picked_points = []
+        self.highlights = self.ax.scatter([], [], s=30, marker="$S$", color="red")
+        self.hint = self.ax.text(s="Press 'Enter' to show DUT data of selected point(s)", 
+                                 x=1, y=0, transform=self.ax.transAxes, va="bottom", ha="right", 
+                                 fontstyle="italic", fontsize=10, zorder=1000)
+        self.hint.set_visible(False)
+        # mainGUI for show dut date table
+        self.mainGUI = mainGUI
         self.updatePrecision(precision)
             
     def updatePrecision(self, precision):
         self.valueFormat = "%%.%df" % precision
+        
+    def copyBackground(self):
+        self.marker.set_visible(False)
+        self.dcp.set_visible(False)        
+        self.ax.figure.canvas.draw()
+        self.background = self.ax.figure.canvas.copy_from_bbox(self.ax.figure.bbox)
 
     def mouse_move(self, event):
         if not event.inaxes:
@@ -198,21 +300,80 @@ class MagCursor(object):
             # set visible
             self.marker.set_visible(True)
             self.dcp.set_visible(True)
-            # self.ax.draw_artist(self.marker)
-            # self.ax.draw_artist(self.dcp)
-            # self.ax.figure.canvas.blit(self.ax.bbox)
-            self.ax.figure.canvas.draw()
+            if self.background:
+                self.ax.figure.canvas.restore_region(self.background)
+            self.ax.draw_artist(self.marker)
+            self.ax.draw_artist(self.dcp)
+            self.ax.figure.canvas.blit(self.ax.bbox)
         else:
             self.marker.set_visible(False)
             self.dcp.set_visible(False)
-            # self.ax.draw_artist(self.marker)
-            # self.ax.draw_artist(self.dcp)
-            # self.ax.figure.canvas.blit(self.ax.bbox)
-            self.ax.figure.canvas.draw()
+            
+            if self.background:
+                self.ax.figure.canvas.restore_region(self.background)            
+            self.ax.draw_artist(self.marker)
+            self.ax.draw_artist(self.dcp)
+            self.ax.figure.canvas.blit(self.ax.bbox)
             
     def canvas_resize(self, event):
+        self.copyBackground()
         # update range once the canvas is resized
         self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
+        
+    def key_press(self, event):
+        if event.key == 'shift':
+            self.shift_pressed = True
+        elif event.key == 'enter':
+            if self.picked_points:
+                selectedDutIndex = [x for (x, y) in self.picked_points]
+                DutDataReader(self.mainGUI, sorted(selectedDutIndex), StyleDelegateForTable_List())     # pass styleDelegate because I don't want to copy the code...
+            
+    def key_release(self, event):
+        if event.key == 'shift':
+            self.shift_pressed = False
+            
+    def button_press(self, event):
+        # do nothing when toolbar is active
+        if self.ax.figure.canvas.toolbar.mode.value:
+            return
+        
+        # used to check if user clicked blank area, if so, clear all selected points
+        contains, _ = self.line.contains(event)
+        if not contains:
+            self.picked_points = []
+            self.resetPointSelection()
+            self.copyBackground()
+        # otherwise will be handled by pick event
+        
+    def on_pick(self, event):
+        # do nothing when toolbar is active
+        if self.ax.figure.canvas.toolbar.mode.value:
+            return
+        
+        ind = event.ind[0]
+        point = (event.artist._xorig[ind], event.artist._yorig[ind])
+        if self.shift_pressed:
+            if point in self.picked_points:
+                # remove if existed
+                self.picked_points.remove(point)
+            else:
+                # append points to selected points list
+                self.picked_points.append(point)
+        else:
+            # replace with the current point only
+            self.picked_points = [point]
+        
+        if len(self.picked_points) > 0:
+            self.highlights.set_offsets(self.picked_points)
+            self.hint.set_visible(True)
+        else:
+            self.resetPointSelection()
+        self.copyBackground()
+        
+    def resetPointSelection(self):
+        self.highlights.remove()
+        self.highlights = self.ax.scatter([], [], s=40, marker='$S$', color='red')
+        self.hint.set_visible(False)
 
 
 class SettingParams:
@@ -230,10 +391,11 @@ class SettingParams:
         self.showGaus_histo = True
         self.showBoxp_histo = True
         self.binCount = 30
-        self.showSigma = "3, 6, 9"    # for hashability
-        # table
+        self.showSigma = "3, 6, 9"
+        # General
         self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
         self.dataPrecision = 3
+        self.checkCpk = False
         self.cpkThreshold = 1.33
         # colors
         self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
@@ -288,7 +450,7 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
 
 
 class signals4MainUI(QtCore.QObject):
-    dataSignal = Signal(stdfSummarizer)  # get std data from loader
+    dataSignal = Signal(stdfData)  # get std data from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
 
 
@@ -301,7 +463,8 @@ class MyWindow(QtWidgets.QMainWindow):
         sys.excepthook = self.onException
         
         self.preTab = None              # used for detecting tab changes
-        self.preSiteSelection = None    # used for detecting site selection changes
+        self.preSiteSelection = set()    # used for detecting site selection changes
+        self.preHeadSelection = set()
         self.dataSrc = None     # only store test data
         self.dataInfo = None    # used to store other info
         self.selData = None
@@ -331,9 +494,11 @@ class MyWindow(QtWidgets.QMainWindow):
         self.init_TestList()
         self.init_DataTable()
         self.init_SettingUI()
-        # dict to store site checkbox objects
+        # dict to store site/head checkbox objects
         self.site_cb_dict = {}
+        self.head_cb_dict = {}
         self.availableSites = []
+        self.availableHeads = []
         # enable drop file
         self.enableDragDrop()
         # init actions
@@ -342,7 +507,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionExport.triggered.connect(self.onExportReport)
         self.ui.actionSettings.triggered.connect(self.onSettings)
         self.ui.actionAbout.triggered.connect(self.onAbout)
-        self.ui.actionReadDutData.triggered.connect(self.onReadDutData)
+        self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
+        self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
         
         # init and connect signals
         self.signals = signals4MainUI()
@@ -372,7 +538,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if not f:
             f, _typ = QFileDialog.getOpenFileName(self, 
                                                   caption="Select a STD File To Open", 
-                                                  filter="STDF (*.std; *.stdf);;Compressed STDF (*.gz; *.bz2);;All Files (*.*)",)
+                                                  filter="All Supported Files (*.std; *.stdf; *.std*; *.gz; *.bz2);;STDF (*.std; *.stdf);;Compressed STDF (*.gz; *.bz2)",)
         if os.path.isfile(f):
             if f.endswith("gz"):
                 self.std_handle = gzip.open(f, 'rb')
@@ -411,7 +577,7 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox = QtWidgets.QMessageBox(self)
         msgBox.setWindowTitle("About")
         msgBox.setTextFormat(QtCore.Qt.RichText)
-        msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>Author: noonchen<br>Email: chennoon233@foxmail.com<br>")
+        msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>Version: V2.0.0<br>Author: noonchen<br>Email: chennoon233@foxmail.com<br>")
         msgBox.setInformativeText("For instructions, please refer to the ReadMe in the repo:<br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a><br><br><span style='font-size:8px'>Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.</span>")
         appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
         appIcon.setDevicePixelRatio(2.0)
@@ -419,12 +585,25 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox.exec_()
         
     
-    def onReadDutData(self):
+    def onReadDutData_DS(self):
+        # context menu callback for DUT summary
         selectedRows = self.ui.dutInfoTable.selectionModel().selectedRows()
         if selectedRows:
             selectedDutIndex = [self.Row_DutIndexDict[r.row()] for r in selectedRows]   # if row(s) is selected, self.Row_DutIndexDict is already updated in self.prepareDataForDUTSummary()
             DutDataReader(self, selectedDutIndex, StyleDelegateForTable_List())     # pass styleDelegate because I don't want to copy the code...
-    
+
+
+    def onReadDutData_TS(self):
+        # context menu callback for Test summary
+        selectedRows = self.ui.rawDataTable.selectionModel().selectedIndexes()
+        if selectedRows:
+            allDutIndexes = [r.row()-3 for r in selectedRows]    # row4 is dutIndex 1
+            selectedDutIndex = sorted([i for i in set(allDutIndexes) if i > 0])     # remove duplicates and invalid dutIndex (e.g. header rows)
+            if selectedDutIndex:
+                DutDataReader(self, selectedDutIndex, StyleDelegateForTable_List())     # pass styleDelegate because I don't want to copy the code...
+            else:
+                QMessageBox.information(None, "No DUTs selected", "You need to select DUT row(s) first", buttons=QMessageBox.Ok)
+  
     
     def enableDragDrop(self):
         for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
@@ -481,16 +660,17 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel = QtGui.QStandardItemModel()
         self.ui.dataTable.setModel(self.tmodel)
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
-        # rawData table
+        # test summary table
         self.tmodel_raw = QtGui.QStandardItemModel()
         self.ui.rawDataTable.setModel(self.tmodel_raw)
         self.ui.rawDataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.rawDataTable))
+        self.ui.rawDataTable.addAction(self.ui.actionReadDutData_TS)   # add context menu for reading dut data
         # dut summary table
         self.tmodel_dut = QtGui.QStandardItemModel()
         self.ui.dutInfoTable.setModel(self.tmodel_dut)
         self.ui.dutInfoTable.setSelectionBehavior(QAbstractItemView.SelectRows)     # select row only
         self.ui.dutInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dutInfoTable))
-        self.ui.dutInfoTable.addAction(self.ui.actionReadDutData)   # add context menu for reading dut data
+        self.ui.dutInfoTable.addAction(self.ui.actionReadDutData_DS)   # add context menu for reading dut data
         # file header table
         self.tmodel_info = QtGui.QStandardItemModel()
         self.ui.fileInfoTable.setModel(self.tmodel_info)
@@ -506,11 +686,13 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         
                             
-    def init_SiteCheckbox(self):
+    def init_Head_SiteCheckbox(self):
         # bind functions to all checkboxes
         self.ui.All.clicked['bool'].connect(self.onSiteChecked)
 
         for cb in self.site_cb_dict.values():
+            cb.clicked['bool'].connect(self.onSiteChecked)
+        for cb in self.head_cb_dict.values():
             cb.clicked['bool'].connect(self.onSiteChecked)
             
         # bind functions to check/uncheck all buttons
@@ -564,6 +746,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
     
     def init_SettingUI(self):
+        #TODO: options to turn off cpk marking to maximize speed
         self.settingUI = stdfSettings(self)
         
         
@@ -589,6 +772,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Name: ", os.path.basename(absPath)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["Directory Path: ", os.path.dirname(absPath)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Size: ", "%.2f MB"%(os.stat(self.std_handle.name).st_size / 2**20)]])
+        if len(self.dataInfo.waferDict) != 0:
+            self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["Wafers Tested: ", str(self.dataInfo.waferIndex)]])    # WIR #
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Tested: ", str(self.dataInfo.dutIndex)]])    # PIR #
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Passed: ", str(self.dataInfo.dutPassed)]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Failed: ", str(self.dataInfo.dutFailed)]])
@@ -614,14 +799,14 @@ class MyWindow(QtWidgets.QMainWindow):
         # clear
         self.tmodel_dut.removeRows(0, self.tmodel_dut.rowCount())
         self.tmodel_dut.removeColumns(0, self.tmodel_dut.columnCount())
-        
-        headerLabels = ["Part ID", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
+        headerLabels = ["Part ID", "Test Head", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
         self.tmodel_dut.setHorizontalHeaderLabels(headerLabels)
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
         siteList = sorted(self.getCheckedSites())
+        headList = sorted(self.getCheckedHeads())
         
-        dutInfo = self.prepareDataForDUTSummary(siteList, updateRow_dutIndex_dict=True)
+        dutInfo = self.prepareDataForDUTSummary(headList, siteList, updateRow_dutIndex_dict=True)
         for tmpRow in dutInfo:
             qitemRow = []
             for item in tmpRow:
@@ -650,6 +835,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self.onSiteChecked()
                 
                 
+    def getCheckedHeads(self):
+        checkedHeads = []
+        
+        for head_num, cb in self.head_cb_dict.items():
+            if cb.isChecked():
+                checkedHeads.append(head_num)
+                
+        return checkedHeads
+    
+    
     def getCheckedSites(self):
         checkedSites = []
         
@@ -673,7 +868,7 @@ class MyWindow(QtWidgets.QMainWindow):
             selectedIndex = self.selModel.selection().indexes()
         
         if selectedIndex:
-            return sorted([int(ind.data().split("\t")[0]) for ind in selectedIndex])
+            return sorted([int(ind.data().split("\t")[0].strip("#")) for ind in selectedIndex])     # wafer number begins with "#"
         else:
             return None
     
@@ -693,20 +888,22 @@ class MyWindow(QtWidgets.QMainWindow):
             itemNums = self.getSelectedNums()
             # get enabled sites
             siteList = self.getCheckedSites()
+            headList = self.getCheckedHeads()
             # prepare the data for plot and table, skip in Bin & Wafer tab to save time
-            if not currentTab in [tab.Bin, tab.Wafer]: self.prepareData(itemNums, siteList)
+            if not currentTab in [tab.Bin, tab.Wafer]: self.prepareData(itemNums, siteList, headList)
             
             # update bin chart only if sites changed and previous tab is not bin chart
-            if self.preSiteSelection == set(siteList) and currentTab == tab.Bin and self.preTab == tab.Bin:
+            if self.preHeadSelection == set(headList) and self.preSiteSelection == set(siteList) and currentTab == tab.Bin and self.preTab == tab.Bin:
                 # do not update
                 pass
             else:
-                # update site selection
+                # update head/site selection
+                self.preHeadSelection = set(headList)
                 self.preSiteSelection = set(siteList)
                 # update table
                 self.updateTableContent()
                 # update tab
-                self.updateTabContent()     # do not change order, updating raw data table may alter the tmp data
+                self.updateTabContent()     # do not change order, updating test summary table may alter the tmp data
                 # update DUT summary
                 self.updateDutSummary()
     
@@ -716,50 +913,58 @@ class MyWindow(QtWidgets.QMainWindow):
         
         # it is safe to call onSelect directly without any items in listView
         # the inner function will detect the items and will skip if there is none
-        # if self.getSelectedNums():
+        # TODO: check test item availability and disable the missing test items
         self.onSelect()
-            
-            
-    def cacheOmittedRecordField(self):
-        #MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
-        # as it may be omitted in the later record, causing typeError when user directly selects sites where 
-        # no such field value is available in the data preparation.
-        arbSite = list(self.dataSrc.keys())[0]
-        for test_num in self.dataSrc[arbSite].keys():
-            recType, endian, _, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
-            offset_1st = offsetL[0]
-            lengthL_1s = lengthL[0]
-            
-            self.std_handle.seek(offset_1st, 0)
-            rawByte_1st = self.std_handle.read(lengthL_1s)
-            
-            RecordParser.endian = endian
-            RecordParser.updateOCache(recType, lengthL_1s, rawByte_1st)
     
     
-    def isTestFail(self, test_num, site):
-        if site == -1:
-            recType, endian, _, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
-        else:
-            offsetL = self.dataSrc[site][test_num]["Offset"]
-            lengthL = self.dataSrc[site][test_num]["Length"]
-            recType = self.dataSrc[site][test_num]["RecType"]
-            endian = self.dataSrc[site][test_num]["Endian"]
-        # parse data on-the-fly
-        RecordParser.endian = endian    # specify the parse endian
-        testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle, failCheck=True)
+    def isTestFail(self, test_num):
+        failStateChecked = False
         
-        for stat in map(isPass, testDict["FlagList"]):
-            if stat == False:
+        if test_num in self.dataInfo.globalTestFlag:
+            # test synopsis for current test item contains valid fail count
+            failCount = self.dataInfo.globalTestFlag[test_num]
+            if failCount > 0:
                 return "testFailed"
-        else:
-            # if all tests passed, check if cpk is lower than the threshold
-            _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
-            if cpk != np.nan:
-                # check cpk only if it's valid
-                if cpk < self.settingParams.cpkThreshold:
-                    return "cpkFailed"
-            return "testPassed"
+            else:
+                # if user do not need to check Cpk, return to caller
+                if self.settingParams.checkCpk:
+                    failStateChecked = True      # avoid re-check fail state when calculating Cpk
+                else:
+                    return "testPassed"
+
+        # when need to check Cpk, fail count for this test_num in TSR is invalid, or TSR is not omitted whatsoever
+        # read test data from all heads and sites
+        for head in self.dataSrc.keys():
+            headData = self.dataSrc[head]
+            for site in headData.keys():
+                siteData = headData[site]
+                try:
+                    offsetL = siteData[test_num]["Offset"]
+                    lengthL = siteData[test_num]["Length"]
+                    recHeader = siteData[test_num]["recHeader"]
+                    endian = siteData[test_num]["Endian"]
+                    
+                    RecordParser.endian = endian    # specify the parse endian
+                    testDict = RecordParser.parse_rawList(recHeader, offsetL, lengthL, self.std_handle, failCheck=True)
+                    
+                    if not failStateChecked:
+                        for stat in map(isPass, testDict["FlagList"]):
+                            if stat == False:
+                                return "testFailed"
+                            
+                    if self.settingParams.checkCpk:
+                        # if all tests passed, check if cpk is lower than the threshold
+                        _, _, cpk = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
+                        if cpk != np.nan:
+                            # check cpk only if it's valid
+                            if cpk < self.settingParams.cpkThreshold:
+                                return "cpkFailed"
+                                
+                except KeyError:
+                    # test_num is not presented in the current site
+                    pass
+                
+        return "testPassed"
         
         
     def clearTestItemBG(self):
@@ -770,65 +975,67 @@ class MyWindow(QtWidgets.QMainWindow):
             qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.BackgroundRole)
                         
             
-    def mergeAllSiteTestData(self, test_num):
+    def mergeAllSiteTestData(self, head, test_num):
         # get UnOrdered offsetL, lengthL & dutIndex list from all sites
         uo_dutIndex = []
         uo_offsetL = []
         uo_lengthL = []
-        recType = None
+        recHeader = None
         endian = ""
         
-        for site in self.dataSrc.keys():
+        for site in self.dataSrc[head].keys():
             if site == -1:
                 continue     # manually skip 
             try:
-                uo_offsetL += self.dataSrc[site][test_num]["Offset"]
-                uo_lengthL += self.dataSrc[site][test_num]["Length"]
-                uo_dutIndex += self.dataSrc[site][test_num]["DUTIndex"]        
-                recType = self.dataSrc[site][test_num]["RecType"]
-                endian = self.dataSrc[site][test_num]["Endian"]
+                uo_offsetL += self.dataSrc[head][site][test_num]["Offset"]
+                uo_lengthL += self.dataSrc[head][site][test_num]["Length"]
+                uo_dutIndex += self.dataSrc[head][site][test_num]["DUTIndex"]        
+                recHeader = self.dataSrc[head][site][test_num]["recHeader"]
+                endian = self.dataSrc[head][site][test_num]["Endian"]
             except KeyError:
-                self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, False, False)
+                self.updateStatus(f"No test data found for {test_num} in Test Head {head} Site {site}", False, False, False)
         sorted_lists = sorted(zip(uo_dutIndex, uo_offsetL, uo_lengthL), key=lambda x: x[0])
         dutIndex, offsetL, lengthL = [[x[i] for x in sorted_lists] for i in range(3)]
-        return recType, endian, dutIndex, offsetL, lengthL
+        return recHeader, endian, dutIndex, offsetL, lengthL
             
             
-    def prepareData(self, selectItemNums, selectSites):
+    def prepareData(self, selectItemNums, selectSites, selectHeads):
         # clear
         self.selData = {}
         
         if selectItemNums:
-            self.updateStatus("Reading test data...")
+            # self.updateStatus("Reading test data...")
             for test_num in selectItemNums:
                 for site in selectSites:
-                    tempSelDict = self.selData.setdefault(site, {})
-                    if site == -1:
-                        recType, endian, dutIndex, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
-                    else:
-                        try:
-                            offsetL = self.dataSrc[site][test_num]["Offset"]
-                            lengthL = self.dataSrc[site][test_num]["Length"]
-                            recType = self.dataSrc[site][test_num]["RecType"]
-                            endian = self.dataSrc[site][test_num]["Endian"]
-                            dutIndex = self.dataSrc[site][test_num]["DUTIndex"]
-                        except KeyError:
-                            self.updateStatus("Site %d has no test item: %d"%(site, test_num), False, False, False)
-                            tempSelDict[test_num] = {}
-                            continue
-                    # parse data on-the-fly
-                    RecordParser.endian = endian    # specify the parse endian
-                    testDict = RecordParser.parse_rawList(recType, offsetL, lengthL, self.std_handle)
-                    # Add new keys
-                    testDict["DUTIndex"] = np.array(dutIndex)
-                    testDict["DataList"] = np.array(testDict["DataList"], dtype="float64")
-                    testDict["Min"] = np.min(testDict["DataList"])
-                    testDict["Max"] = np.max(testDict["DataList"])
-                    testDict["Median"] = np.median(testDict["DataList"])
-                    testDict["Mean"], testDict["SDev"], testDict["Cpk"] = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
-                    # keys in testDict: TestName / TestNum / [deleted: StatList] / FlagList / LL / HL / Unit / DataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
-                    tempSelDict[test_num] = testDict
-            self.updateStatus("")
+                    for head in selectHeads:
+                        tempSelDict_site = self.selData.setdefault(head, {})
+                        tempSelDict = tempSelDict_site.setdefault(site, {})
+                        if site == -1:
+                            recHeader, endian, dutIndex, offsetL, lengthL = self.mergeAllSiteTestData(head, test_num)
+                        else:
+                            try:
+                                offsetL = self.dataSrc[head][site][test_num]["Offset"]
+                                lengthL = self.dataSrc[head][site][test_num]["Length"]
+                                recHeader = self.dataSrc[head][site][test_num]["recHeader"]
+                                endian = self.dataSrc[head][site][test_num]["Endian"]
+                                dutIndex = self.dataSrc[head][site][test_num]["DUTIndex"]
+                            except KeyError:
+                                self.updateStatus(f"No test data found for {test_num} in Test Head {head} Site {site}", False, False, False)
+                                tempSelDict[test_num] = {}
+                                continue
+                        # parse data on-the-fly
+                        RecordParser.endian = endian    # specify the parse endian
+                        testDict = RecordParser.parse_rawList(recHeader, offsetL, lengthL, self.std_handle)
+                        # Add new keys
+                        testDict["DUTIndex"] = np.array(dutIndex)
+                        testDict["DataList"] = np.array(testDict["DataList"], dtype="float64")
+                        testDict["Min"] = np.min(testDict["DataList"])
+                        testDict["Max"] = np.max(testDict["DataList"])
+                        testDict["Median"] = np.median(testDict["DataList"])
+                        testDict["Mean"], testDict["SDev"], testDict["Cpk"] = calc_cpk(testDict["LL"], testDict["HL"], testDict["DataList"])
+                        # keys in testDict: TestName / TestNum / [deleted: StatList] / FlagList / LL / HL / Unit / DataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
+                        tempSelDict[test_num] = testDict
+            # self.updateStatus("")
                 
                 
     def updateTabContent(self, forceUpdate=False):
@@ -845,6 +1052,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.preTab = tabType       # save tab index everytime tab updates
         selTestNums = self.getSelectedNums()    # test num in trend/histo, wafer index in wafer
         siteList = sorted(self.getCheckedSites())
+        headList = sorted(self.getCheckedHeads())
         
         # update Test Data table in info tab only when test items are selected
         if tabType == tab.Info:
@@ -857,7 +1065,7 @@ class MyWindow(QtWidgets.QMainWindow):
             2nd col: site
             3rd+ col: test items
             """
-            hheaderLabels = ["Part ID", "Site"]
+            hheaderLabels = ["Part ID", "Test Head", "Site"]
             vheaderLabels_base = ["Test Number", "HLimit", "LLimit", "Unit"]
             vh_len = len(vheaderLabels_base)
             # clear raw data table
@@ -869,8 +1077,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 siteList = self.availableSites
             
             # Append Part ID & site to the table first
-            dutInfo = self.prepareDataForDUTSummary(siteList)
-            dut_ID_Site = [[L[i] for L in dutInfo] for i in [0, 1]]     # index0: ID; index1: Site
+            dutInfo = self.prepareDataForDUTSummary(headList, siteList)
+            dut_ID_Site = [[L[i] for L in dutInfo] for i in [0, 1, 2]]     # index0: ID; index1: Head; index2: Site
             dut_ID_Site = [["N/A"]*vh_len + L for L in dut_ID_Site]     # add blank to match with the test data
             vheaderLabels = vheaderLabels_base + ["#%d"%(i+1) for i in range(len(dutInfo))]
             
@@ -886,7 +1094,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             # Append Test data
             for test_num in selTestNums:
-                test_data_list, test_stat_list, test_flagInfo_list = self.prepareDataForDUTSummary(siteList, test_num=test_num, exportTestFlag=True)
+                test_data_list, test_stat_list, test_flagInfo_list = self.prepareDataForDUTSummary(headList, siteList, test_num=test_num, exportTestFlag=True)
                 hheaderLabels.append(test_data_list[0])  # add test name to header list
                 
                 qitemCol = []
@@ -956,13 +1164,14 @@ class MyWindow(QtWidgets.QMainWindow):
                 canvasPriorityDict = {}
                 for index in range(qfigLayout.count()):
                     mp_widget = qfigLayout.itemAt(index).widget()
-                    if mp_widget.isCanvas:
-                        # skip toolbar widget
-                        mp_test_num = mp_widget.test_num
-                        mp_site = mp_widget.site
-                        priority = float("%d.%03d"%(mp_test_num, mp_site+1))    # use test_num.site as priority to sort the images based on test number and sites in ascending order, assuming site number < 1000
-                        canvasIndexDict[(mp_test_num, mp_site)] = index
-                        canvasPriorityDict[priority] = index
+                    # if mp_widget.isCanvas:
+                    #     # skip toolbar widget
+                    mp_head = mp_widget.head
+                    mp_test_num = mp_widget.test_num
+                    mp_site = mp_widget.site
+                    priority = (mp_head<<8 | mp_test_num)<<8 | (mp_site+1)    # use mp_head|test_num|site as priority to sort the images based on test number and sites in ascending order
+                    canvasIndexDict[(mp_head, mp_test_num, mp_site)] = index
+                    canvasPriorityDict[priority] = index
                 return canvasIndexDict, canvasPriorityDict
             
             canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # get current indexes
@@ -970,46 +1179,49 @@ class MyWindow(QtWidgets.QMainWindow):
             # delete canvas/toolbars that are not selected
             canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}     # must delete from large index, invert dict to loop from large index
             for index in sorted(canvasIndexDict_reverse.keys(), reverse=True):
-                (mp_test_num, mp_site) = canvasIndexDict_reverse[index]
+                (mp_head, mp_test_num, mp_site) = canvasIndexDict_reverse[index]
                 # if not in Bin tab: no test item selected/ test item is unselected, remove
                 # if sites are unselected, remove
-                if (tabType != tab.Bin and (selTestNums == None or not mp_test_num in selTestNums)) or (not mp_site in siteList):
+                if (tabType != tab.Bin and (selTestNums == None or not mp_test_num in selTestNums)) or (not mp_site in siteList) or (not mp_head in headList):
                     # bin don't care about testNum
-                    qfigLayout.itemAt(index+1).widget().setParent(None)     # must delete toolbar first (index+1)
+                    # qfigLayout.itemAt(index+1).widget().setParent(None)     # must delete toolbar first (index+1)
                     qfigLayout.itemAt(index).widget().setParent(None)
                     
             canvasIndexDict, canvasPriorityDict = getCanvasDicts(qfigLayout)    # update after deleting some images
                     
-        def calculateCanvasIndex(test_num, site, canvasPriorityDict):
+        def calculateCanvasIndex(_test_num, _head, _site, canvasPriorityDict):
             # get index to which the new plot should be inserted
-            Pr = float("%d.%03d"%(test_num, site+1))
-            PrList = list(canvasPriorityDict.keys())
+            Pr = (_head<<8 | _test_num)<<8 | (_site+1)
+            PrList = sorted(canvasPriorityDict.keys())
             PrList.append(Pr)
             PrIndex = sorted(PrList).index(Pr)
-            calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
+            # calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -2) + 2
+            calculatedIndex = canvasPriorityDict.get(PrList[PrIndex-1], -1) + 1
             return calculatedIndex
     
-        self.updateStatus("Generating images...")
         # generate drawings in trend , histo and bin, but bin doesn't require test items selection
         if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and selTestNums != None):
+            self.updateStatus("Generating images...")
             if tabType == tab.Bin:
                 # bin chart is independent of test items
                 for site in siteList[::-1]:
-                    if (0, site) in canvasIndexDict:
-                        # no need to draw image for a existed testnum and site
-                        continue
-                    calIndex = calculateCanvasIndex(0, site, canvasPriorityDict)
-                    # draw
-                    self.genPlot(site, 0, tabType, updateTab=True, insertIndex=calIndex)
+                    for head in headList[::-1]:
+                        if (head, 0, site) in canvasIndexDict:
+                            # no need to draw image for a existed testnum and site
+                            continue
+                        calIndex = calculateCanvasIndex(0, head, site, canvasPriorityDict)
+                        # draw
+                        self.genPlot(head, site, 0, tabType, updateTab=True, insertIndex=calIndex)
             else:
                 for test_num in selTestNums[::-1]:
                     for site in siteList[::-1]:
-                        if (test_num, site) in canvasIndexDict:
-                            # no need to draw image for a existed testnum and site
-                            continue
-                        calIndex = calculateCanvasIndex(test_num, site, canvasPriorityDict)
-                        # draw
-                        self.genPlot(site, test_num, tabType, updateTab=True, insertIndex=calIndex)
+                        for head in headList[::-1]:
+                            if (head, test_num, site) in canvasIndexDict:
+                                # no need to draw image for a existed testnum and site
+                                continue
+                            calIndex = calculateCanvasIndex(test_num, head, site, canvasPriorityDict)
+                            # draw
+                            self.genPlot(head, site, test_num, tabType, updateTab=True, insertIndex=calIndex)
             self.updateStatus("")
         # remaining cases are: no test items in tab trend, histo, wafer
         else:
@@ -1022,43 +1234,45 @@ class MyWindow(QtWidgets.QMainWindow):
             
     def prepareTableContent(self, tabType, **kargs):
         if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
+            head = kargs["head"]
             site = kargs["site"]
             test_num = kargs["test_num"]
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             
             if "RawData" in kargs and kargs["RawData"]:
                 # return data for raw data table
-                testDict = self.selData[site][test_num]
+                testDict = self.selData[head][site][test_num]
                 DUTIndex = testDict["DUTIndex"]
                 DataList = testDict["DataList"]
                 FlagList = testDict["FlagList"]
                 rowList = []    # 2d list
                 for index, value, test_flag in zip(DUTIndex, DataList, FlagList):
                     tmpRow = [self.dataInfo.dutDict.get(index, {"PART_ID": "MissingID"})["PART_ID"],
-                                "%d / %s" % (test_num, "All Sites" if site == -1 else "Site%d"%site),
+                                "%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                                 "%s" % testDict["TestName"],
                                 "%s" % testDict["Unit"],
-                                "" if self.selData[site][test_num]["LL"] == None else valueFormat % self.selData[site][test_num]["LL"],
-                                "" if self.selData[site][test_num]["HL"] == None else valueFormat % self.selData[site][test_num]["HL"],
+                                "" if testDict["LL"] == None else valueFormat % testDict["LL"],
+                                "" if testDict["HL"] == None else valueFormat % testDict["HL"],
                                 valueFormat % value,
                                 f"{test_flag:>08b}"]            
                     rowList.append(tmpRow)
             
             else:
                 # return data for statistic table
-                if self.selData[site][test_num]:
-                    rowList = ["%d / %s" % (test_num, "All Sites" if site == -1 else "Site%d"%site),
-                            self.selData[site][test_num]["TestName"],
-                            self.selData[site][test_num]["Unit"],
-                            "" if self.selData[site][test_num]["LL"] == None else valueFormat % self.selData[site][test_num]["LL"],
-                            "" if self.selData[site][test_num]["HL"] == None else valueFormat % self.selData[site][test_num]["HL"],
-                            "%d" % list(map(isPass, self.selData[site][test_num]["FlagList"])).count(False),
-                            "%s" % "∞" if self.selData[site][test_num]["Cpk"] == np.inf else ("" if self.selData[site][test_num]["Cpk"] is np.nan else valueFormat % self.selData[site][test_num]["Cpk"]),
-                            valueFormat % self.selData[site][test_num]["Mean"],
-                            valueFormat % self.selData[site][test_num]["Median"],
-                            valueFormat % self.selData[site][test_num]["SDev"],
-                            valueFormat % self.selData[site][test_num]["Min"],
-                            valueFormat % self.selData[site][test_num]["Max"]]
+                testDict = self.selData[head][site][test_num]
+                if testDict:
+                    rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
+                            testDict["TestName"],
+                            testDict["Unit"],
+                            "" if testDict["LL"] == None else valueFormat % testDict["LL"],
+                            "" if testDict["HL"] == None else valueFormat % testDict["HL"],
+                            "%d" % list(map(isPass, testDict["FlagList"])).count(False),
+                            "%s" % "∞" if testDict["Cpk"] == np.inf else ("" if testDict["Cpk"] is np.nan else valueFormat % testDict["Cpk"]),
+                            valueFormat % testDict["Mean"],
+                            valueFormat % testDict["Median"],
+                            valueFormat % testDict["SDev"],
+                            valueFormat % testDict["Min"],
+                            valueFormat % testDict["Max"]]
                 else:
                     # some weird files might in this case, in which the number of 
                     # test items in different sites are not the same
@@ -1067,16 +1281,17 @@ class MyWindow(QtWidgets.QMainWindow):
         
         elif tabType == tab.Bin or tabType == tab.Wafer:
             bin = kargs["bin"]
+            head = kargs["head"]
             site = kargs["site"]
             rowList = []
             
             if bin == "HBIN":
-                hbin_count = self.dataInfo.hbinSUM[site]
+                hbin_count = self.dataInfo.hbinSUM[head][site]
                 hbin_info = self.dataInfo.hbinDict
                 HList = sorted(hbin_count.keys())
                 HCnt = [hbin_count[i] for i in HList]
                 
-                rowList.append("%s / %s" % ("Hardware Bin", "All Sites" if site == -1 else "Site%d"%site))
+                rowList.append("%s / %s / %s" % ("Hardware Bin", f"Head{head}", "All Sites" if site == -1 else f"Site{site}"))
                 for bin_num, cnt in zip(HList, HCnt):
                     if cnt == 0: continue
                     item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(HCnt)), bin_num]
@@ -1085,12 +1300,12 @@ class MyWindow(QtWidgets.QMainWindow):
                     rowList.append(item)
                         
             elif bin == "SBIN":
-                sbin_count = self.dataInfo.sbinSUM[site]
+                sbin_count = self.dataInfo.sbinSUM[head][site]
                 sbin_info = self.dataInfo.sbinDict
                 SList = sorted(sbin_count.keys())
                 SCnt = [sbin_count[i] for i in SList]
                 
-                rowList.append("%s / %s" % ("Software Bin", "All Sites" if site == -1 else "Site%d"%site))
+                rowList.append("%s / %s / %s" % ("Software Bin", f"Head{head}", "All Sites" if site == -1 else f"Site{site}"))
                 for bin_num, cnt in zip(SList, SCnt):
                     if cnt == 0: continue
                     item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/sum(SCnt)), bin_num]
@@ -1101,10 +1316,10 @@ class MyWindow(QtWidgets.QMainWindow):
             return rowList
       
       
-    def prepareDataForDUTSummary(self, siteList, updateRow_dutIndex_dict=False, **kargs):
+    def prepareDataForDUTSummary(self, headList, siteList, updateRow_dutIndex_dict=False, **kargs):
         """
         Provide data for DUT summary sheet in exported excel
-        if selectedDutIndex in kargs, siteList is ignored
+        if selectedDutIndex in kargs, headList & siteList are ignored
         if test_num is in kargs: return its test data sorted by dutIndex
         if test_num and exportTestFlag in kargs, return [data, flag]
         else: return dut info sorted by dutIndex
@@ -1122,13 +1337,23 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             for dutIndex in sorted(dutDict.keys()):
                 site = dutDict[dutIndex]["SITE_NUM"]
-                # skip dutIndex if its site is not selected
-                if not (site in siteList or -1 in siteList): continue
+                head = dutDict[dutIndex]["HEAD_NUM"]
+                # skip dutIndex if its headnum/site is not selected
+                if not ((head in headList or -1 in headList) and (site in siteList or -1 in siteList)): continue
                 selectedDutIndex.append(dutIndex)
                     
         if "test_num" in kargs:
             test_num = kargs["test_num"]
-            recType, endian, dutIndexList, offsetL, lengthL = self.mergeAllSiteTestData(test_num)
+            recHeader = None
+            endian = ""
+            dutIndexList = []
+            offsetL = []
+            lengthL = []
+            for head in self.dataSrc.keys():   # we need to get the complete dutIndexList, thus we should loop all test heads
+                recHeader, endian, d, o, l = self.mergeAllSiteTestData(head, test_num)
+                dutIndexList.extend(d)
+                offsetL.extend(o)
+                lengthL.extend(l)
             # get offset & length of selected dut only
             ind_tested = []
             # dutL_no_test = []
@@ -1145,7 +1370,7 @@ class MyWindow(QtWidgets.QMainWindow):
             selectedLengthL = [lengthL[i] for i in ind_tested]
             # parse selected
             RecordParser.endian = endian    # specify the parse endian
-            testDict = RecordParser.parse_rawList(recType, selectedOffsetL, selectedLengthL, self.std_handle)
+            testDict = RecordParser.parse_rawList(recHeader, selectedOffsetL, selectedLengthL, self.std_handle)
             # for those dut in iL_no_test, insert default value to DataList & StatList manually
             # for dut_no_test in dutL_no_test:
             #     ind = selectedDutIndex.index(dut_no_test)
@@ -1180,6 +1405,7 @@ class MyWindow(QtWidgets.QMainWindow):
         for dutIndex in selectedDutIndex:
             hbin = dutDict[dutIndex]["HARD_BIN"]
             sbin = dutDict[dutIndex]["SOFT_BIN"]
+            head = dutDict[dutIndex]["HEAD_NUM"]
             site = dutDict[dutIndex]["SITE_NUM"]
             prrStat = dutDict[dutIndex]["PART_STAT"]
             prrFlag = dutDict[dutIndex]["PART_FLG"]
@@ -1191,12 +1417,13 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 # dut info without any test data    
                 tmpRow = [dutDict.get(dutIndex, {"PART_ID": "MissingID"})["PART_ID"], 
-                        "Site %d" % site, 
-                        "%d" % dutDict[dutIndex]["NUM_TEST"],
-                        "%d ms" % dutDict[dutIndex]["TEST_T"],
-                        "Bin %d - %s" % (hbin, self.dataInfo.hbinDict[hbin][0]),
-                        "Bin %d - %s" % (sbin, self.dataInfo.sbinDict[sbin][0]),
-                        f"{prrStat} / 0x{prrFlag:02x}"]
+                          "Head %d" % head,
+                          "Site %d" % site,
+                          "%d" % dutDict[dutIndex]["NUM_TEST"],
+                          "%d ms" % dutDict[dutIndex]["TEST_T"],
+                          "Bin %d - %s" % (hbin, self.dataInfo.hbinDict[hbin][0]),
+                          "Bin %d - %s" % (sbin, self.dataInfo.sbinDict[sbin][0]),
+                          f"{prrStat} / 0x{prrFlag:02x}"]
                 data.append(tmpRow)
                 
         if updateRow_dutIndex_dict:
@@ -1261,26 +1488,27 @@ class MyWindow(QtWidgets.QMainWindow):
                 rowHeader = []
                 for test_num in selTestNums:
                     for site in sorted(self.getCheckedSites()):
-                        rowList = self.prepareTableContent(tabType, site=site, test_num=test_num)
-                        # create QStandardItem and set TextAlignment
-                        qitemList = []
-                        rowHeader.append(rowList.pop(0))    # pop the 1st item as row header
-                        for index in range(len(rowList)):
-                            item  = rowList[index]
-                            qitem = QtGui.QStandardItem(item)
-                            qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                            qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                            if index == indexOfFail:
-                                if item != "0": 
-                                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                            elif index == indexOfCpk:
-                                if item != "" and item != "∞":
-                                    if float(item) < self.settingParams.cpkThreshold:
+                        for head in sorted(self.getCheckedHeads()):
+                            rowList = self.prepareTableContent(tabType, head=head, site=site, test_num=test_num)
+                            # create QStandardItem and set TextAlignment
+                            qitemList = []
+                            rowHeader.append(rowList.pop(0))    # pop the 1st item as row header
+                            for index in range(len(rowList)):
+                                item  = rowList[index]
+                                qitem = QtGui.QStandardItem(item)
+                                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
+                                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                                if index == indexOfFail:
+                                    if item != "0": 
                                         qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                        qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-                            qitemList.append(qitem)
-                        self.tmodel.appendRow(qitemList)
+                                        qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+                                elif index == indexOfCpk:
+                                    if item != "" and item != "∞":
+                                        if float(item) < self.settingParams.cpkThreshold:
+                                            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                            qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                                qitemList.append(qitem)
+                            self.tmodel.appendRow(qitemList)
                         
                 self.tmodel.setVerticalHeaderLabels(rowHeader)
                 self.ui.dataTable.verticalHeader().setDefaultAlignment(QtCore.Qt.AlignCenter)
@@ -1296,23 +1524,24 @@ class MyWindow(QtWidgets.QMainWindow):
             for binType in ["HBIN", "SBIN"]:
                 color_dict = self.settingParams.hbinColor if binType == "HBIN" else self.settingParams.sbinColor
                 for site in sorted(self.getCheckedSites()):
-                    rowList = self.prepareTableContent(tabType, bin=binType, site=site)
-                    qitemList = []
-                    rowHeader.append(rowList[0])    # the 1st item as row header
-                    colSize = len(rowList)-1 if len(rowList)-1>colSize else colSize     # get max length
-                    for item in rowList[1:]:
-                        qitem = QtGui.QStandardItem(item[0])
-                        qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                        qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                        # set color
-                        bin_num = item[1]
-                        bc = QtGui.QColor(color_dict[bin_num])
-                        # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
-                        fc = QtGui.QColor("#000000") if bc.red()*0.299 + bc.green()*0.587 + bc.blue()*0.114 > 186 else QtGui.QColor("#FFFFFF")
-                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
-                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
-                        qitemList.append(qitem)
-                    self.tmodel.appendRow(qitemList)
+                    for head in sorted(self.getCheckedHeads()):
+                        rowList = self.prepareTableContent(tabType, bin=binType, head=head, site=site)
+                        qitemList = []
+                        rowHeader.append(rowList[0])    # the 1st item as row header
+                        colSize = len(rowList)-1 if len(rowList)-1>colSize else colSize     # get max length
+                        for item in rowList[1:]:
+                            qitem = QtGui.QStandardItem(item[0])
+                            qitem.setTextAlignment(QtCore.Qt.AlignCenter)
+                            qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                            # set color
+                            bin_num = item[1]
+                            bc = QtGui.QColor(color_dict[bin_num])
+                            # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
+                            fc = QtGui.QColor("#000000") if bc.red()*0.299 + bc.green()*0.587 + bc.blue()*0.114 > 186 else QtGui.QColor("#FFFFFF")
+                            qitem.setData(bc, QtCore.Qt.BackgroundRole)
+                            qitem.setData(fc, QtCore.Qt.ForegroundRole)
+                            qitemList.append(qitem)
+                        self.tmodel.appendRow(qitemList)
                     
             self.tmodel.setVerticalHeaderLabels(rowHeader)
             self.ui.dataTable.verticalHeader().setDefaultAlignment(QtCore.Qt.AlignCenter)
@@ -1321,75 +1550,55 @@ class MyWindow(QtWidgets.QMainWindow):
             self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
-    def genPlot(self, site, test_num, tabType, **kargs):
+    def genPlot(self, head, site, test_num, tabType, **kargs):
         # create fig & canvas
-        figsize = (9, 9) if tabType == tab.Wafer else (9, 4) 
+        figsize = (9, 10) if tabType == tab.Wafer else (9, 4) 
         fig = plt.Figure(figsize=figsize)
-        # fig.tight_layout()
         fig.set_tight_layout(True)
-        canvas = FigureCanvas(fig)
-        # prevent the canvas to shrink beyond a point
-        # original size looks like a good minimum size
-        canvas.setMinimumSize(canvas.size())
+        canvas = PlotCanvas(fig)
         # binds to widget
         if "updateTab" in kargs and kargs["updateTab"] and "insertIndex" in kargs:
             qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
             qfigLayout = qfigWidget.children()[0]
             
-            canvas.setParent(qfigWidget)
-            toolbar = NavigationToolbar(canvas, qfigWidget)
-            setattr(canvas, "test_num", test_num)
-            setattr(canvas, "site", site)
-            setattr(canvas, "priority", float("%d.%03d"%(test_num, site+1)))
-            setattr(canvas, "isCanvas", True)
-            setattr(toolbar, "isCanvas", False)
+            canvas.bindToUI(qfigWidget)
+            canvas.head = head
+            canvas.site = site
+            canvas.test_num = test_num
+            canvas.priority = (head<<8 | test_num)<<8 | (site+1)
             # place the fig and toolbar in the layout
             index = kargs["insertIndex"]
             qfigLayout.insertWidget(index, canvas)
-            qfigLayout.insertWidget(index+1, toolbar)
                 
         if tabType == tab.Trend:   # Trend
+            selData = self.selData[head][site][test_num]
             ax = fig.add_subplot(111)
-            ax.set_title("%d %s - %s"%(self.selData[site][test_num]["TestNum"], self.selData[site][test_num]["TestName"], "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
-            # x_arr = np.array(range(len(self.selData[site][test_num]["DataList"])))
-            x_arr = self.selData[site][test_num]["DUTIndex"]
-            y_arr = self.selData[site][test_num]["DataList"]
-            HL = self.selData[site][test_num]["HL"]
-            LL = self.selData[site][test_num]["LL"]
-            med = self.selData[site][test_num]["Median"]
-            avg = self.selData[site][test_num]["Mean"]
+            ax.set_title("%d %s - %s - %s"%(selData["TestNum"], selData["TestName"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+            x_arr = selData["DUTIndex"]
+            y_arr = selData["DataList"]
+            HL = selData["HL"]
+            LL = selData["LL"]
+            med = selData["Median"]
+            avg = selData["Mean"]
             # plot            
-            trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.5, markeredgecolor="black", linewidth=0.5, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
-            # connect magnet cursor
-            cursorKey = "%d_%d"%(test_num, site)
-            self.cursorDict[cursorKey] = MagCursor(trendLine, self.settingParams.dataPrecision)
-            canvas.mpl_connect('motion_notify_event', self.cursorDict[cursorKey].mouse_move)
-            canvas.mpl_connect('resize_event', self.cursorDict[cursorKey].canvas_resize)
-            ax.callbacks.connect('xlim_changed', self.cursorDict[cursorKey].canvas_resize)
-            ax.callbacks.connect('ylim_changed', self.cursorDict[cursorKey].canvas_resize)
+            trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
             # axes label
             ax.ticklabel_format(useOffset=False)    # prevent + sign
+            ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
             ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma")
-            ax.set_ylabel("%s%s"%(self.selData[site][test_num]["TestName"], " (%s)"%self.selData[site][test_num]["Unit"] if self.selData[site][test_num]["Unit"] else ""), fontsize=12, fontname="Tahoma")
+            ax.set_ylabel("%s%s"%(selData["TestName"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
             # limits
-            ax.set_xlim(left = x_arr[0] - (x_arr[-1]-x_arr[0]) * 0.05)
-            data_max = self.selData[site][test_num]["Max"]
-            data_min = self.selData[site][test_num]["Min"]
+            if len(x_arr) == 1:
+                ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
+            else:
+                ax.set_xlim(left = x_arr[0] - (x_arr[-1]-x_arr[0]) * 0.05)
+            data_max = max(selData["Max"], HL) if HL != None else selData["Max"]
+            data_min = min(selData["Min"], LL) if LL != None else selData["Min"]
             dataDelta = data_max - data_min
             
-            if (HL != None) and (LL != None): # if HL/LL is not None, set ylim based on HL/LL or data
-                largeDelta = max(dataDelta, (HL-LL))     # use the bigger delta to calc the headroom
-                headroomY = 5 if largeDelta == 0 else largeDelta * 0.1
-                ax.set_ylim((LL-headroomY, HL+headroomY))
-            else:   # if HL/LL is None, set ylim based on data
-                headroomY = 5 if dataDelta == 0 else dataDelta * 0.1
-                ax.set_ylim((data_min-headroomY, data_max+headroomY))
-                
-            # reset limits if data points are out of canvas
-            if data_max  > ax.get_ylim()[1]:
-                ax.set_ylim(top = data_max + dataDelta * 0.1)
-            if self.selData[site][test_num]["Min"]  < ax.get_ylim()[0]:
-                ax.set_ylim(bottom = data_min - dataDelta * 0.1)
+            headroomY = 5 if dataDelta == 0 else dataDelta * 0.1
+            ax.set_ylim((data_min-headroomY, data_max+headroomY))
+
             # HL/LL lines
             if self.settingParams.showHL_trend: 
                 if HL != None: 
@@ -1402,9 +1611,10 @@ class MyWindow(QtWidgets.QMainWindow):
             # data labels
             med_text = ("Med = %.3f \n" if med > avg else "\nMed = %.3f ") % med
             avg_text = ("\nAvg = %.3f " if med > avg else "Avg = %.3f \n") % avg
-            # set xlim to prevent text and data point overlap, convert str len to plot pixel by times 14
-            headroomX, _ = [i-j for i,j in zip(toDCoord(ax, (len(med_text)*16, 0)), toDCoord(ax, (0, 0)))]
-            ax.set_xlim(right = x_arr[-1]+headroomX)
+            if len(x_arr) != 1:
+                # set xlim to prevent text and data point overlap, convert str len to plot pixel by times 16
+                headroomX, _ = [i-j for i,j in zip(toDCoord(ax, (len(med_text)*16, 0)), toDCoord(ax, (0, 0)))]
+                ax.set_xlim(right = x_arr[-1]+headroomX)
             # add med and avg text at the right edge of the plot
             if self.settingParams.showMed_trend:
                 ax.text(x=ax.get_xlim()[1], y=med, s=med_text, color='k', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center")
@@ -1412,16 +1622,30 @@ class MyWindow(QtWidgets.QMainWindow):
             if self.settingParams.showMean_trend:
                 ax.text(x=ax.get_xlim()[1], y=avg, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center")
                 ax.axhline(y = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
+            if not ("exportImg" in kargs and kargs["exportImg"] == True):
+                # connect magnet cursor
+                cursorKey = "%d_%d"%(test_num, site)
+                self.cursorDict[cursorKey] = MagCursor(trendLine, self.settingParams.dataPrecision, mainGUI=self)
+                canvas.mpl_connect('motion_notify_event', self.cursorDict[cursorKey].mouse_move)
+                canvas.mpl_connect('resize_event', self.cursorDict[cursorKey].canvas_resize)
+                canvas.mpl_connect('pick_event', self.cursorDict[cursorKey].on_pick)
+                canvas.mpl_connect('key_press_event', self.cursorDict[cursorKey].key_press)
+                canvas.mpl_connect('key_release_event', self.cursorDict[cursorKey].key_release)                
+                canvas.mpl_connect('button_press_event', self.cursorDict[cursorKey].button_press)
+                ax.callbacks.connect('xlim_changed', self.cursorDict[cursorKey].canvas_resize)
+                ax.callbacks.connect('ylim_changed', self.cursorDict[cursorKey].canvas_resize)
+                # self.cursorDict[cursorKey].copyBackground()   # not required, as updating the tab will trigger canvas resize event
         
         elif tabType == tab.Histo:   # Histogram
+            selData = self.selData[head][site][test_num]
             ax = fig.add_subplot(111)
-            ax.set_title("%d %s - %s"%(self.selData[site][test_num]["TestNum"], self.selData[site][test_num]["TestName"], "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
-            dataList = self.selData[site][test_num]["DataList"]
-            HL = self.selData[site][test_num]["HL"]
-            LL = self.selData[site][test_num]["LL"]
-            med = self.selData[site][test_num]["Median"]
-            avg = self.selData[site][test_num]["Mean"]
-            sd = self.selData[site][test_num]["SDev"]
+            ax.set_title("%d %s - %s - %s"%(selData["TestNum"], selData["TestName"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+            dataList = selData["DataList"]
+            HL = selData["HL"]
+            LL = selData["LL"]
+            med = selData["Median"]
+            avg = selData["Mean"]
+            sd = selData["SDev"]
             bin_num = self.settingParams.binCount
             # note: len(bin_edges) = len(hist) + 1
             hist, bin_edges = np.histogram(dataList, bins = bin_num)
@@ -1491,16 +1715,16 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.text(x=avg, y=ax.get_ylim()[1], s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center")
                 ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
             ax.ticklabel_format(useOffset=False)    # prevent + sign
-            ax.set_xlabel("%s%s"%(self.selData[site][test_num]["TestName"], " (%s)"%self.selData[site][test_num]["Unit"] if self.selData[site][test_num]["Unit"] else ""), fontsize=12, fontname="Tahoma")
+            ax.set_xlabel("%s%s"%(selData["TestName"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
             ax.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
             
         elif tabType == tab.Bin:   # Bin Chart
-            fig.suptitle("%s - %s"%("Bin Summary", "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+            fig.suptitle("%s - %s - %s"%("Bin Summary", "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
             ax_l = fig.add_subplot(121)
             ax_r = fig.add_subplot(122)
             Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
             # HBIN plot
-            hbin_count = self.dataInfo.hbinSUM[site]
+            hbin_count = self.dataInfo.hbinSUM[head][site]
             hbin_info = self.dataInfo.hbinDict
             HList = sorted(hbin_count.keys())
             HCnt = [hbin_count[i] for i in HList]
@@ -1521,7 +1745,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax_l.set_ylabel("Hardware Bin Counts", fontsize=12, fontname="Tahoma")
 
             # SBIN plot
-            sbin_count = self.dataInfo.sbinSUM[site]
+            sbin_count = self.dataInfo.sbinSUM[head][site]
             sbin_info = self.dataInfo.sbinDict
             SList = sorted(sbin_count.keys())
             SCnt = [sbin_count[i] for i in SList]
@@ -1544,8 +1768,7 @@ class MyWindow(QtWidgets.QMainWindow):
         elif tabType == tab.Wafer:   # Wafermap
             waferDict = self.dataInfo.waferDict[test_num]
             ax = fig.add_subplot(111, aspect=1)
-            ax.set_title("Wafer ID: %s - %s"%(waferDict["WAFER_ID"], "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
-            
+            ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
             xmin = self.dataInfo.waferInfo.get("xmin", -32768)
             ymin = self.dataInfo.waferInfo.get("ymin", -32768)
             xmax = self.dataInfo.waferInfo.get("xmax", -32768)
@@ -1559,11 +1782,11 @@ class MyWindow(QtWidgets.QMainWindow):
                 sbin = self.dataInfo.dutDict[dut]["SOFT_BIN"]
                 coordsDict.setdefault(sbin, []).append(coords)
             # draw
-            dutCnt = sum(self.dataInfo.sbinSUM[site].values())
+            dutCnt = sum(self.dataInfo.sbinSUM[head][site].values())
             legendHandles = []
             for sbin in sorted(coordsDict.keys()):
                 sbinName = self.dataInfo.sbinDict[sbin][0]
-                sbinCnt = self.dataInfo.sbinSUM[site][sbin]
+                sbinCnt = self.dataInfo.sbinSUM[head][site][sbin]
                 percent = 100 * sbinCnt / dutCnt
                 label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
                 rects = []
@@ -1590,7 +1813,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
             ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=-100)
             # legend
-            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(-0.1, -0.02, 1.2, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
                     
         if "exportImg" in kargs and kargs["exportImg"] == True:
             imgData = io.BytesIO()
@@ -1606,7 +1829,6 @@ class MyWindow(QtWidgets.QMainWindow):
     def releaseMemory(self):
         # clear cache to release memory
         RecordParser.cache = {}
-        RecordParser.ocache = {}
         self.selData = {}
         # clear images
         [[self.tab_dict[key]["layout"].itemAt(index).widget().setParent(None) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin]]
@@ -1614,34 +1836,47 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def callFileLoader(self, stdHandle):
         if stdHandle:
-            self.releaseMemory()
             stdfLoader(stdHandle, self.signals, self)
 
         
-    @Slot(stdfSummarizer)
-    def updateData(self, smz):
+    @Slot(stdfData)
+    def updateData(self, sData):
         sys.excepthook = self.onException
-        if len(smz.data) != 0:
+        if len(sData.testData) != 0:
+            # release cache of previous file
+            self.releaseMemory()
             # remove old std file handler
             self.stdHandleList = [self.std_handle]
             
-            self.dataSrc = smz.data
-            self.dataInfo = smz     # attrs: fileInfo; pinDict; hbinSUM; sbinSUM; hbinDict; sbinDict; waferInfo; waferDict
+            self.dataSrc = sData.testData
+            self.dataInfo = sData     # attrs: fileInfo; pinDict; hbinSUM; sbinSUM; hbinDict; sbinDict; waferInfo; waferDict; globalTestFlag
             
             # disable/enable wafer tab
-            self.ui.tabControl.setTabEnabled(4, self.dataInfo.waferInfo != {})
+            self.ui.tabControl.setTabEnabled(4, len(self.dataInfo.waferDict) != 0)
     
             # update listView
-            arbSite = list(self.dataSrc.keys())[0]    # get an arbitrary site number to get test number & test name
-            self.completeTestList = ["%d\t%s"%(test_num, self.dataSrc[arbSite][test_num]["TestName"]) for test_num in sorted(self.dataSrc[arbSite].keys())]
+            self.completeTestDict = {}  # key: test_num, value: test name
+            for head_num, sdict in self.dataSrc.items():
+                for site_num, tdict in sdict.items():
+                    for test_num, test_data in tdict.items():
+                        if test_num in self.completeTestDict:
+                            continue
+                        else:
+                            self.completeTestDict[test_num] = test_data["TestName"]
+                        
+            self.completeTestList = ["%d\t%s"%(test_num, self.completeTestDict[test_num]) for test_num in sorted(self.completeTestDict.keys())]
             self.updateModelContent(self.sim_list, self.completeTestList)
-            self.completeWaferList = ["%d\t%s"%(waferIndex, self.dataInfo.waferDict[waferIndex]["WAFER_ID"]) for waferIndex in sorted(self.dataInfo.waferDict.keys())]
+            self.completeWaferList = ["#%d\t%s"%(waferIndex, self.dataInfo.waferDict[waferIndex]["WAFER_ID"]) for waferIndex in sorted(self.dataInfo.waferDict.keys())]
             self.updateModelContent(self.sim_list_wafer, self.completeWaferList)
             
-            # remove site checkbox for invalid sites
+            # remove site/head checkbox for invalid sites/heads
             current_exist_site = list(self.site_cb_dict.keys())     # avoid RuntimeError: dictionary changed size during iteration
+            current_exist_head = list(self.head_cb_dict.keys())
+            sites_in_file = set()
+            [sites_in_file.update(set(self.dataSrc[headnum].keys())) for headnum in self.dataSrc.keys()] # all sites in stdf file
+            
             for site in current_exist_site:
-                if site not in self.dataSrc:
+                if site not in sites_in_file:
                     self.site_cb_dict.pop(site)
                     row = 1 + site//4
                     col = site % 4
@@ -1649,37 +1884,65 @@ class MyWindow(QtWidgets.QMainWindow):
                     if cb_layout is not None:
                         cb_layout.widget().deleteLater()
                         self.ui.gridLayout_site_select.removeItem(cb_layout)
+                        
+            for headnum in current_exist_head:
+                if headnum not in self.dataSrc.keys():
+                    self.head_cb_dict.pop(headnum)
+                    row = headnum//3
+                    col = headnum % 3
+                    cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
+                    if cb_layout_h is not None:
+                        cb_layout_h.widget().deleteLater()
+                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)                    
                                  
-            # add & enable checkboxes for each sites
-            self.availableSites = [i for i in self.dataSrc.keys() if i != -1]
+            # add & enable checkboxes for each sites and heads
+            self.availableSites = list(sites_in_file)
+            self.availableHeads = sorted(self.dataSrc.keys())
+            
+            siteNum = 0     # pre-define local var in case there are no available sites
             for siteNum in self.availableSites:
                 if siteNum in self.site_cb_dict:
                     # skip if already have a checkbox for this site
                     continue
                 siteName = "Site %d" % siteNum
-                self.site_cb_dict[siteNum] = QtWidgets.QCheckBox(self.ui.site_selection)
+                self.site_cb_dict[siteNum] = QtWidgets.QCheckBox(self.ui.site_selection_contents)
                 self.site_cb_dict[siteNum].setObjectName(siteName)
                 self.site_cb_dict[siteNum].setText(siteName)
                 row = 1 + siteNum//4
                 col = siteNum % 4
                 self.ui.gridLayout_site_select.addWidget(self.site_cb_dict[siteNum], row, col)
-            # set max height in order to resize site selection groupbox
-            self.ui.site_selection.setMaximumHeight(60 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*(2 + siteNum//4))   # 2 + siteNum//4 == total row in grid layout
+                
+            for headnum in self.availableHeads:
+                if headnum in self.head_cb_dict:
+                    continue
+                headName = "Test Head %d" % headnum
+                self.head_cb_dict[headnum] = QtWidgets.QCheckBox(self.ui.head_selection_tab)
+                self.head_cb_dict[headnum].setObjectName(headName)
+                self.head_cb_dict[headnum].setText(headName)
+                self.head_cb_dict[headnum].setChecked(True)
+                row = headnum//3
+                col = headnum % 3
+                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)                
+            # set max height in order to resize site/head selection tab control
+            nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
+            self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
             
             self.init_SettingUI()   # remove existing color btns
             self.settingUI.initColorBtns()
             self.init_SettingParams()
-            self.init_SiteCheckbox()
+            self.init_Head_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummary()
             self.updateTableContent()
             self.updateTabContent(forceUpdate=True)
-            self.cacheOmittedRecordField()
+            # self.cacheOmittedRecordField()
             
         else:
             # aborted, restore to original stdf file handler
             self.std_handle = self.stdHandleList[0]
             self.stdHandleList = [self.std_handle]
+            # restore previous ocahce
+            RecordParser.ocache = RecordParser.ocache_previous
 
     
     @Slot(str, bool, bool, bool)
@@ -1745,6 +2008,4 @@ def run():
     sys.exit(app.exec_())
     
 if __name__ == '__main__':
-    # task = Process(target=run, daemon=False)
-    # task.start()
     run()

@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Tue Feb 16 2021
+# Last Modified: Thu Feb 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,8 +28,8 @@
 import struct
 import re
 
-from deps.pystdf.Types import *
-from deps.pystdf import V4
+from .Types import packFormatMap, EndOfRecordException
+from . import V4
 
 
 # pre-compile struct format, key: endian+fmt, value: struct object
@@ -48,6 +48,9 @@ unit_prefix = {15: "f",
               -6: "M",
               -9: "G",
               -12: "T"}
+
+fieldNames = dict([(rec.header(), rec.fieldNames) for rec in V4.records])
+fieldStdfTypes = dict([(rec.header(), rec.fieldStdfTypes) for rec in V4.records])
 
 
 """*** Functions group of parse_raw() ***"""
@@ -68,9 +71,9 @@ def appendFieldParser(fn, action):
     return newRecordParser
 
 
-def createRecordParser(recType):
+def createRecordParser(recHeader):
     fn = lambda rawInfo, fields: fields
-    for stdfType in recType.fieldStdfTypes:
+    for stdfType in fieldStdfTypes[recHeader]:
         # fieldStdfTypes is defined in StdfRecordMeta class, are strictly-ordered stdf types list in a record
         # ["CI", "U1", ...]
         fn = appendFieldParser(fn, getFieldParser(stdfType))
@@ -198,7 +201,7 @@ unpackMap = {
     "Dn": lambda rawInfo, fmt: readDn(rawInfo),
     "Vn": lambda rawInfo, fmt: readVn(rawInfo)}      
 
-recordParsers = dict([( (recType.typ, recType.sub), createRecordParser(recType) ) for recType in V4.records ])  # parser functions dicts for recTypes
+recordParsers = dict([(rec.header(), createRecordParser(rec.header())) for rec in V4.records ])  # parser functions dicts for records
 
 """*** End Group ***"""
 
@@ -225,21 +228,23 @@ class RecordParser:
     cache = {}
     # cache for possibly omitted data, such as RES_SCAL
     ocache = {}
+    ocache_previous = {}
     
     @staticmethod
-    def parse_raw(recType, length, rawByte):
+    def parse_raw(recHeader, length, rawByte):
         rawInfo = RawData(length, rawByte)  # mutable object contains info of binary data
-        recParser = recordParsers[(recType.typ, recType.sub)]  # get parser function of the record type
+        recParser = recordParsers[recHeader]  # get parser function of the record type
+        recFields = fieldNames[recHeader]
         valueList = recParser(rawInfo, [])  # get a list of data in the current record
         
-        if len(valueList) < len(recType.columnNames):
-            valueList += [None] * (len(recType.columnNames) - len(valueList)) # append None for the data that are not presented in the file
+        if len(valueList) < len(recFields):
+            valueList += [None] * (len(recFields) - len(valueList)) # append None for the data that are not presented in the file
         
-        valueDict = dict(zip(recType.fieldNames, valueList))
+        valueDict = dict(zip(recFields, valueList))
         return valueDict
     
     @staticmethod
-    def parse_rawList(recType, offset_list, length_list, file_handle, **kargs):
+    def parse_rawList(recHeader, offset_list, length_list, file_handle, **kargs):
         # the offsets belong to a single test item, all fields are the same except the test value
         testDict = {}
         for offset, length in zip(offset_list, length_list):
@@ -248,7 +253,7 @@ class RecordParser:
             try:
                 valueDict = RecordParser.cache[(offset, length)]
             except KeyError:
-                valueDict = RecordParser.parse_raw(recType, length, rawByte)
+                valueDict = RecordParser.parse_raw(recHeader, length, rawByte)
                 RecordParser.cache[(offset, length)] = valueDict    # cache value dict for speed
 
             # bit7-6: 00 pass; 10 fail; x1 none;
@@ -275,47 +280,47 @@ class RecordParser:
             # set default LL/HL/Unit for FTR since there's no such field
             # update the following field only once for PTR & MPR, as they may be omitted from records
             if "LL" not in testDict:
-                if recType == V4.ftr:
+                if recHeader == V4.ftr.header():
                     testDict["LL"] = None
                 else:
                     # bit 6 set = No Low Limit for this test 
                     testDict["LL"] = result_lolimit * 10 ** result_scale if record_flag & 0b01000000 == 0 else None
                     
             if "HL" not in testDict:
-                if recType == V4.ftr:
+                if recHeader == V4.ftr.header():
                     testDict["HL"] = None
                 else:
                     # bit 7 set = No High Limit for this test 
                     testDict["HL"] = result_hilimit * 10 ** result_scale if record_flag & 0b10000000 == 0 else None
                     
             if "Unit" not in testDict:
-                if recType == V4.ftr:
+                if recHeader == V4.ftr.header():
                     testDict["Unit"] = ""
                 else:
                     testDict["Unit"] = unit_prefix.get(result_scale, "") + result_unit
                                     
-            if recType == V4.ftr:
+            if recHeader == V4.ftr.header():
                 testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["TEST_FLG"]]
             else:
-                if recType == V4.ptr:
+                if recHeader == V4.ptr.header():
                     tmpResult = valueDict["RESULT"] * 10 ** result_scale
                     # testDict.setdefault("DataList", []).append(tmpResult)     # list is immutable in python
                     testDict["DataList"] = testDict.setdefault("DataList", []) + [tmpResult]
                     
-                elif recType == V4.mpr:
+                elif recHeader == V4.mpr.header():
                     # for mpr, datalist is 2d, column for different pins
                     testDict["DataList"] = testDict.setdefault("DataList", []) + [valueDict["RTN_RSLT"] * 10 ** result_scale]
                 
         return testDict
     
     @staticmethod
-    def updateOCache(recType, length, rawByte):
+    def updateOCache(recHeader, length, rawByte):
         # read the first record of test items and cache (possibly) omitted fields
         # RES_SCAL of the first record will never be omitted according to the stdf spec.
-        valueDict = RecordParser.parse_raw(recType, length, rawByte)
+        valueDict = RecordParser.parse_raw(recHeader, length, rawByte)
         test_num = valueDict["TEST_NUM"]
         
-        if recType == V4.ptr:
+        if recHeader == V4.ptr.header() or recHeader == V4.mpr.header():
             result_scale = valueDict["RES_SCAL"]
             LO_LIMIT = valueDict["LO_LIMIT"]
             HI_LIMIT = valueDict["HI_LIMIT"]
@@ -326,10 +331,6 @@ class RecordParser:
                                              "HI_LIMIT": HI_LIMIT, 
                                              "UNITS": UNITS,
                                              "OPT_FLAG": OPT_FLAG}
-        
-        elif recType == V4.mpr:
-            result_scale = valueDict["RES_SCAL"]
-            RecordParser.ocache[test_num] = {"RES_SCAL": result_scale}
 
 
 

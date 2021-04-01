@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Feb 15 2021
+# Last Modified: Thu Apr 01 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -117,9 +117,9 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_binCount.setValidator(QtGui.QIntValidator(1, 1000, self))
         self.settingsUI.lineEdit_cpk.setValidator(QtGui.QDoubleValidator(self))
         
-        self.settingsUI.settingBox.setItemIcon(0, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
-        self.settingsUI.settingBox.setItemIcon(1, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
-        self.settingsUI.settingBox.setItemIcon(2, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["table"], format = 'SVG'))))
+        self.settingsUI.settingBox.setItemIcon(0, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["table"], format = 'SVG'))))
+        self.settingsUI.settingBox.setItemIcon(1, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
+        self.settingsUI.settingBox.setItemIcon(2, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
         self.settingsUI.settingBox.setItemIcon(3, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["color_palette"], format = 'SVG'))))
                 
         
@@ -138,9 +138,10 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.showBoxp_histo.setChecked(self.originalParams.showBoxp_histo)
         self.settingsUI.lineEdit_binCount.setText(str(self.originalParams.binCount))
         self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
-        # table
+        # general
         self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
+        self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if self.originalParams.checkCpk else 1)
         self.settingsUI.lineEdit_cpk.setText(str(self.originalParams.cpkThreshold))
         # color
         for (orig_dict, layout) in [(self.originalParams.siteColor, self.settingsUI.gridLayout_site_color),
@@ -197,36 +198,38 @@ class stdfSettings(QtWidgets.QDialog):
         self.parent.settingParams.showBoxp_histo = self.settingsUI.showBoxp_histo.isChecked()
         self.parent.settingParams.binCount = int(self.settingsUI.lineEdit_binCount.text())
         self.parent.settingParams.showSigma = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
-        # table
+        # General
         self.parent.settingParams.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
         self.parent.settingParams.dataPrecision = self.settingsUI.precisionSlider.value()
+        self.parent.settingParams.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
         self.parent.settingParams.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
         # color
         for group in ["site", "sbin", "hbin"]:
             self.currentColorDict(get=False, group=group)
         # save data to toml config
-        configData = {"Trend Plot": {},
+        configData = {"General": {},
+                      "Trend Plot": {},
                       "Histo Plot": {},
-                      "Statistic Table": {},
                       "Color Setting": {}}
         configName = dict(sys.CONFIG_NAME)
         for k, v in self.parent.settingParams.__dict__.items():
-            if k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
+            if k in ["dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
+                # General
+                configData["General"][configName[k]] = v
+            elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
                 # Trend
                 configData["Trend Plot"][configName[k]] = v
             elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
                 # Histo
                 configData["Histo Plot"][configName[k]] = v
-            elif k in ["dataNotation", "dataPrecision", "cpkThreshold"]:
-                # Table
-                configData["Statistic Table"][configName[k]] = v
+
             elif k in ["siteColor", "sbinColor", "hbinColor"]:
                 # Color
                 # change Int key to string, since toml only support string keys
                 v = dict([(str(intKey), color) for intKey, color in v.items()])
                 configData["Color Setting"][configName[k]] = v
 
-        with open(sys.CONFIG_PATH, "w+") as fd:
+        with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
             toml.dump(configData, fd)
         
         
@@ -241,9 +244,9 @@ class stdfSettings(QtWidgets.QDialog):
                                      "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]])
         
          
-    def isTableChanged(self):
+    def isGeneralChanged(self):
         return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["dataNotation", "dataPrecision", "cpkThreshold"]])
+                        for attr in ["dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]])
 
 
     def isColorChanged(self):
@@ -265,14 +268,14 @@ class stdfSettings(QtWidgets.QDialog):
             if self.isHistoChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Histo): 
                 refreshTab = True
                 
-            if self.isTableChanged() and (self.parent.ui.tabControl.currentIndex() != tab.Bin): 
+            if self.isGeneralChanged() and (self.parent.ui.tabControl.currentIndex() != tab.Bin): 
                 refreshTable = True
                 refreshCursor = True
                 # if raw data table is active, update as well
                 if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
                     refreshTab = True
                 # if cpk threshold changed, clear listView backgrounds
-                if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold:
+                if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
                     refreshList = True
                     
             if self.isColorChanged():
@@ -298,7 +301,7 @@ class stdfSettings(QtWidgets.QDialog):
         # site color picker
         site_color_group = self.settingsUI.site_groupBox
         site_gridLayout = self.settingsUI.gridLayout_site_color
-        for i, siteNum in enumerate([-1]+[i for i in self.parent.dataSrc.keys()]):
+        for i, siteNum in enumerate([-1]+[i for i in self.parent.availableSites]):
             siteName = f"Site {siteNum:<2}" if siteNum != -1 else "All Site"
             cB = colorBtn(parent=site_color_group, name=siteName, num=siteNum)
             row = i//3
@@ -331,18 +334,10 @@ class stdfSettings(QtWidgets.QDialog):
             self.originalParams = deepcopy(self.parent.settingParams)
             self.initWithParentParams()
             currentTab = self.parent.ui.tabControl.currentIndex()
-            if currentTab == 1:
-                # trend tab
-                currentIndex = 0
-            elif currentTab == 2:
-                # histo tab
-                currentIndex = 1
-            elif currentTab == 0:
-                # info tab
-                currentIndex = 2
-            else:
-                # bin & wafer
-                currentIndex = 3
+            if currentTab == 0: currentIndex = 0            # info tab
+            elif currentTab == 1: currentIndex = 1          # trend tab
+            elif currentTab == 2: currentIndex = 2          # histo tab
+            else: currentIndex = 3                          # bin & wafer
             self.settingsUI.settingBox.setCurrentIndex(currentIndex)
 
         self.exec_()           

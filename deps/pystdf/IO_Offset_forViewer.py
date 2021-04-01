@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Tue Feb 09 2021
+# Last Modified: Fri Mar 12 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,28 +26,23 @@
 
 
 import sys
-from time import time
+# from time import time
 import struct
-from deps.pystdf.Types import *
-from deps.pystdf import V4
+from .Types import *
+from . import V4
 
 
 class stdIO:
     
-    def __init__(self, recTypes=V4.records, inp=sys.stdin, flag=None, q=None):
+    def __init__(self, inp=sys.stdin, flag=None, q=None, clusterSize=6000):
         # DataSource.__init__(self)
         self.eof = 1
-        # records' instances
-        self.recTypes = set(recTypes)
         # python stardard input
         self.inp = inp
         self.flag = flag    # used for controlling parse actions
         self.q = q  # queue ref
-        
-        # {(0, 10):FAR, (50, 30):DTR, ....}
-        self.recordMap = dict(
-            [ ( (recType.typ, recType.sub), recType )
-                for recType in recTypes ])
+        # size of a data cluster
+        self.clusterSize = clusterSize
         
         
     def readHeader(self):
@@ -64,20 +59,18 @@ class stdIO:
     def get_records_offset(self):
 
         self.eof = 0
-        records_to_parse = dict([ ((recType.typ, recType.sub), recType) for recType in [V4.mir, 
-                                                                                        V4.wcr, V4.wir, V4.wrr, 
-                                                                                        V4.ptr, V4.ftr, V4.mpr, 
-                                                                                        V4.pir, V4.prr, 
-                                                                                        V4.hbr, V4.sbr] ])
-        dataCluster = []    # pack 6000 items before putting into queue
+        records_to_parse = [rec.header() for rec in [V4.mir, V4.wcr, V4.wir, V4.wrr,
+                                                    V4.ptr, V4.ftr, V4.mpr, V4.tsr,
+                                                    V4.pir, V4.prr, V4.hbr, V4.sbr]]
+        dataCluster = []    # pack items before putting into queue
         try:
             while self.eof==0:
                 if self.flag: 
                     if self.flag.stop: return   # quit loop if flag set to stop
                     
                 header = self.readHeader()
-                if (header.typ, header.sub) in records_to_parse:    # only parse given record types
-                    recType = self.recordMap[(header.typ, header.sub)]    # get record type instance
+                recHeader = (header.typ << 8) | header.sub
+                if recHeader in records_to_parse:    # only parse given record types
                     offset = self.inp.tell()    # position of front end of record data (without header)
                     rawData = self.inp.read(header.len)
                     
@@ -87,17 +80,18 @@ class stdIO:
                         raise EofException()
                     else:
                         if self.q:
-                            if len(dataCluster) < 6000:
-                                dataCluster.append({"recType": (recType.typ, recType.sub), "offset": offset, "length": header.len, "rawData": rawData})
+                            if len(dataCluster) < self.clusterSize:
+                                dataCluster.append({"recHeader": recHeader, "offset": offset, "length": header.len, "rawData": rawData})
                             else:
                                 self.q.put(dataCluster)
                                 # don't forget to store the data from current iteration
-                                dataCluster = [{"recType": (recType.typ, recType.sub), "offset": offset, "length": header.len, "rawData": rawData}]
+                                dataCluster = [{"recHeader": recHeader, "offset": offset, "length": header.len, "rawData": rawData}]
                 else:
                     self.inp.seek(header.len, 1) # skip other records
         except EofException: 
             if self.q:
-                self.q.put(dataCluster)
+                if len(dataCluster)>0:
+                    self.q.put(dataCluster)
 
 
     def detect_endian(self):
