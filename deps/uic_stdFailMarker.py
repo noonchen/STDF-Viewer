@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Mar 24 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,16 +26,17 @@
 
 import time
 # pyqt5
-from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
+# from PyQt5 import QtCore, QtWidgets, QtGui
+# from PyQt5.QtWidgets import QApplication
+# from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
-# from PySide2 import QtCore, QtWidgets
-# from PySide2.QtWidgets import QApplication
-# from deps.ui.stdfViewer_loadingUI_side import Ui_loadingUI
-# from PySide2.QtCore import Signal, Slot
-
+from PySide2 import QtCore, QtWidgets, QtGui
+from PySide2.QtWidgets import QApplication
+from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# pyside6
+# from PySide6 import QtCore, QtWidgets, QtGui
+# from PySide6.QtWidgets import QApplication
+# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 
 class FailMarker(QtWidgets.QWidget):
@@ -102,12 +103,4 @@ class FailMarker(QtWidgets.QWidget):
     def updateProgressBar(self, num):
         self.UI.progressBar.setValue(num)
       
-        
-if __name__ == "__main__":
-    import sys
-    app = QtWidgets.QApplication([])
-    path1 = "Test path"
-    test = FailMarker()
-    sys.exit(app.exec_())
-    
     

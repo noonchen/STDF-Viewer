@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Apr 01 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -41,15 +41,20 @@ from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataReader
 
 # pyqt5
-from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
-from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
-from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
+# from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
+# from PyQt5 import QtCore, QtWidgets, QtGui
+# from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+# from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
 # pyside2
-# from deps.ui.stdfViewer_MainWindows_side import Ui_MainWindow
-# from PySide2 import QtCore, QtWidgets, QtGui
-# from PySide2.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QStyledItemDelegate
-# from PySide2.QtCore import Signal, Slot
+from deps.ui.stdfViewer_MainWindows_side2 import Ui_MainWindow
+from PySide2 import QtCore, QtWidgets, QtGui
+from PySide2.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+from PySide2.QtCore import Qt, Signal, Slot
+# pyside6
+# from deps.ui.stdfViewer_MainWindows_side6 import Ui_MainWindow
+# from PySide6 import QtCore, QtWidgets, QtGui
+# from PySide6.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+# from PySide6.QtCore import Qt, Signal, Slot
 
 import matplotlib
 matplotlib.use('QT5Agg')
@@ -90,7 +95,7 @@ def calc_cpk(L, H, data):
     sdev = np.std(data)
     mean = np.mean(data)
     
-    if L == None or H == None:
+    if L is None or H is None:
         return mean, sdev, np.nan
     
     T = H - L
@@ -235,7 +240,7 @@ class PlotCanvas(QtWidgets.QWidget):
             
     def setParent(self, parent):
         # only used for delete instance
-        if parent == None:
+        if parent is None:
             super().setParent(None)
             self.canvas.setParent(None)
             if self.showToolBar: self.toolbar.setParent(None)
@@ -780,7 +785,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
         for fn in mirFieldNames:
             value = self.dataInfo.fileInfo[fn]
-            if value == None or value == "" or value == " " : continue
+            if value is None or value == "" or value == " " : continue
             tmpRow = [QtGui.QStandardItem(ele) for ele in [mirDict[fn] + ": ", value]]
             self.tmodel_info.appendRow(tmpRow)
             
@@ -890,7 +895,10 @@ class MyWindow(QtWidgets.QMainWindow):
             siteList = self.getCheckedSites()
             headList = self.getCheckedHeads()
             # prepare the data for plot and table, skip in Bin & Wafer tab to save time
-            if not currentTab in [tab.Bin, tab.Wafer]: self.prepareData(itemNums, siteList, headList)
+            if not currentTab in [tab.Bin, tab.Wafer]: 
+                self.updateStatus("Reading Data...")
+                self.prepareData(itemNums, siteList, headList)
+                self.updateStatus("")
             
             # update bin chart only if sites changed and previous tab is not bin chart
             if self.preHeadSelection == set(headList) and self.preSiteSelection == set(siteList) and currentTab == tab.Bin and self.preTab == tab.Bin:
@@ -1056,7 +1064,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         # update Test Data table in info tab only when test items are selected
         if tabType == tab.Info:
-            if selTestNums == None:
+            if selTestNums is None:
                 # clear rawDataTable in info tab if no test item is selected
                 self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
                 return
@@ -1182,7 +1190,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 (mp_head, mp_test_num, mp_site) = canvasIndexDict_reverse[index]
                 # if not in Bin tab: no test item selected/ test item is unselected, remove
                 # if sites are unselected, remove
-                if (tabType != tab.Bin and (selTestNums == None or not mp_test_num in selTestNums)) or (not mp_site in siteList) or (not mp_head in headList):
+                if (tabType != tab.Bin and (selTestNums is None or not mp_test_num in selTestNums)) or (not mp_site in siteList) or (not mp_head in headList):
                     # bin don't care about testNum
                     # qfigLayout.itemAt(index+1).widget().setParent(None)     # must delete toolbar first (index+1)
                     qfigLayout.itemAt(index).widget().setParent(None)
@@ -1251,8 +1259,8 @@ class MyWindow(QtWidgets.QMainWindow):
                                 "%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                                 "%s" % testDict["TestName"],
                                 "%s" % testDict["Unit"],
-                                "" if testDict["LL"] == None else valueFormat % testDict["LL"],
-                                "" if testDict["HL"] == None else valueFormat % testDict["HL"],
+                                "" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                                "" if testDict["HL"] is None else valueFormat % testDict["HL"],
                                 valueFormat % value,
                                 f"{test_flag:>08b}"]            
                     rowList.append(tmpRow)
@@ -1264,8 +1272,8 @@ class MyWindow(QtWidgets.QMainWindow):
                     rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                             testDict["TestName"],
                             testDict["Unit"],
-                            "" if testDict["LL"] == None else valueFormat % testDict["LL"],
-                            "" if testDict["HL"] == None else valueFormat % testDict["HL"],
+                            "" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                            "" if testDict["HL"] is None else valueFormat % testDict["HL"],
                             "%d" % list(map(isPass, testDict["FlagList"])).count(False),
                             "%s" % "∞" if testDict["Cpk"] == np.inf else ("" if testDict["Cpk"] is np.nan else valueFormat % testDict["Cpk"]),
                             valueFormat % testDict["Mean"],
@@ -1397,8 +1405,8 @@ class MyWindow(QtWidgets.QMainWindow):
             # headers: ["Test Name", "Test Number", "Upper Limit", "Lower Limit", "Unit"]
             data = [testDict["TestName"],
                     "%d" % test_num,
-                    "" if testDict["HL"] == None else valueFormat % testDict["HL"],
-                    "" if testDict["LL"] == None else valueFormat % testDict["LL"],
+                    "" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                    "" if testDict["LL"] is None else valueFormat % testDict["LL"],
                     testDict["Unit"]]
             flag = [0] * len(data)     # append 0 (Pass test flag) at beginning to match with data
 
@@ -1845,7 +1853,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if len(sData.testData) != 0:
             # release cache of previous file
             self.releaseMemory()
-            # remove old std file handler
+            # remove old std file handleron
             self.stdHandleList = [self.std_handle]
             
             self.dataSrc = sData.testData
@@ -1947,20 +1955,16 @@ class MyWindow(QtWidgets.QMainWindow):
     
     @Slot(str, bool, bool, bool)
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
-        try:
-            self.statusBar().showMessage(new_msg)
-            if info: 
-                QtWidgets.QMessageBox.information(None, "Info", new_msg)
-            elif warning: 
-                QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
-                logger.warning(new_msg)
-            elif error:
-                QtWidgets.QMessageBox.critical(None, "Error", new_msg)
-                sys.exit()
-            QApplication.processEvents()
-        except:
-            logger.exception("Error occurred when updating status")
+        self.statusBar().showMessage(new_msg)
+        if info: 
+            QtWidgets.QMessageBox.information(None, "Info", new_msg)
+        elif warning: 
+            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+            logger.warning(new_msg)
+        elif error:
+            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
             sys.exit()
+        QApplication.processEvents()
         
     
     def eventFilter(self, object, event):

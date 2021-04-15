@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Mar 30 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -31,7 +31,6 @@ from array import array
 import threading as th
 import multiprocessing as mp
 from .stdfData import stdfData
-from .pystdf import V4
 from .pystdf.IO_Offset_forViewer import stdIO
 from .pystdf.RecordParser import RecordParser
 # import sqlite3
@@ -145,7 +144,8 @@ class stdfSummarizer:
         # precompiled struct
         self.cplStruct = {}
         # stdf data
-        self.endian = "="
+        self.endian = "<"
+        self.isLittleEndian = True
         self.stdfData = stdfData()
         # used for recording PTRs, MPRs that already read possibly omitted fields
         self.readAlreadyTR = {}
@@ -194,6 +194,7 @@ class stdfSummarizer:
     def set_endian(self, endian_from_parser):
         # update endian for info parse, input is a tuple
         self.endian, = endian_from_parser
+        self.isLittleEndian = True if endian_from_parser == "<" else False
         RecordParser.endian = endian_from_parser
         # pre compile standard format and 0s-255s
         for stdfmt, cfmt in formatMap.items():
@@ -363,8 +364,13 @@ class stdfSummarizer:
     
     def onTR(self, recHeader, binaryLen, rawData):
         # read testNum and siteNum
-        THS_struct = self.cplStruct.setdefault("THS", struct.Struct(self.endian + formatMap["U4"]+formatMap["U1"]+formatMap["U1"]))
-        TEST_NUM, HEAD_NUM, SITE_NUM = THS_struct.unpack(rawData[:6])
+        # THS_struct = self.cplStruct.setdefault("THS", struct.Struct(self.endian + formatMap["U4"]+formatMap["U1"]+formatMap["U1"]))
+        # TEST_NUM, HEAD_NUM, SITE_NUM = THS_struct.unpack(rawData[:6])
+        # python slice
+        TEST_NUM = int.from_bytes(rawData[:4], "little" if self.isLittleEndian else "big")
+        HEAD_NUM = rawData[4]
+        SITE_NUM = rawData[5]
+                
         currentDutIndex = self.head_site_dutIndex[HEAD_NUM<<8 | SITE_NUM]
         
         tmpHead = self.testData.setdefault(HEAD_NUM, {})
@@ -483,7 +489,7 @@ class stdfSummarizer:
         # SITE_NUM = valueDict["SITE_NUM"]
         HBIN_NUM = valueDict["HBIN_NUM"]
         HBIN_PF = valueDict["HBIN_PF"]
-        HBIN_NAM = "Missing Name" if valueDict["HBIN_NAM"] == None else valueDict["HBIN_NAM"]
+        HBIN_NAM = "Missing Name" if valueDict["HBIN_NAM"] is None else valueDict["HBIN_NAM"]
         # use the count from PRR as default, in case the file is incomplete
         # HBIN_CNT = valueDict["HBIN_CNT"]
         if not HBIN_NUM in self.hbinDict:
@@ -501,7 +507,7 @@ class stdfSummarizer:
         # SITE_NUM = valueDict["SITE_NUM"]
         SBIN_NUM = valueDict["SBIN_NUM"]
         SBIN_PF = valueDict["SBIN_PF"]
-        SBIN_NAM = "Missing Name" if valueDict["SBIN_NAM"] == None else valueDict["SBIN_NAM"]
+        SBIN_NAM = "Missing Name" if valueDict["SBIN_NAM"] is None else valueDict["SBIN_NAM"]
         
         if not SBIN_NUM in self.sbinDict:
             self.sbinDict[SBIN_NUM] = [SBIN_NAM, SBIN_PF]
@@ -557,34 +563,47 @@ class stdfSummarizer:
             if slen_byte == b'':
                 return "Missing Name"
             else:
-                slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(slen_byte)
-                tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[13 : 13+slen])
+                # slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(slen_byte)
+                slen = slen_byte[0]
+                # tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[13 : 13+slen])
+                tname_binary = rawData[13 : 13+slen]
                 return tname_binary.decode("ascii")
 
         elif recHeader == 3855:  # MPR 3855
             if len(rawData) >= 13:  # 4+1+1+1+1+2+2 = 12, +1 to ensure slen isn't omitted
-                RTN_cnt, RSLT_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[8:12])
+                # RTN_cnt, RSLT_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[8:12])
+                RTN_cnt = int.from_bytes(rawData[8:10], "little" if self.isLittleEndian else "big")
+                RSLT_cnt = int.from_bytes(rawData[10:12], "little" if self.isLittleEndian else "big")
                 tname_offset = 12 + RTN_cnt*1 + RSLT_cnt*4
-                slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[tname_offset : tname_offset+1])
-                tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[tname_offset+1 : tname_offset+1+slen])
+                # slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[tname_offset : tname_offset+1])
+                slen = rawData[tname_offset]
+                # tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[tname_offset+1 : tname_offset+1+slen])
+                tname_binary = rawData[tname_offset+1 : tname_offset+1+slen]
                 return tname_binary.decode("ascii")
             else:
                 return "Missing Name"
         
         elif recHeader == 3860:  # FTR 3860
             if len(rawData) >= 44:  # 4+1+1+1+1+4+4+4+4+4+4+2+2+2 = 38 (before array), +6 to ensure slen isn't omitted
-                RTN_cnt, PGM_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[34:38])
+                # RTN_cnt, PGM_cnt, = self.cplStruct.setdefault("U2U2", struct.Struct(self.endian + formatMap["U2"]+formatMap["U2"])).unpack(rawData[34:38])
+                RTN_cnt = int.from_bytes(rawData[34:36], "little" if self.isLittleEndian else "big")
+                PGM_cnt = int.from_bytes(rawData[36:38], "little" if self.isLittleEndian else "big")
+                    
                 offset = 38 + RTN_cnt*2 + (RTN_cnt//2 + RTN_cnt%2) + PGM_cnt*2 + (PGM_cnt//2 + PGM_cnt%2)   # U2 + N1, N1 = 4bits
                 # skip Dn
-                bitL, = self.cplStruct[self.endian+formatMap["U2"]].unpack(rawData[offset : offset+2])
+                # bitL, = self.cplStruct[self.endian+formatMap["U2"]].unpack(rawData[offset : offset+2])
+                bitL = int.from_bytes(rawData[offset : offset+2], "little" if self.isLittleEndian else "big")
                 offset += 2 + bitL//8 + (1 if bitL%8 > 0 else 0)
                 # skip Cn*3
                 for _ in range(3):
-                    L, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[offset : offset+1])
+                    # L, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[offset : offset+1])
+                    L = rawData[offset]
                     offset += 1 + L
                 # get Cn of test name
-                slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[offset : offset+1])
-                tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[offset+1 : offset+1+slen])
+                # slen, = self.cplStruct[self.endian+formatMap["U1"]].unpack(rawData[offset : offset+1])
+                slen = rawData[offset]
+                # tname_binary, = self.cplStruct[str(slen)+"s"].unpack(rawData[offset+1 : offset+1+slen])
+                tname_binary = rawData[offset+1 : offset+1+slen]
                 return  tname_binary.decode("ascii")
             else:
                 return "Missing Name"
@@ -623,7 +642,7 @@ class stdfDataRetriever:
             # if the file is small, use thread for efficiency
             task = th.Thread(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
         else:
-            from multiprocessing import Queue
+            Queue = mp.Queue
             self.q = Queue(0)
             # if the file is large, use process for high parallelism
             task = Process(target=parser, args=(fileHandle.name, flag, self.q), daemon=False)
@@ -636,11 +655,10 @@ class stdfDataRetriever:
             if not self.useThread: 
                 # process is used
                 task.terminate()
-                if getattr(flag, "stop", False):
-                    # child process will encounter error if we close the queue
-                    # help us to terminate the process
-                    self.q.close()
-                    
+                # if getattr(flag, "stop", False):
+                #     # child process will encounter error if we close the queue
+                #     # help us to terminate the process
+                self.q.close()
             task.join()
             self.checkError(task)
         except:
@@ -663,7 +681,7 @@ class stdfDataRetriever:
         
     def checkError(self, process_task):
         if self.useThread:
-            if self.error:
+            if not self.error is None:
                 raise self.error
         else:
             if process_task.exception:

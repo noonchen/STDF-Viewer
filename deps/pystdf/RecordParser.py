@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Thu Feb 25 2021
+# Last Modified: Mon Apr 12 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -125,7 +125,8 @@ def readCn(rawInfo):
     rawInfo.len -= len(buf)
     rawInfo.raw = rawInfo.raw[slen:]
 
-    val,=structFMT[str(slen) + "s"].unpack(buf)
+    # val,=structFMT[str(slen) + "s"].unpack(buf)
+    val = buf
     return val.decode("ascii")
 
 
@@ -223,7 +224,7 @@ class RawData:
 
 class RecordParser:
     # default endian, should be changed before parse
-    endian = "="
+    endian = "<"
     # Parser cache
     cache = {}
     # cache for possibly omitted data, such as RES_SCAL

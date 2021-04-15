@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Apr 01 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,27 +24,31 @@
 
 
 
-import enum
-from operator import truediv
 import re
 import os
 # import io
 # import threading
 from enum import IntEnum
 from xlsxwriter import Workbook
-from datetime import datetime
+import subprocess, platform
 # pyqt5
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-from deps.ui.stdfViewer_exportUI import Ui_exportUI
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
+# from PyQt5 import QtCore, QtWidgets
+# from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
+# from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+# from deps.ui.stdfViewer_exportUI import Ui_exportUI
+# from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
-# from PySide2 import QtCore, QtWidgets
-# from PySide2.QtWidgets import QAbstractItemView, QFileDialog
-# from deps.ui.stdfViewer_exportUI_side import Ui_exportUI
-# from deps.ui.stdfViewer_loadingUI_side import Ui_loadingUI
-# from PySide2.QtCore import Signal, Slot
+from PySide2 import QtCore, QtWidgets
+from PySide2.QtWidgets import QAbstractItemView, QFileDialog
+from deps.ui.stdfViewer_exportUI_side2 import Ui_exportUI
+from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+from PySide2.QtCore import Signal, Slot
+# pyside6
+# from PySide6 import QtCore, QtWidgets
+# from PySide6.QtWidgets import QAbstractItemView, QFileDialog
+# from deps.ui.stdfViewer_exportUI_side6 import Ui_exportUI
+# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from PySide6.QtCore import Signal, Slot
 
 # def print_thread(fname):
 #     print("Thread: %s, function name: %s" % (threading.currentThread().getName(), fname))
@@ -63,8 +67,8 @@ class tab(IntEnum):
 
 
 def list_operation(main, method, other):
-    main = [] if main == None else main
-    other = [] if other == None else other
+    main = [] if main is None else main
+    other = [] if other is None else other
     
     if method == "+":
         tmp = set(main) | set(other)
@@ -205,205 +209,204 @@ class reportGenerator(QtCore.QObject):
             x_scale = imageHeight_in_rowHeight * 0.21 / 4      # default cell height = 0.21 inches, image height = 4 inches
             loopCnt = 0     # used for representing generation progress
 
-            if True:    # placeholder for other save options
-                for cont in self.contL:
-                    if cont == tab.Trend:
-                        # Sheet for trend plot and test data
-                        TrendSheet = wb.add_worksheet("Trend Chart")
-                        currentRow = 0
-                        startCol = 0
-                        col_width = [len(s) for s in header_stat]
-                        for test_num in self.numL:
-                            for site in self.siteL:
-                                for head in self.headL:
-                                    if self.forceQuit: return
-                                    # self.ExportWind.parent.prepareData([test_num], [site])
-                                    self.prepareDataSignal.emit(head, site, test_num)
-                                    # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Trend, exportImg=True)
-                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
-                                    image_io = self.waitForImage(head, site, test_num, tab.Trend)
-                                    dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
-                                    rawDataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num, "RawData": True})
-                                    TrendSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                                    currentRow += imageHeight_in_rowHeight
-                                    TrendSheet.write_row(currentRow, startCol, header_stat, centerStyle)
-                                    currentRow += 1
-                                    write_row(TrendSheet, currentRow, startCol, dataList, centerStyle)
-                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                                    # Add raw data source of trend chart below
-                                    currentRow += 1
-                                    TrendSheet.write_row(currentRow, startCol, ["Raw data:"])
-                                    currentRow += 1
-                                    write_row(TrendSheet, currentRow, startCol, [row[6] for row in rawDataList], centerStyle)   # data in index 6
-                                    currentRow += 2
-                                    loopCnt += 1
-                                    sendProgress(loopCnt)
-                            currentRow += 2     # add gap between different test items
-                        [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                                                        
-                    elif cont == tab.Histo:
-                        # Sheet for histogram plot and test data
-                        HistoSheet = wb.add_worksheet("Histogram")
-                        currentRow = 0
-                        startCol = 0
-                        col_width = [len(s) for s in header_stat]
-                        for test_num in self.numL:
-                            for site in self.siteL:
-                                for head in self.headL:
-                                    if self.forceQuit: return
-                                    # self.ExportWind.parent.prepareData([test_num], [site])
-                                    self.prepareDataSignal.emit(head, site, test_num)
-                                    # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Histo, exportImg=True)
-                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Histo, site=site, test_num=test_num)
-                                    image_io = self.waitForImage(head, site, test_num, tab.Histo)
-                                    dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "test_num": test_num})                                
-                                    HistoSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                                    currentRow += imageHeight_in_rowHeight
-                                    HistoSheet.write_row(currentRow, startCol, header_stat, centerStyle)
-                                    currentRow += 1                                     
-                                    write_row(HistoSheet, currentRow, startCol, dataList, centerStyle)
-                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                                    # HistoSheet.write_row(currentRow, startCol, dataList)
-                                    currentRow += 2
-                                    loopCnt += 1
-                                    sendProgress(loopCnt)
-                            currentRow += 2     # add gap between different test items                            
-                        [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                        
-                    elif cont == tab.Bin:
-                        # Sheet for bin distribution
-                        BinSheet = wb.add_worksheet("Bin Chart")
-                        currentRow = 0
-                        startCol = 0
-                        extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]
-                        col_width = []
+            for cont in self.contL:
+                if cont == tab.Trend:
+                    # Sheet for trend plot and test data
+                    TrendSheet = wb.add_worksheet("Trend Chart")
+                    currentRow = 0
+                    startCol = 0
+                    col_width = [len(s) for s in header_stat]
+                    for test_num in self.numL:
                         for site in self.siteL:
                             for head in self.headL:
                                 if self.forceQuit: return
-                                # image_io = self.ExportWind.parent.genPlot(None, None, site, 0, tab.Bin, exportImg=True)
-                                image_io = self.waitForImage(head=head, site=site, test_num=0, chartType=tab.Bin)
-                                BinSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                # self.ExportWind.parent.prepareData([test_num], [site])
+                                self.prepareDataSignal.emit(head, site, test_num)
+                                # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Trend, exportImg=True)
+                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
+                                image_io = self.waitForImage(head, site, test_num, tab.Trend)
+                                dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
+                                rawDataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num, "RawData": True})
+                                TrendSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
                                 currentRow += imageHeight_in_rowHeight
-                                # dataList_HB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="HBIN", site=site))
-                                dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
-                                BinSheet.write_row(currentRow, startCol, dataList_HB, centerStyle)
-                                col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
+                                TrendSheet.write_row(currentRow, startCol, header_stat, centerStyle)
                                 currentRow += 1
-                                # dataList_SB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="SBIN", site=site))
-                                dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
-                                BinSheet.write_row(currentRow, startCol, dataList_SB, centerStyle)
-                                col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
-                                currentRow += 3
+                                write_row(TrendSheet, currentRow, startCol, dataList, centerStyle)
+                                col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                # Add raw data source of trend chart below
+                                currentRow += 1
+                                TrendSheet.write_row(currentRow, startCol, ["Raw data:"])
+                                currentRow += 1
+                                write_row(TrendSheet, currentRow, startCol, [row[6] for row in rawDataList], centerStyle)   # data in index 6
+                                currentRow += 2
                                 loopCnt += 1
                                 sendProgress(loopCnt)
-                        [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                        
-                    elif cont == tab.Stat:
-                        # Sheet for statistics of test items, e.g. cpk, mean, etc.
-                        StatSheet = wb.add_worksheet("Test Statistics")
-                        currentRow = 0
-                        startCol = 0
-                        StatSheet.write_row(currentRow, startCol, header_stat, centerStyle)
-                        col_width = [len(s) for s in header_stat]
-                        currentRow += 1
-                        for test_num in self.numL:
-                            for site in self.siteL:
-                                for head in self.headL:
-                                    if self.forceQuit: return
-                                    # self.ExportWind.parent.prepareData([test_num], [site])
-                                    self.prepareDataSignal.emit(head, site, test_num)
-                                    # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
-                                    dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
-                                    write_row(StatSheet, currentRow, startCol, dataList, centerStyle)
-                                    # StatSheet.write_row(currentRow, startCol, dataList)
-                                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                                    currentRow += 1
-                                    loopCnt += 1
-                                    sendProgress(loopCnt)
-                            currentRow += 1     # add gap between different test items
-                        [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-
-                    elif cont == tab.FileInfo:
-                        # Sheet for file information
-                        FileInfoSheet = wb.add_worksheet("File Info")
-                        headerLabels = ["Property Name", "Value"]
-                        col_width = [len(s) for s in headerLabels]
-                        
-                        currentRow = 0
-                        startCol = 0
-                        FileInfoSheet.write_row(currentRow, startCol, headerLabels, centerStyle)
-                        currentRow += 1
-                        data = self.waitForTableData(cont)   
-                                             
-                        for row in data:
+                        currentRow += 2     # add gap between different test items
+                    [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                                                    
+                elif cont == tab.Histo:
+                    # Sheet for histogram plot and test data
+                    HistoSheet = wb.add_worksheet("Histogram")
+                    currentRow = 0
+                    startCol = 0
+                    col_width = [len(s) for s in header_stat]
+                    for test_num in self.numL:
+                        for site in self.siteL:
+                            for head in self.headL:
+                                if self.forceQuit: return
+                                # self.ExportWind.parent.prepareData([test_num], [site])
+                                self.prepareDataSignal.emit(head, site, test_num)
+                                # image_io = self.ExportWind.parent.genPlot(None, None, site, test_num, tab.Histo, exportImg=True)
+                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Histo, site=site, test_num=test_num)
+                                image_io = self.waitForImage(head, site, test_num, tab.Histo)
+                                dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "test_num": test_num})                                
+                                HistoSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                                currentRow += imageHeight_in_rowHeight
+                                HistoSheet.write_row(currentRow, startCol, header_stat, centerStyle)
+                                currentRow += 1                                     
+                                write_row(HistoSheet, currentRow, startCol, dataList, centerStyle)
+                                col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                # HistoSheet.write_row(currentRow, startCol, dataList)
+                                currentRow += 2
+                                loopCnt += 1
+                                sendProgress(loopCnt)
+                        currentRow += 2     # add gap between different test items                            
+                    [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                    
+                elif cont == tab.Bin:
+                    # Sheet for bin distribution
+                    BinSheet = wb.add_worksheet("Bin Chart")
+                    currentRow = 0
+                    startCol = 0
+                    extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]
+                    col_width = []
+                    for site in self.siteL:
+                        for head in self.headL:
                             if self.forceQuit: return
-                            write_row(FileInfoSheet, currentRow, startCol, row, centerStyle)
-                            col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
+                            # image_io = self.ExportWind.parent.genPlot(None, None, site, 0, tab.Bin, exportImg=True)
+                            image_io = self.waitForImage(head=head, site=site, test_num=0, chartType=tab.Bin)
+                            BinSheet.insert_image(currentRow, startCol, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
+                            currentRow += imageHeight_in_rowHeight
+                            # dataList_HB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="HBIN", site=site))
+                            dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
+                            BinSheet.write_row(currentRow, startCol, dataList_HB, centerStyle)
+                            col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
                             currentRow += 1
-                            
-                        loopCnt += 1
-                        sendProgress(loopCnt)
-                        [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                            
-                    elif cont == tab.DUT:
-                        # Sheet for DUT summary & Test raw data
-                        DutSheet = wb.add_worksheet("DUT Summary")
-                        headerLabelList = [["", "Part ID", "Test Head", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
-                                           ["Test Number"],
-                                           ["Upper Limit"],
-                                           ["Lower Limit"],
-                                           ["Unit"]]
-                        col_width = [len(s) for s in headerLabelList[0]]
-                        col_width[0] = max([len(row[0]) for row in headerLabelList])
-                        currentRow = 0
-                        startCol = 0
-                        # write headers
-                        for h in headerLabelList:
-                            DutSheet.write_row(currentRow, startCol, h, centerStyle)
-                            currentRow += 1
-                        # write DUT info
-                        DutInfoList = self.waitForDutSummary(self.headL, self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
-                        for count, infoRow in enumerate(DutInfoList):
-                            L = ["#%d" % (count+1)] + infoRow
-                            write_row(DutSheet, currentRow, startCol, L, centerStyle)
-                            col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(L)]
-                            currentRow += 1                            
-                        [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                        #append test raw data to the last column
-                        startRow = 0
-                        currentCol = len(headerLabelList[0])
-                        for test_num in self.numL:
-                            if self.forceQuit: return
-                            max_width = 0
-                            DutDataList = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num})
-                            write_col(DutSheet, startRow, currentCol, DutDataList, centerStyle)
-                            max_width = max([len(s) for s in DutDataList])
-                            DutSheet.set_column(currentCol, currentCol, max_width*1.1)
-                            currentCol += 1
+                            # dataList_SB = extractData(self.ExportWind.parent.prepareTableContent(tab.Bin, bin="SBIN", site=site))
+                            dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
+                            BinSheet.write_row(currentRow, startCol, dataList_SB, centerStyle)
+                            col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
+                            currentRow += 3
                             loopCnt += 1
                             sendProgress(loopCnt)
-                            
-                    elif cont == tab.Wafer:
-                        imageHeight_in_rowHeight = 50
-                        y_scale = imageHeight_in_rowHeight * 0.21 / 10
-                        # Sheet for wafer map
-                        WaferSheet = wb.add_worksheet("Wafer Map")
-                        currentRow = 0
-                        startCol = 0
-                        for wafer in self.numWafer:
-                            for site in self.siteL:
-                                for head in self.headL:
-                                    if self.forceQuit: return
-                                    image_io = self.waitForImage(head=head, site=site, test_num=wafer, chartType=tab.Wafer)
-                                    WaferSheet.insert_image(currentRow, startCol, "", {'x_scale': y_scale, 'y_scale': y_scale, 'image_data': image_io})
-                                    currentRow += imageHeight_in_rowHeight + 1
-                                    # dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
-                                    # WaferSheet.write_row(currentRow, startCol, dataList_HB)
-                                    # currentRow += 1
-                                    loopCnt += 1
-                                    sendProgress(loopCnt)
-                            currentRow += 3
-                                                                                             
+                    [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                    
+                elif cont == tab.Stat:
+                    # Sheet for statistics of test items, e.g. cpk, mean, etc.
+                    StatSheet = wb.add_worksheet("Test Statistics")
+                    currentRow = 0
+                    startCol = 0
+                    StatSheet.write_row(currentRow, startCol, header_stat, centerStyle)
+                    col_width = [len(s) for s in header_stat]
+                    currentRow += 1
+                    for test_num in self.numL:
+                        for site in self.siteL:
+                            for head in self.headL:
+                                if self.forceQuit: return
+                                # self.ExportWind.parent.prepareData([test_num], [site])
+                                self.prepareDataSignal.emit(head, site, test_num)
+                                # dataList = self.ExportWind.parent.prepareTableContent(tab.Trend, site=site, test_num=test_num)
+                                dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
+                                write_row(StatSheet, currentRow, startCol, dataList, centerStyle)
+                                # StatSheet.write_row(currentRow, startCol, dataList)
+                                col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+                                currentRow += 1
+                                loopCnt += 1
+                                sendProgress(loopCnt)
+                        currentRow += 1     # add gap between different test items
+                    [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+
+                elif cont == tab.FileInfo:
+                    # Sheet for file information
+                    FileInfoSheet = wb.add_worksheet("File Info")
+                    headerLabels = ["Property Name", "Value"]
+                    col_width = [len(s) for s in headerLabels]
+                    
+                    currentRow = 0
+                    startCol = 0
+                    FileInfoSheet.write_row(currentRow, startCol, headerLabels, centerStyle)
+                    currentRow += 1
+                    data = self.waitForTableData(cont)   
+                                            
+                    for row in data:
+                        if self.forceQuit: return
+                        write_row(FileInfoSheet, currentRow, startCol, row, centerStyle)
+                        col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
+                        currentRow += 1
+                        
+                    loopCnt += 1
+                    sendProgress(loopCnt)
+                    [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                        
+                elif cont == tab.DUT:
+                    # Sheet for DUT summary & Test raw data
+                    DutSheet = wb.add_worksheet("DUT Summary")
+                    headerLabelList = [["", "Part ID", "Test Head", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
+                                        ["Test Number"],
+                                        ["Upper Limit"],
+                                        ["Lower Limit"],
+                                        ["Unit"]]
+                    col_width = [len(s) for s in headerLabelList[0]]
+                    col_width[0] = max([len(row[0]) for row in headerLabelList])
+                    currentRow = 0
+                    startCol = 0
+                    # write headers
+                    for h in headerLabelList:
+                        DutSheet.write_row(currentRow, startCol, h, centerStyle)
+                        currentRow += 1
+                    # write DUT info
+                    DutInfoList = self.waitForDutSummary(self.headL, self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
+                    for count, infoRow in enumerate(DutInfoList):
+                        L = ["#%d" % (count+1)] + infoRow
+                        write_row(DutSheet, currentRow, startCol, L, centerStyle)
+                        col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(L)]
+                        currentRow += 1                            
+                    [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                    #append test raw data to the last column
+                    startRow = 0
+                    currentCol = len(headerLabelList[0])
+                    for test_num in self.numL:
+                        if self.forceQuit: return
+                        max_width = 0
+                        DutDataList = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num})
+                        write_col(DutSheet, startRow, currentCol, DutDataList, centerStyle)
+                        max_width = max([len(s) for s in DutDataList])
+                        DutSheet.set_column(currentCol, currentCol, max_width*1.1)
+                        currentCol += 1
+                        loopCnt += 1
+                        sendProgress(loopCnt)
+                        
+                elif cont == tab.Wafer:
+                    imageHeight_in_rowHeight = 50
+                    y_scale = imageHeight_in_rowHeight * 0.21 / 10
+                    # Sheet for wafer map
+                    WaferSheet = wb.add_worksheet("Wafer Map")
+                    currentRow = 0
+                    startCol = 0
+                    for wafer in self.numWafer:
+                        for site in self.siteL:
+                            for head in self.headL:
+                                if self.forceQuit: return
+                                image_io = self.waitForImage(head=head, site=site, test_num=wafer, chartType=tab.Wafer)
+                                WaferSheet.insert_image(currentRow, startCol, "", {'x_scale': y_scale, 'y_scale': y_scale, 'image_data': image_io})
+                                currentRow += imageHeight_in_rowHeight + 1
+                                # dataList_HB = extractData(self.waitForDataList(tab.Bin, {"site": site, "bin": "HBIN"}))
+                                # WaferSheet.write_row(currentRow, startCol, dataList_HB)
+                                # currentRow += 1
+                                loopCnt += 1
+                                sendProgress(loopCnt)
+                        currentRow += 3
+                                                                                            
         self.closeSignal.emit(True)
         
           
@@ -749,14 +752,14 @@ class stdfExporter(QtWidgets.QDialog):
         self.path = self.getOutPath()
         self.numWafer = sorted([i for i in self.parent.dataInfo.waferDict.keys()])
        
-        if len(self.numL) == 0 or len(self.headL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path == None:
+        if len(self.numL) == 0 or len(self.headL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path is None:
             # input not complete
             message = ""
             if len(self.numL) == 0: message += "No test item is selected\n\n"
             if len(self.headL) == 0: message += "No head is selected\n\n"
             if len(self.siteL) == 0: message += "No site is selected\n\n"
             if len(self.contL) == 0: message += "No content is selected\n\n"
-            if self.path == None: message += "Output directory is invalid, not writable or not existed\n"
+            if self.path is None: message += "Output directory is invalid, not writable or not existed\n"
             
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             
@@ -777,10 +780,10 @@ class stdfExporter(QtWidgets.QDialog):
                     self.totalLoopCnt += len(self.numL)
                 elif cont == tab.Wafer:
                     self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
-                elif False:
-                    # Update loopcnt if more contents are added
-                    # self.totalLoopCnt += len(self.siteL)
-                    pass
+                # elif False:
+                #     # Update loopcnt if more contents are added
+                #     # self.totalLoopCnt += len(self.siteL)
+                #     pass
                     
             self.pd = progressDisplayer(parent=self)
             # self.generate_report()
@@ -810,7 +813,6 @@ class stdfExporter(QtWidgets.QDialog):
                 
     def openFileInOS(self, filepath):
         # https://stackoverflow.com/a/435669
-        import subprocess, os, platform
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows
@@ -820,7 +822,6 @@ class stdfExporter(QtWidgets.QDialog):
         
         
     def revealFile(self, filepath):
-        import subprocess, os, platform
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', '-R', filepath))
         elif platform.system() == 'Windows':    # Windows

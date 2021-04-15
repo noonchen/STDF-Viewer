@@ -5,7 +5,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 10th 2020
 # -----
-# Last Modified: Fri Mar 12 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,8 +27,8 @@
 
 import sys
 # from time import time
-import struct
-from .Types import *
+# import struct
+from .Types import RecordHeader, EofException, InitialSequenceException
 from . import V4
 
 
@@ -43,13 +43,19 @@ class stdIO:
         self.q = q  # queue ref
         # size of a data cluster
         self.clusterSize = clusterSize
+        # set a default endian for reading header for the 1st time
+        self.endian = "<"
+        self.isLittleEndian = True
         
         
     def readHeader(self):
         try:
             hdr = RecordHeader()
             buffer = self.inp.read(4)
-            hdr.len, hdr.typ, hdr.sub = self.StructHeader.unpack(buffer)
+            # hdr.len, hdr.typ, hdr.sub = self.StructHeader.unpack(buffer)
+            hdr.len = int.from_bytes(buffer[:2], "little" if self.isLittleEndian else "big")
+            hdr.typ = buffer[2]
+            hdr.sub = buffer[3]
             return hdr
         except Exception:
             self.eof = 1
@@ -98,24 +104,25 @@ class stdIO:
         self.inp.seek(0, 0)
         self.eof = 0
         
-        # set a default endian for reading header for the 1st time
-        self.endian = "="
         # precompile struct for header
-        self.StructHeader = struct.Struct(self.endian + packFormatMap["U2"]+packFormatMap["U1"]+packFormatMap["U1"])
+        # self.StructHeader = struct.Struct(self.endian + packFormatMap["U2"]+packFormatMap["U1"]+packFormatMap["U1"])
         header = self.readHeader()
         if header.typ != 0 and header.sub != 10:
             raise InitialSequenceException("It's not a valid std file")
         
         buffer = self.inp.read(1)
-        cpuType, = struct.unpack(packFormatMap["U1"], buffer)
+        # cpuType, = struct.unpack(packFormatMap["U1"], buffer)
+        cpuType = buffer[0]
         if cpuType == 2:
             self.endian = '<'    # LSB
+            self.isLittleEndian = True
         else:
             self.endian = '>'    # MSB
+            self.isLittleEndian = False
         # restore the file offset
         self.inp.seek(0)
         # re-precompile struct for header
-        self.StructHeader = struct.Struct(self.endian + packFormatMap["U2"]+packFormatMap["U1"]+packFormatMap["U1"])
+        # self.StructHeader = struct.Struct(self.endian + packFormatMap["U2"]+packFormatMap["U1"]+packFormatMap["U1"])
         
         
     def send_endian(self):
