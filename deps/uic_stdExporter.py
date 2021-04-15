@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Apr 12 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -32,17 +32,23 @@ from enum import IntEnum
 from xlsxwriter import Workbook
 import subprocess, platform
 # pyqt5
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-from deps.ui.stdfViewer_exportUI import Ui_exportUI
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
+# from PyQt5 import QtCore, QtWidgets
+# from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
+# from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+# from deps.ui.stdfViewer_exportUI import Ui_exportUI
+# from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
-# from PySide2 import QtCore, QtWidgets
-# from PySide2.QtWidgets import QAbstractItemView, QFileDialog
-# from deps.ui.stdfViewer_exportUI_side import Ui_exportUI
-# from deps.ui.stdfViewer_loadingUI_side import Ui_loadingUI
-# from PySide2.QtCore import Signal, Slot
+from PySide2 import QtCore, QtWidgets
+from PySide2.QtWidgets import QAbstractItemView, QFileDialog
+from deps.ui.stdfViewer_exportUI_side2 import Ui_exportUI
+from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+from PySide2.QtCore import Signal, Slot
+# pyside6
+# from PySide6 import QtCore, QtWidgets
+# from PySide6.QtWidgets import QAbstractItemView, QFileDialog
+# from deps.ui.stdfViewer_exportUI_side6 import Ui_exportUI
+# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from PySide6.QtCore import Signal, Slot
 
 # def print_thread(fname):
 #     print("Thread: %s, function name: %s" % (threading.currentThread().getName(), fname))

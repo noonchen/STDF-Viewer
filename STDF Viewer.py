@@ -41,15 +41,20 @@ from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataReader
 
 # pyqt5
-from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
-from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
-from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
+# from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
+# from PyQt5 import QtCore, QtWidgets, QtGui
+# from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+# from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
 # pyside2
-# from deps.ui.stdfViewer_MainWindows_side import Ui_MainWindow
-# from PySide2 import QtCore, QtWidgets, QtGui
-# from PySide2.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QStyledItemDelegate
-# from PySide2.QtCore import Signal, Slot
+from deps.ui.stdfViewer_MainWindows_side2 import Ui_MainWindow
+from PySide2 import QtCore, QtWidgets, QtGui
+from PySide2.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+from PySide2.QtCore import Qt, Signal, Slot
+# pyside6
+# from deps.ui.stdfViewer_MainWindows_side6 import Ui_MainWindow
+# from PySide6 import QtCore, QtWidgets, QtGui
+# from PySide6.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox, QStyledItemDelegate
+# from PySide6.QtCore import Qt, Signal, Slot
 
 import matplotlib
 matplotlib.use('QT5Agg')
@@ -1950,25 +1955,16 @@ class MyWindow(QtWidgets.QMainWindow):
     
     @Slot(str, bool, bool, bool)
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
-        try:
-            self.statusBar().showMessage(new_msg)
-            if info: 
-                QtWidgets.QMessageBox.information(None, "Info", new_msg)
-            elif warning: 
-                QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
-                logger.warning(new_msg)
-            elif error:
-                QtWidgets.QMessageBox.critical(None, "Error", new_msg)
-                sys.exit()
-            QApplication.processEvents()
-        except SystemExit:
-            pass
-        except KeyboardInterrupt:
-            logger.exception("User interrupts the program")
+        self.statusBar().showMessage(new_msg)
+        if info: 
+            QtWidgets.QMessageBox.information(None, "Info", new_msg)
+        elif warning: 
+            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+            logger.warning(new_msg)
+        elif error:
+            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
             sys.exit()
-        except:
-            logger.exception("Error occurred when updating status")
-            sys.exit()
+        QApplication.processEvents()
         
     
     def eventFilter(self, object, event):

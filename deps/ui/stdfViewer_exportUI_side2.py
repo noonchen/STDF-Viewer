@@ -17,7 +17,7 @@ class Ui_exportUI(object):
     def setupUi(self, exportUI):
         if not exportUI.objectName():
             exportUI.setObjectName(u"exportUI")
-        exportUI.resize(572, 660)
+        exportUI.resize(584, 660)
         exportUI.setStyleSheet(u"")
         self.verticalLayout_2 = QVBoxLayout(exportUI)
         self.verticalLayout_2.setSpacing(20)
@@ -36,8 +36,8 @@ class Ui_exportUI(object):
         self.TestList = QListView(self.test_selection)
         self.TestList.setObjectName(u"TestList")
         font = QFont()
-        font.setFamily(u"Courier New")
-        font.setPointSize(10)
+        font.setFamily(u"Courier")
+        font.setPointSize(12)
         self.TestList.setFont(font)
 
         self.verticalLayout_5.addWidget(self.TestList)
@@ -85,7 +85,7 @@ class Ui_exportUI(object):
         self.Addbutton.setSizePolicy(sizePolicy)
         font1 = QFont()
         font1.setFamily(u"Arial")
-        font1.setPointSize(24)
+        font1.setPointSize(18)
         font1.setBold(True)
         font1.setWeight(75)
         self.Addbutton.setFont(font1)
@@ -151,6 +151,25 @@ class Ui_exportUI(object):
 
         self.verticalLayout_2.addLayout(self.horizontalLayout_box)
 
+        self.horizontalLayout_HSselection = QHBoxLayout()
+        self.horizontalLayout_HSselection.setObjectName(u"horizontalLayout_HSselection")
+        self.horizontalLayout_HSselection.setContentsMargins(-1, 0, -1, -1)
+        self.head_selection = QGroupBox(exportUI)
+        self.head_selection.setObjectName(u"head_selection")
+        self.horizontalLayout = QHBoxLayout(self.head_selection)
+        self.horizontalLayout.setObjectName(u"horizontalLayout")
+        self.horizontalLayout.setContentsMargins(-1, 5, -1, 5)
+        self.gridLayout_head = QGridLayout()
+        self.gridLayout_head.setSpacing(20)
+        self.gridLayout_head.setObjectName(u"gridLayout_head")
+        self.gridLayout_head.setSizeConstraint(QLayout.SetFixedSize)
+        self.gridLayout_head.setContentsMargins(-1, -1, 0, -1)
+
+        self.horizontalLayout.addLayout(self.gridLayout_head)
+
+
+        self.horizontalLayout_HSselection.addWidget(self.head_selection)
+
         self.site_selection = QGroupBox(exportUI)
         self.site_selection.setObjectName(u"site_selection")
         sizePolicy1 = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -165,18 +184,18 @@ class Ui_exportUI(object):
         self.horizontalLayout_2 = QHBoxLayout(self.site_selection)
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
         self.horizontalLayout_2.setContentsMargins(-1, 5, -1, 5)
-        self.gridLayout = QGridLayout()
-        self.gridLayout.setSpacing(20)
-        self.gridLayout.setObjectName(u"gridLayout")
-        self.gridLayout.setSizeConstraint(QLayout.SetFixedSize)
-        self.gridLayout.setContentsMargins(0, 0, 10, 0)
+        self.gridLayout_site = QGridLayout()
+        self.gridLayout_site.setSpacing(20)
+        self.gridLayout_site.setObjectName(u"gridLayout_site")
+        self.gridLayout_site.setSizeConstraint(QLayout.SetFixedSize)
+        self.gridLayout_site.setContentsMargins(0, 0, 10, 0)
         self.All = QCheckBox(self.site_selection)
         self.All.setObjectName(u"All")
         sizePolicy1.setHeightForWidth(self.All.sizePolicy().hasHeightForWidth())
         self.All.setSizePolicy(sizePolicy1)
         self.All.setChecked(False)
 
-        self.gridLayout.addWidget(self.All, 0, 0, 1, 1)
+        self.gridLayout_site.addWidget(self.All, 0, 0, 1, 1)
 
         self.cancelAll = QPushButton(self.site_selection)
         self.cancelAll.setObjectName(u"cancelAll")
@@ -186,7 +205,7 @@ class Ui_exportUI(object):
         self.cancelAll.setMaximumSize(QSize(65, 16777215))
         self.cancelAll.setAutoDefault(False)
 
-        self.gridLayout.addWidget(self.cancelAll, 0, 2, 1, 1)
+        self.gridLayout_site.addWidget(self.cancelAll, 0, 2, 1, 1)
 
         self.checkAll = QPushButton(self.site_selection)
         self.checkAll.setObjectName(u"checkAll")
@@ -196,17 +215,20 @@ class Ui_exportUI(object):
         self.checkAll.setMaximumSize(QSize(65, 16777215))
         self.checkAll.setAutoDefault(False)
 
-        self.gridLayout.addWidget(self.checkAll, 0, 1, 1, 1)
+        self.gridLayout_site.addWidget(self.checkAll, 0, 1, 1, 1)
 
 
-        self.horizontalLayout_2.addLayout(self.gridLayout)
+        self.horizontalLayout_2.addLayout(self.gridLayout_site)
 
         self.horizontalSpacer = QSpacerItem(95, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.horizontalLayout_2.addItem(self.horizontalSpacer)
 
 
-        self.verticalLayout_2.addWidget(self.site_selection)
+        self.horizontalLayout_HSselection.addWidget(self.site_selection)
+
+
+        self.verticalLayout_2.addLayout(self.horizontalLayout_HSselection)
 
         self.content_selection = QGroupBox(exportUI)
         self.content_selection.setObjectName(u"content_selection")
@@ -220,47 +242,46 @@ class Ui_exportUI(object):
         self.gridLayout_2.setSizeConstraint(QLayout.SetFixedSize)
         self.gridLayout_2.setHorizontalSpacing(50)
         self.gridLayout_2.setContentsMargins(0, 0, 10, 0)
-        self.Trend_cb = QCheckBox(self.content_selection)
-        self.Trend_cb.setObjectName(u"Trend_cb")
-        self.Trend_cb.setChecked(True)
+        self.FileInfo_cb = QCheckBox(self.content_selection)
+        self.FileInfo_cb.setObjectName(u"FileInfo_cb")
+        self.FileInfo_cb.setChecked(True)
 
-        self.gridLayout_2.addWidget(self.Trend_cb, 0, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.FileInfo_cb, 0, 0, 1, 1)
 
         self.Stat_cb = QCheckBox(self.content_selection)
         self.Stat_cb.setObjectName(u"Stat_cb")
-        self.Stat_cb.setChecked(True)
+        self.Stat_cb.setChecked(False)
 
-        self.gridLayout_2.addWidget(self.Stat_cb, 0, 3, 1, 1)
+        self.gridLayout_2.addWidget(self.Stat_cb, 1, 2, 1, 1)
 
-        self.Histo_cb = QCheckBox(self.content_selection)
-        self.Histo_cb.setObjectName(u"Histo_cb")
-        self.Histo_cb.setChecked(True)
+        self.Trend_cb = QCheckBox(self.content_selection)
+        self.Trend_cb.setObjectName(u"Trend_cb")
+        self.Trend_cb.setChecked(False)
 
-        self.gridLayout_2.addWidget(self.Histo_cb, 0, 1, 1, 1)
-
-        self.Bin_cb = QCheckBox(self.content_selection)
-        self.Bin_cb.setObjectName(u"Bin_cb")
-        self.Bin_cb.setChecked(True)
-
-        self.gridLayout_2.addWidget(self.Bin_cb, 0, 2, 1, 1)
+        self.gridLayout_2.addWidget(self.Trend_cb, 0, 2, 1, 1)
 
         self.DUT_cb = QCheckBox(self.content_selection)
         self.DUT_cb.setObjectName(u"DUT_cb")
         self.DUT_cb.setChecked(True)
 
-        self.gridLayout_2.addWidget(self.DUT_cb, 1, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.DUT_cb, 0, 1, 1, 1)
 
-        self.RawData_cb = QCheckBox(self.content_selection)
-        self.RawData_cb.setObjectName(u"RawData_cb")
-        self.RawData_cb.setChecked(True)
+        self.Histo_cb = QCheckBox(self.content_selection)
+        self.Histo_cb.setObjectName(u"Histo_cb")
+        self.Histo_cb.setChecked(False)
 
-        self.gridLayout_2.addWidget(self.RawData_cb, 1, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.Histo_cb, 0, 3, 1, 1)
 
-        self.FileInfo_cb = QCheckBox(self.content_selection)
-        self.FileInfo_cb.setObjectName(u"FileInfo_cb")
-        self.FileInfo_cb.setChecked(True)
+        self.Bin_cb = QCheckBox(self.content_selection)
+        self.Bin_cb.setObjectName(u"Bin_cb")
+        self.Bin_cb.setChecked(False)
 
-        self.gridLayout_2.addWidget(self.FileInfo_cb, 1, 2, 1, 1)
+        self.gridLayout_2.addWidget(self.Bin_cb, 1, 0, 1, 1)
+
+        self.Wafer_cb = QCheckBox(self.content_selection)
+        self.Wafer_cb.setObjectName(u"Wafer_cb")
+
+        self.gridLayout_2.addWidget(self.Wafer_cb, 1, 1, 1, 1)
 
 
         self.horizontalLayout_4.addLayout(self.gridLayout_2)
@@ -321,7 +342,7 @@ class Ui_exportUI(object):
         self.Confirm.setMinimumSize(QSize(0, 30))
         self.Confirm.setMaximumSize(QSize(16777215, 40))
         font4 = QFont()
-        font4.setFamily(u"Menlo")
+        font4.setFamily(u"Tahoma")
         font4.setBold(True)
         font4.setWeight(75)
         self.Confirm.setFont(font4)
@@ -347,13 +368,13 @@ class Ui_exportUI(object):
         self.Cancel.setFont(font4)
         self.Cancel.setStyleSheet(u"QPushButton {\n"
 "color: white;\n"
-"background-color: rgb(83, 0, 0); \n"
-"border: 1px solid rgb(83, 0, 0); \n"
+"background-color: rgb(120, 120, 120); \n"
+"border: 1px solid rgb(120, 120, 120); \n"
 "border-radius: 5px;}\n"
 "\n"
 "QPushButton:pressed {\n"
-"background-color: rgb(40, 0, 0); \n"
-"border: 1px solid rgb(40, 0, 0);}")
+"background-color: rgb(50, 50, 50); \n"
+"border: 1px solid rgb(50, 50, 50);}")
 
         self.horizontalLayout_button.addWidget(self.Cancel)
 
@@ -392,18 +413,19 @@ class Ui_exportUI(object):
 #endif // QT_CONFIG(tooltip)
         self.RemoveAllbutton.setText(QCoreApplication.translate("exportUI", u"<<", None))
         self.exportTest.setTitle(QCoreApplication.translate("exportUI", u"Export Tests", None))
+        self.head_selection.setTitle(QCoreApplication.translate("exportUI", u"Head Selection", None))
         self.site_selection.setTitle(QCoreApplication.translate("exportUI", u"Site Selection", None))
         self.All.setText(QCoreApplication.translate("exportUI", u"All Sites", None))
         self.cancelAll.setText(QCoreApplication.translate("exportUI", u"\u2715 All", None))
         self.checkAll.setText(QCoreApplication.translate("exportUI", u"\u2713 All", None))
         self.content_selection.setTitle(QCoreApplication.translate("exportUI", u"Report Content Selection", None))
-        self.Trend_cb.setText(QCoreApplication.translate("exportUI", u"Trend Chart", None))
+        self.FileInfo_cb.setText(QCoreApplication.translate("exportUI", u"File Info", None))
         self.Stat_cb.setText(QCoreApplication.translate("exportUI", u"Test Statistics", None))
+        self.Trend_cb.setText(QCoreApplication.translate("exportUI", u"Trend Chart", None))
+        self.DUT_cb.setText(QCoreApplication.translate("exportUI", u"DUT Summary", None))
         self.Histo_cb.setText(QCoreApplication.translate("exportUI", u"Histogram", None))
         self.Bin_cb.setText(QCoreApplication.translate("exportUI", u"Bin Chart", None))
-        self.DUT_cb.setText(QCoreApplication.translate("exportUI", u"DUT Summary", None))
-        self.RawData_cb.setText(QCoreApplication.translate("exportUI", u"Raw Data", None))
-        self.FileInfo_cb.setText(QCoreApplication.translate("exportUI", u"File Info", None))
+        self.Wafer_cb.setText(QCoreApplication.translate("exportUI", u"Wafer Map", None))
         self.exportPath_selection.setTitle(QCoreApplication.translate("exportUI", u"Export Path Selection", None))
         self.plainTextEdit.setPlainText("")
         self.toolButton.setText(QCoreApplication.translate("exportUI", u"...", None))
@@ -411,7 +433,7 @@ class Ui_exportUI(object):
 #if QT_CONFIG(shortcut)
         self.Confirm.setShortcut(QCoreApplication.translate("exportUI", u"Return", None))
 #endif // QT_CONFIG(shortcut)
-        self.Cancel.setText(QCoreApplication.translate("exportUI", u"Cancel", None))
+        self.Cancel.setText(QCoreApplication.translate("exportUI", u"Close", None))
 #if QT_CONFIG(shortcut)
         self.Cancel.setShortcut(QCoreApplication.translate("exportUI", u"Esc, Ctrl+W", None))
 #endif // QT_CONFIG(shortcut)

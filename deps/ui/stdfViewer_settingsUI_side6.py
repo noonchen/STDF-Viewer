@@ -3,21 +3,21 @@
 ################################################################################
 ## Form generated from reading UI file 'stdfViewer_settingsUI.ui'
 ##
-## Created by: Qt User Interface Compiler version 5.15.2
+## Created by: Qt User Interface Compiler version 6.0.3
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide2.QtCore import *
-from PySide2.QtGui import *
-from PySide2.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtWidgets import *
 
 
 class Ui_Setting(object):
     def setupUi(self, Setting):
         if not Setting.objectName():
             Setting.setObjectName(u"Setting")
-        Setting.resize(378, 381)
+        Setting.resize(370, 441)
         sizePolicy = QSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -25,7 +25,7 @@ class Ui_Setting(object):
         Setting.setSizePolicy(sizePolicy)
         Setting.setMinimumSize(QSize(370, 0))
         Setting.setStyleSheet(u"QToolBox::tab {\n"
-"    background: gray;\n"
+"    background: #BEBDBF;\n"
 "    border-radius: 3px;\n"
 "    color: black;\n"
 "}\n"
@@ -42,15 +42,144 @@ class Ui_Setting(object):
         font = QFont()
         font.setFamily(u"Tahoma")
         font.setBold(True)
-        font.setWeight(75)
         self.settingBox.setFont(font)
-        self.trendSetting = QWidget()
-        self.trendSetting.setObjectName(u"trendSetting")
-        self.trendSetting.setGeometry(QRect(0, 0, 98, 72))
+        self.generalSetting = QWidget()
+        self.generalSetting.setObjectName(u"generalSetting")
+        self.generalSetting.setGeometry(QRect(0, 0, 346, 236))
         font1 = QFont()
         font1.setFamily(u"Tahoma")
         font1.setBold(False)
-        font1.setWeight(50)
+        self.generalSetting.setFont(font1)
+        self.verticalLayout_4 = QVBoxLayout(self.generalSetting)
+        self.verticalLayout_4.setObjectName(u"verticalLayout_4")
+        self.verticalLayout_4.setContentsMargins(0, 0, 0, 0)
+        self.tablescrollArea = QScrollArea(self.generalSetting)
+        self.tablescrollArea.setObjectName(u"tablescrollArea")
+        self.tablescrollArea.setFrameShape(QFrame.NoFrame)
+        self.tablescrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tablescrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tablescrollArea.setWidgetResizable(True)
+        self.scrollAreaWidgetContents_3 = QWidget()
+        self.scrollAreaWidgetContents_3.setObjectName(u"scrollAreaWidgetContents_3")
+        self.scrollAreaWidgetContents_3.setGeometry(QRect(0, 0, 346, 236))
+        self.verticalLayout_7 = QVBoxLayout(self.scrollAreaWidgetContents_3)
+        self.verticalLayout_7.setSpacing(20)
+        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
+        self.verticalLayout_7.setContentsMargins(-1, 0, -1, -1)
+        self.horizontalLayout_9 = QHBoxLayout()
+        self.horizontalLayout_9.setObjectName(u"horizontalLayout_9")
+        self.label_3 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_3.setObjectName(u"label_3")
+
+        self.horizontalLayout_9.addWidget(self.label_3)
+
+        self.notationCombobox = QComboBox(self.scrollAreaWidgetContents_3)
+        self.notationCombobox.addItem("")
+        self.notationCombobox.addItem("")
+        self.notationCombobox.addItem("")
+        self.notationCombobox.setObjectName(u"notationCombobox")
+        sizePolicy1 = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.notationCombobox.sizePolicy().hasHeightForWidth())
+        self.notationCombobox.setSizePolicy(sizePolicy1)
+
+        self.horizontalLayout_9.addWidget(self.notationCombobox)
+
+
+        self.verticalLayout_7.addLayout(self.horizontalLayout_9)
+
+        self.horizontalLayout_10 = QHBoxLayout()
+        self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")
+        self.label_4 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_4.setObjectName(u"label_4")
+
+        self.horizontalLayout_10.addWidget(self.label_4)
+
+        self.label_5 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_5.setObjectName(u"label_5")
+        self.label_5.setMinimumSize(QSize(22, 0))
+        font2 = QFont()
+        font2.setFamily(u"Courier New")
+        font2.setPointSize(18)
+        font2.setBold(False)
+        self.label_5.setFont(font2)
+
+        self.horizontalLayout_10.addWidget(self.label_5)
+
+        self.precisionSlider = QSlider(self.scrollAreaWidgetContents_3)
+        self.precisionSlider.setObjectName(u"precisionSlider")
+        self.precisionSlider.setStyleSheet(u"QSlider::groove:horizontal {\n"
+"    border: 0px;\n"
+"    height: 6px; /* the groove expands to the size of the slider by default. by giving it a height, it has a fixed size */\n"
+"    background: rgb(173, 173, 173);\n"
+"    margin: 2px 0;\n"
+"}\n"
+"\n"
+"QSlider::handle:horizontal {\n"
+"    background: rgb(153, 153, 153);\n"
+"    border: 1px solid #5c5c5c;\n"
+"    width: 18px;\n"
+"    margin: -2px 0; /* handle is placed by default on the contents rect of the groove. Expand outside the groove */\n"
+"    border-radius: 3px;\n"
+"}")
+        self.precisionSlider.setMaximum(12)
+        self.precisionSlider.setPageStep(3)
+        self.precisionSlider.setValue(3)
+        self.precisionSlider.setOrientation(Qt.Horizontal)
+        self.precisionSlider.setTickPosition(QSlider.NoTicks)
+
+        self.horizontalLayout_10.addWidget(self.precisionSlider)
+
+
+        self.verticalLayout_7.addLayout(self.horizontalLayout_10)
+
+        self.horizontalLayout_11 = QHBoxLayout()
+        self.horizontalLayout_11.setObjectName(u"horizontalLayout_11")
+        self.label_6 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_6.setObjectName(u"label_6")
+
+        self.horizontalLayout_11.addWidget(self.label_6)
+
+        self.checkCpkcomboBox = QComboBox(self.scrollAreaWidgetContents_3)
+        self.checkCpkcomboBox.addItem("")
+        self.checkCpkcomboBox.addItem("")
+        self.checkCpkcomboBox.setObjectName(u"checkCpkcomboBox")
+        sizePolicy1.setHeightForWidth(self.checkCpkcomboBox.sizePolicy().hasHeightForWidth())
+        self.checkCpkcomboBox.setSizePolicy(sizePolicy1)
+
+        self.horizontalLayout_11.addWidget(self.checkCpkcomboBox)
+
+
+        self.verticalLayout_7.addLayout(self.horizontalLayout_11)
+
+        self.horizontalLayout_13 = QHBoxLayout()
+        self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
+        self.label_9 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_9.setObjectName(u"label_9")
+
+        self.horizontalLayout_13.addWidget(self.label_9)
+
+        self.lineEdit_cpk = QLineEdit(self.scrollAreaWidgetContents_3)
+        self.lineEdit_cpk.setObjectName(u"lineEdit_cpk")
+
+        self.horizontalLayout_13.addWidget(self.lineEdit_cpk)
+
+
+        self.verticalLayout_7.addLayout(self.horizontalLayout_13)
+
+        self.verticalSpacer_3 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        self.verticalLayout_7.addItem(self.verticalSpacer_3)
+
+        self.tablescrollArea.setWidget(self.scrollAreaWidgetContents_3)
+
+        self.verticalLayout_4.addWidget(self.tablescrollArea)
+
+        self.settingBox.addItem(self.generalSetting, u"General")
+        self.trendSetting = QWidget()
+        self.trendSetting.setObjectName(u"trendSetting")
+        self.trendSetting.setGeometry(QRect(0, 0, 98, 72))
         self.trendSetting.setFont(font1)
         self.verticalLayout_2 = QVBoxLayout(self.trendSetting)
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
@@ -61,7 +190,7 @@ class Ui_Setting(object):
         self.trendscrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 324, 92))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 329, 92))
         self.verticalLayout_5 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_5.setSpacing(20)
         self.verticalLayout_5.setObjectName(u"verticalLayout_5")
@@ -126,7 +255,7 @@ class Ui_Setting(object):
         self.histoscrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents_2 = QWidget()
         self.scrollAreaWidgetContents_2.setObjectName(u"scrollAreaWidgetContents_2")
-        self.scrollAreaWidgetContents_2.setGeometry(QRect(0, 0, 324, 227))
+        self.scrollAreaWidgetContents_2.setGeometry(QRect(0, 0, 329, 227))
         self.verticalLayout_6 = QVBoxLayout(self.scrollAreaWidgetContents_2)
         self.verticalLayout_6.setSpacing(20)
         self.verticalLayout_6.setObjectName(u"verticalLayout_6")
@@ -197,9 +326,6 @@ class Ui_Setting(object):
 
         self.lineEdit_binCount = QLineEdit(self.scrollAreaWidgetContents_2)
         self.lineEdit_binCount.setObjectName(u"lineEdit_binCount")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
         sizePolicy1.setHeightForWidth(self.lineEdit_binCount.sizePolicy().hasHeightForWidth())
         self.lineEdit_binCount.setSizePolicy(sizePolicy1)
         self.lineEdit_binCount.setAlignment(Qt.AlignCenter)
@@ -239,83 +365,51 @@ class Ui_Setting(object):
         self.verticalLayout_3.addWidget(self.histoscrollArea)
 
         self.settingBox.addItem(self.histoSetting, u"Histo Plot")
-        self.tableSetting = QWidget()
-        self.tableSetting.setObjectName(u"tableSetting")
-        self.tableSetting.setGeometry(QRect(0, 0, 354, 210))
-        self.tableSetting.setFont(font1)
-        self.verticalLayout_4 = QVBoxLayout(self.tableSetting)
-        self.verticalLayout_4.setObjectName(u"verticalLayout_4")
-        self.verticalLayout_4.setContentsMargins(0, 0, 0, 0)
-        self.tablescrollArea = QScrollArea(self.tableSetting)
-        self.tablescrollArea.setObjectName(u"tablescrollArea")
-        self.tablescrollArea.setFrameShape(QFrame.NoFrame)
-        self.tablescrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.tablescrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.tablescrollArea.setWidgetResizable(True)
-        self.scrollAreaWidgetContents_3 = QWidget()
-        self.scrollAreaWidgetContents_3.setObjectName(u"scrollAreaWidgetContents_3")
-        self.scrollAreaWidgetContents_3.setGeometry(QRect(0, 0, 354, 210))
-        self.verticalLayout_7 = QVBoxLayout(self.scrollAreaWidgetContents_3)
-        self.verticalLayout_7.setSpacing(20)
-        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
-        self.verticalLayout_7.setContentsMargins(-1, 0, -1, -1)
-        self.horizontalLayout_9 = QHBoxLayout()
-        self.horizontalLayout_9.setObjectName(u"horizontalLayout_9")
-        self.label_3 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_3.setObjectName(u"label_3")
+        self.colorSetting = QWidget()
+        self.colorSetting.setObjectName(u"colorSetting")
+        self.colorSetting.setGeometry(QRect(0, 0, 98, 72))
+        self.verticalLayout_8 = QVBoxLayout(self.colorSetting)
+        self.verticalLayout_8.setObjectName(u"verticalLayout_8")
+        self.verticalLayout_8.setContentsMargins(0, 0, 0, 0)
+        self.colorscrollArea = QScrollArea(self.colorSetting)
+        self.colorscrollArea.setObjectName(u"colorscrollArea")
+        self.colorscrollArea.setFrameShape(QFrame.NoFrame)
+        self.colorscrollArea.setLineWidth(0)
+        self.colorscrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.colorscrollArea.setWidgetResizable(True)
+        self.scrollAreaWidgetContents_4 = QWidget()
+        self.scrollAreaWidgetContents_4.setObjectName(u"scrollAreaWidgetContents_4")
+        self.scrollAreaWidgetContents_4.setGeometry(QRect(0, 0, 143, 145))
+        self.verticalLayout_9 = QVBoxLayout(self.scrollAreaWidgetContents_4)
+        self.verticalLayout_9.setSpacing(12)
+        self.verticalLayout_9.setObjectName(u"verticalLayout_9")
+        self.verticalLayout_9.setContentsMargins(0, 0, 0, 0)
+        self.site_groupBox = QGroupBox(self.scrollAreaWidgetContents_4)
+        self.site_groupBox.setObjectName(u"site_groupBox")
+        self.gridLayout_site_color = QGridLayout(self.site_groupBox)
+        self.gridLayout_site_color.setObjectName(u"gridLayout_site_color")
 
-        self.horizontalLayout_9.addWidget(self.label_3)
+        self.verticalLayout_9.addWidget(self.site_groupBox)
 
-        self.notationCombobox = QComboBox(self.scrollAreaWidgetContents_3)
-        self.notationCombobox.addItem("")
-        self.notationCombobox.addItem("")
-        self.notationCombobox.addItem("")
-        self.notationCombobox.setObjectName(u"notationCombobox")
-        sizePolicy1.setHeightForWidth(self.notationCombobox.sizePolicy().hasHeightForWidth())
-        self.notationCombobox.setSizePolicy(sizePolicy1)
+        self.sbin_groupBox = QGroupBox(self.scrollAreaWidgetContents_4)
+        self.sbin_groupBox.setObjectName(u"sbin_groupBox")
+        self.gridLayout_sbin_color = QGridLayout(self.sbin_groupBox)
+        self.gridLayout_sbin_color.setObjectName(u"gridLayout_sbin_color")
 
-        self.horizontalLayout_9.addWidget(self.notationCombobox)
+        self.verticalLayout_9.addWidget(self.sbin_groupBox)
 
+        self.hbin_groupBox = QGroupBox(self.scrollAreaWidgetContents_4)
+        self.hbin_groupBox.setObjectName(u"hbin_groupBox")
+        self.gridLayout_hbin_color = QGridLayout(self.hbin_groupBox)
+        self.gridLayout_hbin_color.setObjectName(u"gridLayout_hbin_color")
 
-        self.verticalLayout_7.addLayout(self.horizontalLayout_9)
+        self.verticalLayout_9.addWidget(self.hbin_groupBox)
 
-        self.horizontalLayout_10 = QHBoxLayout()
-        self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")
-        self.label_4 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_4.setObjectName(u"label_4")
+        self.colorscrollArea.setWidget(self.scrollAreaWidgetContents_4)
 
-        self.horizontalLayout_10.addWidget(self.label_4)
+        self.verticalLayout_8.addWidget(self.colorscrollArea)
 
-        self.precisionLCD = QLCDNumber(self.scrollAreaWidgetContents_3)
-        self.precisionLCD.setObjectName(u"precisionLCD")
-        self.precisionLCD.setFrameShape(QFrame.NoFrame)
-        self.precisionLCD.setDigitCount(2)
-        self.precisionLCD.setProperty("intValue", 3)
-
-        self.horizontalLayout_10.addWidget(self.precisionLCD)
-
-        self.precisionSlider = QSlider(self.scrollAreaWidgetContents_3)
-        self.precisionSlider.setObjectName(u"precisionSlider")
-        self.precisionSlider.setMaximum(12)
-        self.precisionSlider.setPageStep(3)
-        self.precisionSlider.setValue(3)
-        self.precisionSlider.setOrientation(Qt.Horizontal)
-        self.precisionSlider.setTickPosition(QSlider.NoTicks)
-
-        self.horizontalLayout_10.addWidget(self.precisionSlider)
-
-
-        self.verticalLayout_7.addLayout(self.horizontalLayout_10)
-
-        self.verticalSpacer_3 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-
-        self.verticalLayout_7.addItem(self.verticalSpacer_3)
-
-        self.tablescrollArea.setWidget(self.scrollAreaWidgetContents_3)
-
-        self.verticalLayout_4.addWidget(self.tablescrollArea)
-
-        self.settingBox.addItem(self.tableSetting, u"Statistic Table")
+        self.settingBox.addItem(self.colorSetting, u"Color Setting")
 
         self.verticalLayout.addWidget(self.settingBox)
 
@@ -330,11 +424,7 @@ class Ui_Setting(object):
         sizePolicy2.setHeightForWidth(self.Confirm.sizePolicy().hasHeightForWidth())
         self.Confirm.setSizePolicy(sizePolicy2)
         self.Confirm.setMinimumSize(QSize(0, 25))
-        font2 = QFont()
-        font2.setFamily(u"Menlo")
-        font2.setBold(True)
-        font2.setWeight(75)
-        self.Confirm.setFont(font2)
+        self.Confirm.setFont(font)
         self.Confirm.setStyleSheet(u"QPushButton {\n"
 "color: white;\n"
 "background-color: rgb(0, 120, 0); \n"
@@ -352,16 +442,16 @@ class Ui_Setting(object):
         sizePolicy2.setHeightForWidth(self.Cancel.sizePolicy().hasHeightForWidth())
         self.Cancel.setSizePolicy(sizePolicy2)
         self.Cancel.setMinimumSize(QSize(0, 25))
-        self.Cancel.setFont(font2)
+        self.Cancel.setFont(font)
         self.Cancel.setStyleSheet(u"QPushButton {\n"
 "color: white;\n"
-"background-color: rgb(83, 0, 0); \n"
-"border: 1px solid rgb(83, 0, 0); \n"
+"background-color: rgb(120, 120, 120); \n"
+"border: 1px solid rgb(120, 120, 120); \n"
 "border-radius: 5px;}\n"
 "\n"
 "QPushButton:pressed {\n"
-"background-color: rgb(40, 0, 0); \n"
-"border: 1px solid rgb(40, 0, 0);}")
+"background-color: rgb(50, 50, 50); \n"
+"border: 1px solid rgb(50, 50, 50);}")
 
         self.horizontalLayout_3.addWidget(self.Cancel)
 
@@ -370,8 +460,8 @@ class Ui_Setting(object):
 
 
         self.retranslateUi(Setting)
-        self.precisionSlider.valueChanged.connect(self.precisionLCD.display)
-        self.precisionSlider.sliderMoved.connect(self.precisionLCD.display)
+        self.precisionSlider.valueChanged.connect(self.label_5.setNum)
+        self.precisionSlider.sliderMoved.connect(self.label_5.setNum)
 
         self.settingBox.setCurrentIndex(0)
 
@@ -381,6 +471,19 @@ class Ui_Setting(object):
 
     def retranslateUi(self, Setting):
         Setting.setWindowTitle(QCoreApplication.translate("Setting", u"Settings", None))
+        self.label_3.setText(QCoreApplication.translate("Setting", u"Data Notation:", None))
+        self.notationCombobox.setItemText(0, QCoreApplication.translate("Setting", u"Automatic", None))
+        self.notationCombobox.setItemText(1, QCoreApplication.translate("Setting", u"Float Number", None))
+        self.notationCombobox.setItemText(2, QCoreApplication.translate("Setting", u"Scientific Notation", None))
+
+        self.label_4.setText(QCoreApplication.translate("Setting", u"Data Precison:", None))
+        self.label_5.setText(QCoreApplication.translate("Setting", u"3", None))
+        self.label_6.setText(QCoreApplication.translate("Setting", u"Find Low Cpk:", None))
+        self.checkCpkcomboBox.setItemText(0, QCoreApplication.translate("Setting", u"Enable", None))
+        self.checkCpkcomboBox.setItemText(1, QCoreApplication.translate("Setting", u"Disable", None))
+
+        self.label_9.setText(QCoreApplication.translate("Setting", u"Cpk Threshold:", None))
+        self.settingBox.setItemText(self.settingBox.indexOf(self.generalSetting), QCoreApplication.translate("Setting", u"General", None))
         self.showHL_trend.setText(QCoreApplication.translate("Setting", u"Show Upper Limit", None))
         self.showLL_trend.setText(QCoreApplication.translate("Setting", u"Show Lower Limit", None))
         self.showMedian_trend.setText(QCoreApplication.translate("Setting", u"Show Median Line", None))
@@ -401,13 +504,10 @@ class Ui_Setting(object):
         self.sigmaCombobox.setItemText(3, QCoreApplication.translate("Setting", u"Show \u00b13\u03c3, \u00b16\u03c3, \u00b19\u03c3", None))
 
         self.settingBox.setItemText(self.settingBox.indexOf(self.histoSetting), QCoreApplication.translate("Setting", u"Histo Plot", None))
-        self.label_3.setText(QCoreApplication.translate("Setting", u"Data Notation:", None))
-        self.notationCombobox.setItemText(0, QCoreApplication.translate("Setting", u"Automatic", None))
-        self.notationCombobox.setItemText(1, QCoreApplication.translate("Setting", u"Float Number", None))
-        self.notationCombobox.setItemText(2, QCoreApplication.translate("Setting", u"Scientific Notation", None))
-
-        self.label_4.setText(QCoreApplication.translate("Setting", u"Data Precison:", None))
-        self.settingBox.setItemText(self.settingBox.indexOf(self.tableSetting), QCoreApplication.translate("Setting", u"Statistic Table", None))
+        self.site_groupBox.setTitle(QCoreApplication.translate("Setting", u"Site Colors", None))
+        self.sbin_groupBox.setTitle(QCoreApplication.translate("Setting", u"Software Bin Colors", None))
+        self.hbin_groupBox.setTitle(QCoreApplication.translate("Setting", u"Hardware Bin Colors", None))
+        self.settingBox.setItemText(self.settingBox.indexOf(self.colorSetting), QCoreApplication.translate("Setting", u"Color Setting", None))
         self.Confirm.setText(QCoreApplication.translate("Setting", u"Confirm", None))
 #if QT_CONFIG(shortcut)
         self.Confirm.setShortcut(QCoreApplication.translate("Setting", u"Return", None))

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Apr 12 2021
+# Last Modified: Thu Apr 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,13 +26,17 @@
 
 import time, os, logging
 # pyqt5
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-from .ui.stdfViewer_loadingUI import Ui_loadingUI
+# from PyQt5 import QtCore, QtWidgets
+# from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+# from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
-# from PySide2 import QtCore, QtWidgets
-# from PySide2.QtCore import Signal, Slot
-# from deps.ui.stdfViewer_loadingUI_side import Ui_loadingUI
+from PySide2 import QtCore, QtWidgets
+from PySide2.QtCore import Signal, Slot
+from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# pyside6
+# from PySide6 import QtCore, QtWidgets
+# from PySide6.QtCore import Signal, Slot
+# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 from .stdfOffsetRetriever import stdfDataRetriever
 # from . import stdfOffsetRetriever_test
@@ -90,7 +94,6 @@ class stdfLoader(QtWidgets.QDialog):
         self.thread.start()
         # blocking parent if it's not finished
         self.exec_()
-        del self.reader
 
         
     def closeEvent(self, event):
@@ -129,7 +132,6 @@ class stdfLoader(QtWidgets.QDialog):
         if closeUI:
             self.thread.quit()
             self.thread.wait()
-            self.thread = None
             self.reader = None
             self.close()
                  
@@ -167,9 +169,9 @@ class stdReader(QtCore.QObject):
                 
         except InitialSequenceException:
             if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), False, True, False)
-        except:
+        except Exception:
             logger.exception("Error occurred when parsing the file")
-            if self.msgSignal: self.msgSignal.emit("Error occurred when parsing the file", False, True, False)
+            if self.msgSignal: self.msgSignal.emit("Error occurred when parsing the file", True, False, False)
         finally:
             self.dataTransSignal.emit(self.sData)
             self.closeSignal.emit(True)     # close loaderUI
