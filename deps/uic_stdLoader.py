@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Feb 26 2021
+# Last Modified: Mon Apr 12 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import time, os
+import time, os, logging
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
@@ -40,6 +40,7 @@ from .stdfOffsetRetriever import stdfDataRetriever
 from .stdfData import stdfData
 from .pystdf.Types import InitialSequenceException
 
+logger = logging.getLogger("STDF Viewer")
 
 class flags:
     stop = False
@@ -166,16 +167,13 @@ class stdReader(QtCore.QObject):
                 
         except InitialSequenceException:
             if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), False, True, False)
-        
+        except:
+            logger.exception("Error occurred when parsing the file")
+            if self.msgSignal: self.msgSignal.emit("Error occurred when parsing the file", False, True, False)
         finally:
             self.dataTransSignal.emit(self.sData)
             self.closeSignal.emit(True)     # close loaderUI
         
-if __name__ == "__main__":
-    import sys
-    app = QtWidgets.QApplication([])
-    path1 = "Test Path"
-    test = stdfLoader(path1)
-    sys.exit(app.exec_())
+
     
     

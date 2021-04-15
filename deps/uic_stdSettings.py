@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Apr 01 2021
+# Last Modified: Mon Apr 12 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -29,12 +29,10 @@ from random import choice
 from copy import deepcopy
 from deps.ui.ImgSrc_svg import ImgDict
 # pyqt5
-from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5 import QtWidgets, QtGui
 from deps.ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
-# from PySide2 import QtCore, QtWidgets, QtGui
-# from PySide2.QtCore import Signal, Slot
+# from PySide2 import QtWidgets, QtGui
 # from deps.ui.stdfViewer_settingsUI_side import Ui_Setting
 
 # simulate a Enum in python
