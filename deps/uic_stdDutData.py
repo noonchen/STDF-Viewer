@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Thu Apr 15 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,24 +24,26 @@
 
 
 
+import subprocess, os, platform
+from .customizedQtClass import StyleDelegateForTable_List
 # pyqt5
-# from PyQt5 import QtCore, QtWidgets, QtGui
-# from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-# from PyQt5.QtCore import pyqtSignal as Signal
-# from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
-# from deps.ui.stdfViewer_dutDataUI import Ui_dutData
+from PyQt5 import QtCore, QtWidgets, QtGui
+from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog
+from PyQt5.QtCore import pyqtSignal as Signal
+from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
-from PySide2 import QtCore, QtWidgets, QtGui
-from PySide2.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-from PySide2.QtCore import Signal
-from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
-from deps.ui.stdfViewer_dutDataUI_side2 import Ui_dutData
+# from PySide2 import QtCore, QtWidgets, QtGui
+# from PySide2.QtWidgets import QAbstractItemView, QApplication, QFileDialog
+# from PySide2.QtCore import Signal
+# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# from .ui.stdfViewer_dutDataUI_side2 import Ui_dutData
 # pyside6
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QAbstractItemView, QApplication, QFileDialog
 # from PySide6.QtCore import Signal
-# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
-# from deps.ui.stdfViewer_dutDataUI_side6 import Ui_dutData
+# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from .ui.stdfViewer_dutDataUI_side6 import Ui_dutData
 
 
 
@@ -51,13 +53,12 @@ class signal(QtCore.QObject):
     
 
 class DutDataReader(QtWidgets.QWidget):
-    def __init__(self, parent, selectedDutIndex, styleDelegate):
+    def __init__(self, parent, selectedDutIndex:list):
         super().__init__()
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
         self.parent = parent
         self.selectedDutIndex = selectedDutIndex      # selected indexes of dut info table
-        self.sd = styleDelegate
                 
         self.setWindowTitle("Reading DUT data")
         self.UI.progressBar.setFormat("%p%")
@@ -72,14 +73,14 @@ class DutDataReader(QtWidgets.QWidget):
     def start(self):
         self.test_number_List = sorted([int(ele.split("\t")[0]) for ele in self.parent.completeTestList])
         self.total = len(self.test_number_List)
-        dutInfo = self.parent.prepareDataForDUTSummary(headList=[], siteList=[], selectedDutIndex=self.selectedDutIndex)
+        dutInfo = [self.parent.dutSummaryDict[i] for i in self.selectedDutIndex]
         dutData = []
         dutStat = []
         dutFlagInfo = []
         for i, test_num in enumerate(self.test_number_List):
             if self.stopFlag: return
 
-            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.prepareDataForDUTSummary(headList=[], siteList=[], selectedDutIndex=self.selectedDutIndex, test_num=test_num, exportTestFlag=True)
+            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, test_num)
             dutData.append(dutData_perTest)
             dutStat.append(stat_perTest)
             dutFlagInfo.append(flagInfo_perTest)
@@ -88,7 +89,7 @@ class DutDataReader(QtWidgets.QWidget):
             QApplication.processEvents()    # force refresh UI to update progress bar
         self.UI.progressBar.setFormat("Filling table with data...")
         QApplication.processEvents()
-        dutDataDisplayer(self, (dutInfo, dutData, dutStat, dutFlagInfo), self.sd, self.signal.hideSignal)
+        dutDataDisplayer(self, (dutInfo, dutData, dutStat, dutFlagInfo), self.signal.hideSignal)
         self.close()
             
         
@@ -104,13 +105,13 @@ class DutDataReader(QtWidgets.QWidget):
         
         
 class dutDataDisplayer(QtWidgets.QDialog):
-    def __init__(self, parent, content, styleDelegate, hideSignal):
+    def __init__(self, parent, content, hideSignal):
         super().__init__()
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
         self.parent = parent
         self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = content
-        self.sd = styleDelegate
+        self.sd = StyleDelegateForTable_List()
         self.hideSignal = hideSignal
         
         self.UI.save.clicked.connect(self.onSave_csv)
@@ -138,7 +139,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.removeColumns(0, self.tmodel.columnCount())
         self.tmodel.removeRows(0, self.tmodel.rowCount())
         # header
-        self.hh = ["Part ID", "Test Head", "Test Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"] + [tmp[0] for tmp in self.dutData]
+        self.hh = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"] + [tmp[0] for tmp in self.dutData]
         vh_base = ["Test Number", "HiLimit", "LoLimit", "Unit"]
         self.vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
         vh_len = len(vh_base)
@@ -146,12 +147,12 @@ class dutDataDisplayer(QtWidgets.QDialog):
         # append value
         # get dut pass/fail list
         statIndex = self.hh.index("DUT Flag")
-        dutStatus = [True] * vh_len + [dutInfo_perDUT[statIndex].split(" ", 1)[0] != "Failed" for dutInfo_perDUT in self.dutInfo]
+        dutStatus = [True] * vh_len + [not dutInfo_perDUT[statIndex].startswith(b"F") for dutInfo_perDUT in self.dutInfo]        # not startswith F == Passed / None
         for col_tuple in zip(*self.dutInfo):
-            tmpCol = ["N/A"] * vh_len + list(col_tuple)
+            tmpCol = [b""] * vh_len + list(col_tuple)
             qitemCol = []
             for i, (item, flag) in enumerate(zip(tmpCol, dutStatus)):
-                qitem = QtGui.QStandardItem(item)
+                qitem = QtGui.QStandardItem(item.decode("utf-8"))
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
@@ -262,21 +263,21 @@ class dutDataDisplayer(QtWidgets.QDialog):
     
     def openFileInOS(self, filepath):
         # https://stackoverflow.com/a/435669
-        import subprocess, os, platform
+        filepath = os.path.normpath(filepath)
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows
-            os.startfile(filepath)
+            subprocess.call(f'cmd /c start "" "{filepath}"')
         else:                                   # linux variants
             subprocess.call(('xdg-open', filepath))        
             
 
     def revealFile(self, filepath):
-        import subprocess, os, platform
+        filepath = os.path.normpath(filepath)
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', '-R', filepath))
         elif platform.system() == 'Windows':    # Windows
-            subprocess.Popen(f'explorer /select,{filepath}')
+            subprocess.Popen(f'explorer /select,"{filepath}"')
         else:                                   # linux variants
             subprocess.call(('xdg-open', os.path.dirname(filepath)))
 

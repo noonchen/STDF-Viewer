@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Apr 15 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,19 +24,19 @@
 
 
 
-import sys, toml
+import sys
 from random import choice
 from copy import deepcopy
-from deps.ui.ImgSrc_svg import ImgDict
+from .ui.ImgSrc_svg import ImgDict
 # pyqt5
-# from PyQt5 import QtWidgets, QtGui
-# from deps.ui.stdfViewer_settingsUI import Ui_Setting
+from PyQt5 import QtWidgets, QtGui
+from .ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
-from PySide2 import QtWidgets, QtGui
-from deps.ui.stdfViewer_settingsUI_side2 import Ui_Setting
+# from PySide2 import QtWidgets, QtGui
+# from .ui.stdfViewer_settingsUI_side2 import Ui_Setting
 # pyside6
 # from PySide6 import QtWidgets, QtGui
-# from deps.ui.stdfViewer_settingsUI_side6 import Ui_Setting
+# from .ui.stdfViewer_settingsUI_side6 import Ui_Setting
 
 
 # simulate a Enum in python
@@ -208,31 +208,33 @@ class stdfSettings(QtWidgets.QDialog):
         # color
         for group in ["site", "sbin", "hbin"]:
             self.currentColorDict(get=False, group=group)
-        # save data to toml config
-        configData = {"General": {},
-                      "Trend Plot": {},
-                      "Histo Plot": {},
-                      "Color Setting": {}}
-        configName = dict(sys.CONFIG_NAME)
-        for k, v in self.parent.settingParams.__dict__.items():
-            if k in ["dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
-                # General
-                configData["General"][configName[k]] = v
-            elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
-                # Trend
-                configData["Trend Plot"][configName[k]] = v
-            elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
-                # Histo
-                configData["Histo Plot"][configName[k]] = v
+        
+        self.parent.dumpConfigFile()
+        # # save data to toml config
+        # configData = {"General": {},
+        #               "Trend Plot": {},
+        #               "Histo Plot": {},
+        #               "Color Setting": {}}
+        # configName = dict(sys.CONFIG_NAME)
+        # for k, v in self.parent.settingParams.__dict__.items():
+        #     if k in ["recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
+        #         # General
+        #         configData["General"][configName[k]] = v
+        #     elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
+        #         # Trend
+        #         configData["Trend Plot"][configName[k]] = v
+        #     elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
+        #         # Histo
+        #         configData["Histo Plot"][configName[k]] = v
 
-            elif k in ["siteColor", "sbinColor", "hbinColor"]:
-                # Color
-                # change Int key to string, since toml only support string keys
-                v = dict([(str(intKey), color) for intKey, color in v.items()])
-                configData["Color Setting"][configName[k]] = v
+        #     elif k in ["siteColor", "sbinColor", "hbinColor"]:
+        #         # Color
+        #         # change Int key to string, since toml only support string keys
+        #         v = dict([(str(intKey), color) for intKey, color in v.items()])
+        #         configData["Color Setting"][configName[k]] = v
 
-        with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
-            toml.dump(configData, fd)
+        # with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
+        #     toml.dump(configData, fd)
         
         
     def isTrendChanged(self):
@@ -285,7 +287,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTable = True
                 
             if refreshTab: self.parent.updateTabContent(forceUpdate=True)
-            if refreshTable: self.parent.updateTableContent()
+            if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.clearTestItemBG()
             if refreshCursor: self.parent.updateCursorPrecision()
                 
@@ -313,7 +315,7 @@ class stdfSettings(QtWidgets.QDialog):
         # sbin color picker
         sbin_color_group = self.settingsUI.sbin_groupBox
         sbin_gridLayout = self.settingsUI.gridLayout_sbin_color
-        for i, sbin in enumerate([i for i in sorted(self.parent.dataInfo.sbinDict.keys())]):
+        for i, sbin in enumerate([i for i in sorted(self.parent.SBIN_dict.keys())]):
             binName = f"SBIN {sbin:<2}"
             cB = colorBtn(parent=sbin_color_group, name=binName, num=sbin)
             row = i//3
@@ -323,7 +325,7 @@ class stdfSettings(QtWidgets.QDialog):
         # hbin color picker
         hbin_color_group = self.settingsUI.hbin_groupBox
         hbin_gridLayout = self.settingsUI.gridLayout_hbin_color
-        for i, hbin in enumerate([i for i in sorted(self.parent.dataInfo.hbinDict.keys())]):
+        for i, hbin in enumerate([i for i in sorted(self.parent.HBIN_dict.keys())]):
             binName = f"HBIN {hbin:<2}"
             cB = colorBtn(parent=hbin_color_group, name=binName, num=hbin)
             row = i//3
