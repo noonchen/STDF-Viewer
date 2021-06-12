@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Apr 15 2021
+# Last Modified: Tue Jun 08 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,25 +24,22 @@
 
 
 
-import time, os, logging
+import time, os, sys, logging
 # pyqt5
-# from PyQt5 import QtCore, QtWidgets
-# from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-# from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
-from PySide2 import QtCore, QtWidgets
-from PySide2.QtCore import Signal, Slot
-from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# from PySide2 import QtCore, QtWidgets
+# from PySide2.QtCore import Signal, Slot
+# from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
 # from PySide6.QtCore import Signal, Slot
 # from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
-from .stdfOffsetRetriever import stdfDataRetriever
-# from . import stdfOffsetRetriever_test
+from .cystdf import stdfDataRetriever     # cython version
 
-from .stdfData import stdfData
-from .pystdf.Types import InitialSequenceException
 
 logger = logging.getLogger("STDF Viewer")
 
@@ -51,15 +48,15 @@ class flags:
 
 
 class signal4Loader(QtCore.QObject):
-     # get data from reader
-    dataTransSignal = Signal(stdfData)
     # get progress from reader
     progressBarSignal = Signal(int)
+    # get parse status from reader
+    parseStatusSignal_reader = Signal(bool)
     # get close signal
     closeSignal = Signal(bool)
     
-    # data transfer signal from parent
-    dataTransToParent = None
+    # parse status signal from parent
+    parseStatusSignal_parent = None
     # status bar signal from parent
     msgSignal = None
 
@@ -67,17 +64,17 @@ class signal4Loader(QtCore.QObject):
 
 class stdfLoader(QtWidgets.QDialog):
     
-    def __init__(self, stdHandle, parentSignal = None, parent = None):
+    def __init__(self, stdPath, parentSignal = None, parent = None):
         super().__init__(parent)
         self.closeEventByThread = False    # used to determine the source of close event
-        self.std = stdHandle
+        self.stdPath = stdPath
         
         self.signals = signal4Loader()
-        self.signals.dataTransSignal.connect(self.getStdfData)
         self.signals.progressBarSignal.connect(self.updateProgressBar)
+        self.signals.parseStatusSignal_reader.connect(self.sendParseSignal)
         self.signals.closeSignal.connect(self.closeLoader)
         
-        self.signals.dataTransToParent = getattr(parentSignal, "dataSignal", None)
+        self.signals.parseStatusSignal_parent = getattr(parentSignal, "parseStatusSignal", None)
         self.signals.msgSignal = getattr(parentSignal, "statusSignal", None)
         
         self.loaderUI = Ui_loadingUI()
@@ -86,7 +83,7 @@ class stdfLoader(QtWidgets.QDialog):
         # create new thread and move stdReader to the new thread
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
-        self.reader.readThis(self.std)
+        self.reader.readThis(self.stdPath)
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
@@ -118,14 +115,21 @@ class stdfLoader(QtWidgets.QDialog):
 
     @Slot(int)
     def updateProgressBar(self, num):
-        # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
-        self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
-        self.loaderUI.progressBar.setValue(num)
+        if num == 10000:
+            self.loaderUI.progressBar.setFormat("Updating GUI...")
+            self.loaderUI.progressBar.setValue(num)
+        else:
+            # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
+            self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
+            self.loaderUI.progressBar.setValue(num)
         
-    @Slot(stdfData)
-    def getStdfData(self, sdata):
-        if self.signals.dataTransToParent: self.signals.dataTransToParent.emit(sdata)
         
+    @Slot(bool)
+    def sendParseSignal(self, parseStatus):
+        # parse parse status from reader to mainUI
+        self.signals.parseStatusSignal_parent.emit(parseStatus)
+    
+    
     @Slot(bool)
     def closeLoader(self, closeUI):
         self.closeEventByThread = closeUI
@@ -138,42 +142,51 @@ class stdfLoader(QtWidgets.QDialog):
         
         
 class stdReader(QtCore.QObject):
-    def __init__(self, QSignal):
+    def __init__(self, QSignal:signal4Loader):
         super().__init__()
-        self.sData = stdfData()
+        self.parseStatus = True     # default success
+        if (QSignal is None or
+            QSignal.parseStatusSignal_reader is None or
+            QSignal.msgSignal is None):
+            raise ValueError("Qsignal is invalid, parse is terminated")
+        
         self.QSignals = QSignal
-        self.dataTransSignal = self.QSignals.dataTransSignal
         self.progressBarSignal = self.QSignals.progressBarSignal
         self.closeSignal = self.QSignals.closeSignal
+        self.parseStatusSignal = self.QSignals.parseStatusSignal_reader
         self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
         
-    def readThis(self, stdHandle):
-        self.std = stdHandle
+    def readThis(self, stdPath):
+        self.stdPath = stdPath
         
     @Slot()
     def readBegin(self):
         try:
             if self.msgSignal: self.msgSignal.emit("Loading STD file...", False, False, False)
             start = time.time()
-            self.retriver = stdfDataRetriever(self.std, QSignal=self.progressBarSignal, flag=self.flag)
-            # self.retriver = stdfOffsetRetriever_test.stdfDataRetriever(self.std, QSignal=self.progressBarSignal, flag=self.flag)
-            self.sData = self.retriver.getStdfData()
+            databasePath = os.path.join(sys.rootFolder, "logs", "tmp.db")
+            stdfDataRetriever(filepath=self.stdPath, dbPath=databasePath, QSignal=self.progressBarSignal, flag=self.flag)
             end = time.time()
-            # print(end - start)
+            print(end - start)
             if self.flag.stop:
-                self.sData.testData = {}   # empty its data in order to force fail the content check
+                # user terminated
+                self.parseStatus = False
                 if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False, False, False)
             else:
+                self.parseStatus = True
                 if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
+            self.parseStatusSignal.emit(self.parseStatus)
                 
-        except InitialSequenceException:
-            if self.msgSignal: self.msgSignal.emit("It is not a standard STDF V4 file.\n\nPath:\n%s" % (os.path.realpath(self.std.name)), False, True, False)
-        except Exception:
+        except Exception as e:
+            self.parseStatus = False
+            self.parseStatusSignal.emit(self.parseStatus)
             logger.exception("Error occurred when parsing the file")
-            if self.msgSignal: self.msgSignal.emit("Error occurred when parsing the file", True, False, False)
+            if self.msgSignal: self.msgSignal.emit(str(e), True, False, False)
+            
         finally:
-            self.dataTransSignal.emit(self.sData)
+            # parse signal cannot be emitted in finally block
+            # since it will execute before except block
             self.closeSignal.emit(True)     # close loaderUI
         
 
