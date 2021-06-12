@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 20th 2021
 # -----
-# Last Modified: Wed Jun 02 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -73,7 +73,7 @@ if isWindows:
                         '-Wl,--no-whole-archive'])
 
 setup(ext_modules = cythonize(Extension(
-            "cystdf",                                             # the extension name
+            "_cystdf",                                             # the extension name
             sources           = ["cystdf_amalgamation.pyx"] \
                                 + source_c,
             language          = "c",                              # generate and compile C code

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue Jun 08 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -32,11 +32,11 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets
 # from PySide2.QtCore import Signal, Slot
-# from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
 # from PySide6.QtCore import Signal, Slot
-# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 from .cystdf import stdfDataRetriever     # cython version
 

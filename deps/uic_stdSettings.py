@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue May 25 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,19 +24,19 @@
 
 
 
-import sys, toml
+import sys
 from random import choice
 from copy import deepcopy
-from deps.ui.ImgSrc_svg import ImgDict
+from .ui.ImgSrc_svg import ImgDict
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
-from deps.ui.stdfViewer_settingsUI import Ui_Setting
+from .ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
 # from PySide2 import QtWidgets, QtGui
-# from deps.ui.stdfViewer_settingsUI_side2 import Ui_Setting
+# from .ui.stdfViewer_settingsUI_side2 import Ui_Setting
 # pyside6
 # from PySide6 import QtWidgets, QtGui
-# from deps.ui.stdfViewer_settingsUI_side6 import Ui_Setting
+# from .ui.stdfViewer_settingsUI_side6 import Ui_Setting
 
 
 # simulate a Enum in python

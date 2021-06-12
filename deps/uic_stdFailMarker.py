@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon May 31 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,15 +28,15 @@ import time
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QApplication
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
+from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
 # from PySide2.QtWidgets import QApplication
-# from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QApplication
-# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 
 class FailMarker(QtWidgets.QWidget):

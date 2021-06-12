@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Fri Jun 11 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -34,20 +34,20 @@ import subprocess, platform, logging
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
-from deps.ui.stdfViewer_exportUI import Ui_exportUI
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
+from .ui.stdfViewer_exportUI import Ui_exportUI
+from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets
 # from PySide2.QtWidgets import QAbstractItemView, QFileDialog
-# from deps.ui.stdfViewer_exportUI_side2 import Ui_exportUI
-# from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # from PySide2.QtCore import Signal, Slot
+# from .ui.stdfViewer_exportUI_side2 import Ui_exportUI
+# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
 # from PySide6.QtWidgets import QAbstractItemView, QFileDialog
-# from deps.ui.stdfViewer_exportUI_side6 import Ui_exportUI
-# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 # from PySide6.QtCore import Signal, Slot
+# from .ui.stdfViewer_exportUI_side6 import Ui_exportUI
+# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 
 logger = logging.getLogger("STDF Viewer")

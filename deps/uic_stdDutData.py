@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Thu Jun 10 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -30,20 +30,20 @@ from .customizedQtClass import StyleDelegateForTable_List
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog
 from PyQt5.QtCore import pyqtSignal as Signal
-from deps.ui.stdfViewer_loadingUI import Ui_loadingUI
-from deps.ui.stdfViewer_dutDataUI import Ui_dutData
+from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
 # from PySide2.QtWidgets import QAbstractItemView, QApplication, QFileDialog
 # from PySide2.QtCore import Signal
-# from deps.ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
-# from deps.ui.stdfViewer_dutDataUI_side2 import Ui_dutData
+# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
+# from .ui.stdfViewer_dutDataUI_side2 import Ui_dutData
 # pyside6
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QAbstractItemView, QApplication, QFileDialog
 # from PySide6.QtCore import Signal
-# from deps.ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
-# from deps.ui.stdfViewer_dutDataUI_side6 import Ui_dutData
+# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
+# from .ui.stdfViewer_dutDataUI_side6 import Ui_dutData
 
 
 

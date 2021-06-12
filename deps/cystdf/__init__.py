@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 25th 2021
 # -----
-# Last Modified: Fri Jun 04 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,19 +24,19 @@
 
 
 
-from . import cystdf
+from . import _cystdf
 import numpy as np
 
 __all__ = ["stdfDataRetriever", "stdfRecordAnalyzer", "stdfParser", "setByteSwap"]
 
-class stdfDataRetriever(cystdf.stdfDataRetriever):
+class stdfDataRetriever(_cystdf.stdfDataRetriever):
     pass
 
 def stdfRecordAnalyzer(filepath:str) -> str:
-    return cystdf.analyzeSTDF(filepath)
+    return _cystdf.analyzeSTDF(filepath)
 
 def stdfParser(recHeader:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
-    return cystdf.parse_rawList(recHeader, offsetArray, lengthArray, file_handle)
+    return _cystdf.parse_rawList(recHeader, offsetArray, lengthArray, file_handle)
 
 def setByteSwap(swapOn:bool):
-    cystdf.setByteSwap(swapOn)
+    _cystdf.setByteSwap(swapOn)

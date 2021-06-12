@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Jun 12 2021
+# Last Modified: Sun Jun 13 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -118,7 +118,6 @@ def deleteWidget(w2delete: QtWidgets.QWidget):
     '''delete QWidget and release its memory'''
     w2delete.setParent(None)
     w2delete.deleteLater()
-    del w2delete
 
 def getCanvasDicts(qfigLayout: QtWidgets.QBoxLayout) -> dict:
     '''Read canvas info (tn, head, site) from the layout 
