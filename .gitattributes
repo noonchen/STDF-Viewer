@@ -1,0 +1,26 @@
+*.* linguist-vendored=false
+# exclude other C libraries
+deps/cystdf/sqlite3_src/*.c linguist-vendored=true
+deps/cystdf/sqlite3_src/*.h linguist-vendored=true
+
+deps/cystdf/libopm/include/*.h linguist-vendored=true
+
+deps/cystdf/hashmap_src/*.c linguist-vendored=true
+deps/cystdf/hashmap_src/*.h linguist-vendored=true
+
+deps/cystdf/stdf4_src/zlib_src/*.c linguist-vendored=true
+deps/cystdf/stdf4_src/zlib_src/*.h linguist-vendored=true
+
+deps/cystdf/stdf4_src/bzip2_src/*.c linguist-vendored=true
+deps/cystdf/stdf4_src/bzip2_src/*.h linguist-vendored=true
+
+deps/cystdf/tsqueue_src/*.c linguist-vendored=true
+deps/cystdf/tsqueue_src/*.h linguist-vendored=true
+# include self-dev C files
+*.c linguist-detectable=true
+*.h linguist-detectable=true
+*.pxd linguist-detectable=true
+*.pyx linguist-detectable=true
+# treat cython as C
+*.pxd linguist-language=C
+*.pyx linguist-language=C
