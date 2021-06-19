@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Sat Jun 19 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -79,7 +79,7 @@ class DatabaseFetcher:
             
         self.connection.text_factory = str
         WaferList = []
-        for row in self.cursor.execute("SELECT WaferIndex, WaferID from Wafer_Info ORDER by WaferIndex"):
+        for row in self.cursor.execute("SELECT WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
             WaferList.append(f"{row[0]}\t{row[1]}")
         return WaferList
     
@@ -137,8 +137,8 @@ class DatabaseFetcher:
         return BinStats
     
     
-    def getMIR_Info(self):
-        # return MIR field-value dict
+    def getFileInfo(self):
+        # return MIR & WCR field-value dict
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         self.connection.text_factory = str
@@ -313,8 +313,14 @@ class DatabaseFetcher:
         
         waferDict = {}     # key: waferIndex, value: {"WAFER_ID"}
         self.connection.text_factory = str
-        for WaferIndex, WaferID in self.cursor.execute("SELECT WaferIndex, WaferID FROM Wafer_Info ORDER by WaferIndex"):
-            waferDict[WaferIndex] = {"WAFER_ID": WaferID}
+        sqlResult = self.cursor.execute("SELECT * FROM Wafer_Info ORDER by WaferIndex")
+        col = [tup[0] for tup in self.cursor.description]   # column names
+        waferIndex_pos = col.index("WaferIndex")
+        
+        for valueList in sqlResult:
+            WaferIndex = valueList[waferIndex_pos]
+            valueList = ["N/A" if ele is None else ele for ele in valueList]    # Replace all None to N/A
+            waferDict[WaferIndex] = dict(zip(col, valueList))
             
         return waferDict
     

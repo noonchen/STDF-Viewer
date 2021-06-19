@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Sat Jun 19 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -569,6 +569,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.dutArray = np.array([])    # complete dut array in the stdf
         self.dutSiteInfo = {}           # site of each dut in self.dutArray
         self.dutSummaryDict = {}        # complete dut summary dict
+        self.fileInfoDict = {}          # info of MIR and WCR
         # dict to store H/SBIN info
         self.HBIN_dict = {}
         self.SBIN_dict = {}
@@ -821,8 +822,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 testDict = self.getData(test_num, selHeads, selSites)
                 
                 test_data_list = ["%d" % test_num,
-                                "" if testDict["HL"] is None else valueFormat % testDict["HL"],
-                                "" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                                "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                                "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
                                 testDict["Unit"]]
                 test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
                 test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
@@ -1028,15 +1029,42 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Passed: ", str(statsDict["Pass"])]])
         self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Failed: ", str(statsDict["Failed"])]])
 
-        mirInfo = self.DatabaseFetcher.getMIR_Info()
+        extraInfoList = []
+        # append mir info
+        self.fileInfoDict = self.DatabaseFetcher.getFileInfo()
         for fn in mirFieldNames:
-            value:str = mirInfo.get(fn, "")
+            value:str = self.fileInfoDict.get(fn, "")
             if fn == "BYTE_ORD":
                 self.needByteSwap = not (value.lower().startswith(sys.byteorder))
             if value == "" or value == " " : continue
-            tmpRow = [QtGui.QStandardItem(ele) for ele in [mirDict[fn] + ": ", value]]
-            self.tmodel_info.appendRow(tmpRow)
+            extraInfoList.append([mirDict[fn] + ": ", value])
+            # tmpRow = [QtGui.QStandardItem(ele) for ele in [mirDict[fn] + ": ", value]]
+            # self.tmodel_info.appendRow(tmpRow)
             
+        # append wafer configuration info
+        if self.containsWafer:
+            wafer_unit = self.fileInfoDict.get("WF_UNITS", "")
+            if "WAFR_SIZ" in self.fileInfoDict:
+                extraInfoList.append(["Wafer Size: ", f'{self.fileInfoDict["WAFR_SIZ"]} {wafer_unit}'])
+            if "DIE_WID" in self.fileInfoDict and "DIE_HT" in self.fileInfoDict:
+                extraInfoList.append(["Wafer Die Width × Height: ", f'{self.fileInfoDict["DIE_WID"]} {wafer_unit} × {self.fileInfoDict["DIE_HT"]} {wafer_unit}'])
+            if "CENTER_X" in self.fileInfoDict and "CENTER_Y" in self.fileInfoDict:
+                extraInfoList.append(["Wafer Center: ", f'({self.fileInfoDict["CENTER_X"]}, {self.fileInfoDict["CENTER_Y"]})'])
+            
+            direction_symbol = {"U": "Up", 
+                                "D": "Down", 
+                                "L": "Left", 
+                                "R": "Right"}
+            flat_orient = direction_symbol.get(self.fileInfoDict.get("WF_FLAT", ""), "Unknown")
+            x_orient = direction_symbol.get(self.fileInfoDict.get("POS_X", ""), "Unknown")
+            y_orient = direction_symbol.get(self.fileInfoDict.get("POS_Y", ""), "Unknown")
+            extraInfoList.append(["Wafer Flat Direction: ", f'{flat_orient}'])
+            extraInfoList.append(["Wafer XY Direction: ", f'({x_orient}, {y_orient})'])
+            
+        for tmpRow in extraInfoList:
+            qitemRow = [QtGui.QStandardItem(ele) for ele in tmpRow]
+            self.tmodel_info.appendRow(qitemRow)
+        
         horizontalHeader.resizeSection(0, 250)
         horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
         horizontalHeader.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
@@ -1296,8 +1324,8 @@ class MyWindow(QtWidgets.QMainWindow):
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         test_info_header = [testInfo["TEST_NAME"],
                             "%d" % test_num,
-                            "" if testInfo["HL"] is None else valueFormat % testInfo["HL"],
-                            "" if testInfo["LL"] is None else valueFormat % testInfo["LL"],
+                            "N/A" if testInfo["HL"] is None else valueFormat % testInfo["HL"],
+                            "N/A" if testInfo["LL"] is None else valueFormat % testInfo["LL"],
                             testInfo["Unit"]]
         test_data_list = test_info_header + ["Not Tested" if np.isnan(data) else valueFormat % data for data in testInfo["dataList"]]
         test_stat_list = [True] * len(test_info_header) + list(map(isPass, testInfo["flagList"]))
@@ -1488,10 +1516,10 @@ class MyWindow(QtWidgets.QMainWindow):
                 rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                         testDict["TEST_NAME"],
                         testDict["Unit"],
-                        "" if testDict["LL"] is None else valueFormat % testDict["LL"],
-                        "" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                        "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                        "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
                         "%d" % list(map(isPass, testDict["flagList"])).count(False),
-                        "%s" % "∞" if testDict["Cpk"] == np.inf else ("" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"]),
+                        "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"]),
                         valueFormat % testDict["Mean"],
                         valueFormat % testDict["Median"],
                         valueFormat % testDict["SDev"],
@@ -1570,8 +1598,8 @@ class MyWindow(QtWidgets.QMainWindow):
             
             test_data_list = [testDict["TEST_NAME"],
                               "%d" % test_num,
-                              "" if testDict["HL"] is None else valueFormat % testDict["HL"],
-                              "" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                              "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                              "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
                               testDict["Unit"]]
             vh_len = len(test_data_list)
             test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
@@ -1659,7 +1687,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                         qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                                         qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                                 elif index == indexOfCpk:
-                                    if item != "" and item != "∞":
+                                    if item != "N/A" and item != "∞":
                                         if float(item) < self.settingParams.cpkThreshold:
                                             qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                                             qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
@@ -1957,8 +1985,8 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
             # set ticks & draw coord lines
-            ax.set_xticks(range(xmin, xmax+1, 1))
-            ax.set_yticks(range(ymin, ymax+1, 1))
+            ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
+            ax.yaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
             Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
             labelsize = Tsize(max(xmax-xmin, ymax-ymin))
             ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
@@ -1967,9 +1995,14 @@ class MyWindow(QtWidgets.QMainWindow):
                 spine.set_visible(False)
             ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
             ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
-            ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=-100)
+            ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
             # legend
             ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            # switch x, y positive direction if WCR specified the orientation.
+            if self.fileInfoDict.get("POS_X", "") == "L":   # x towards left
+                ax.invert_xaxis()
+            if self.fileInfoDict.get("POS_Y", "") == "D":   # y towards down
+                ax.invert_yaxis()
                     
         if exportImg:
             imgData = io.BytesIO()

@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Jun 01 2021
+# Last Modified: Sat Jun 19 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -147,7 +147,8 @@ cdef void get_offset(STDF* std, tsQueue* q, bint* p_needByteSwap, bint* stopFlag
 
             if (recHeader == REC_MIR or recHeader == REC_WCR or recHeader == REC_WIR or recHeader == REC_WRR or
                 recHeader == REC_PTR or recHeader == REC_FTR or recHeader == REC_MPR or recHeader == REC_TSR or
-                recHeader == REC_PIR or recHeader == REC_PRR or recHeader == REC_HBR or recHeader == REC_SBR):
+                recHeader == REC_PIR or recHeader == REC_PRR or recHeader == REC_HBR or recHeader == REC_SBR or 
+                recHeader == REC_PCR):
                 # get binaryLen and read rawData
                 # alloc memory
                 ele = <dataCluster*>message_queue_message_alloc_blocking(q)
@@ -545,7 +546,7 @@ cdef int csqlite3_finalize(sqlite3_stmt *stmt) nogil:
 #################################################
 # ** Callback function for iterating hashmap ** #
 #################################################
-cdef int writeFailCount(void* sql_stmt, uint32_t TEST_NUM, uint32_t count):
+cdef int writeFailCount(void* sql_stmt, uint32_t TEST_NUM, uint32_t count) nogil:
     cdef sqlite3_stmt* updateFailCount_stmt = <sqlite3_stmt*>sql_stmt
     cdef int err = 0
     sqlite3_bind_int(updateFailCount_stmt, 1, count)
@@ -592,6 +593,7 @@ cdef class stdfSummarizer:
         char* TEST_TXT
         const char* filepath_c
         sqlite3 *db_ptr
+        sqlite3_stmt *insertFileInfo_stmt
         sqlite3_stmt *insertDut_stmt
         sqlite3_stmt *updateDut_stmt
         sqlite3_stmt *insertTR_stmt
@@ -601,6 +603,8 @@ cdef class stdfSummarizer:
         # sqlite3_stmt *updateHBIN_stmt
         sqlite3_stmt *insertSBIN_stmt
         # sqlite3_stmt *updateSBIN_stmt
+        sqlite3_stmt *insertWafer_stmt
+        sqlite3_stmt *insertDutCount_stmt
         map_t   seenTN          # ele: TEST_NUM
         map_t   TestFailCount
         map_t   head_site_dutIndex
@@ -609,6 +613,7 @@ cdef class stdfSummarizer:
 
     def __cinit__(self):
         self.db_ptr                 = NULL
+        self.insertFileInfo_stmt    = NULL
         self.insertDut_stmt         = NULL
         self.updateDut_stmt         = NULL
         self.insertTR_stmt          = NULL
@@ -618,6 +623,8 @@ cdef class stdfSummarizer:
         # self.updateHBIN_stmt        = NULL
         self.insertSBIN_stmt        = NULL
         # self.updateSBIN_stmt        = NULL
+        self.insertDutCount_stmt    = NULL
+        self.insertWafer_stmt       = NULL
         self.pRec                   = NULL
         self.seenTN                 = NULL
         self.TestFailCount          = NULL
@@ -643,7 +650,17 @@ cdef class stdfSummarizer:
                                         CREATE TABLE IF NOT EXISTS Wafer_Info (
                                                                 HEAD_NUM INTEGER, 
                                                                 WaferIndex INTEGER PRIMARY KEY,
-                                                                WaferID TEXT);
+                                                                PART_CNT INTEGER,
+                                                                RTST_CNT INTEGER,
+                                                                ABRT_CNT INTEGER,
+                                                                GOOD_CNT INTEGER,
+                                                                FUNC_CNT INTEGER,
+                                                                WAFER_ID TEXT,
+                                                                FABWF_ID TEXT,
+                                                                FRAME_ID TEXT,
+                                                                MASK_ID TEXT,
+                                                                USR_DESC TEXT,
+                                                                EXC_DESC TEXT);
                                                                 
                                         CREATE TABLE IF NOT EXISTS Dut_Info (
                                                                 HEAD_NUM INTEGER, 
@@ -659,6 +676,15 @@ cdef class stdfSummarizer:
                                                                 XCOORD INTEGER,
                                                                 YCOORD INTEGER) WITHOUT ROWID;
                                                                 
+                                        CREATE TABLE IF NOT EXISTS Dut_Counts (
+                                                                HEAD_NUM INTEGER, 
+                                                                SITE_NUM INTEGER, 
+                                                                PART_CNT INTEGER,
+                                                                RTST_CNT INTEGER,
+                                                                ABRT_CNT INTEGER,
+                                                                GOOD_CNT INTEGER,
+                                                                FUNC_CNT INTEGER);
+
                                         CREATE TABLE IF NOT EXISTS Test_Info (
                                                                 TEST_NUM INTEGER PRIMARY KEY, 
                                                                 recHeader INTEGER,
@@ -689,6 +715,7 @@ cdef class stdfSummarizer:
                                         PRAGMA journal_mode = WAL;
                                         
                                         BEGIN;'''
+            const char* insertFileInfo = '''INSERT INTO File_Info VALUES (?,?)'''
             const char* insertDut = '''INSERT INTO Dut_Info (HEAD_NUM, SITE_NUM, DUTIndex) VALUES (?,?,?);'''
             const char* updateDut = '''UPDATE Dut_Info SET TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, 
                                                             HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
@@ -706,11 +733,17 @@ cdef class stdfSummarizer:
             # const char* updateHBIN = '''UPDATE Bin_Info SET BIN_NAME=:HBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="H" AND BIN_NUM=:HBIN_NUM'''
             const char* insertSBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("S", :SBIN_NUM, :SBIN_NAME, :PF);'''
             # const char* updateSBIN = '''UPDATE Bin_Info SET BIN_NAME=:SBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="S" AND BIN_NUM=:SBIN_NUM'''
+            const char* insertDutCount = '''INSERT INTO Dut_Counts VALUES (:HEAD_NUM, :SITE_NUM, :PART_CNT, :RTST_CNT, 
+                                                                        :ABRT_CNT, :GOOD_CNT, :FUNC_CNT);'''
+            const char* insertWafer = '''INSERT OR REPLACE INTO Wafer_Info VALUES (:HEAD_NUM, :WaferIndex, :PART_CNT, :RTST_CNT, :ABRT_CNT, 
+                                                                                :GOOD_CNT, :FUNC_CNT, :WAFER_ID, :FABWF_ID, :FRAME_ID, 
+                                                                                :MASK_ID, :USR_DESC, :EXC_DESC);'''
 
         # init sqlite3 database api
         try:
             csqlite3_open(dbPath, &self.db_ptr)
             csqlite3_exec(self.db_ptr, createTableSql)
+            csqlite3_prepare_v2(self.db_ptr, insertFileInfo, &self.insertFileInfo_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertDut, &self.insertDut_stmt)
             csqlite3_prepare_v2(self.db_ptr, updateDut, &self.updateDut_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertTR, &self.insertTR_stmt)
@@ -720,6 +753,8 @@ cdef class stdfSummarizer:
             # csqlite3_prepare_v2(self.db_ptr, updateHBIN, &self.updateHBIN_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertSBIN, &self.insertSBIN_stmt)
             # csqlite3_prepare_v2(self.db_ptr, updateSBIN, &self.updateSBIN_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertDutCount, &self.insertDutCount_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertWafer, &self.insertWafer_stmt)
         except Exception:
             csqlite3_close(self.db_ptr)
             raise
@@ -894,6 +929,7 @@ cdef class stdfSummarizer:
                                         
                                         COMMIT;'''
         csqlite3_exec(self.db_ptr, createIndex_COMMIT)
+        csqlite3_finalize(self.insertFileInfo_stmt)
         csqlite3_finalize(self.insertDut_stmt)
         csqlite3_finalize(self.updateDut_stmt)
         csqlite3_finalize(self.insertTR_stmt)
@@ -903,6 +939,8 @@ cdef class stdfSummarizer:
         # csqlite3_finalize(self.updateHBIN_stmt)
         csqlite3_finalize(self.insertSBIN_stmt)
         # csqlite3_finalize(self.updateSBIN_stmt)
+        csqlite3_finalize(self.insertDutCount_stmt)
+        csqlite3_finalize(self.insertWafer_stmt)
         csqlite3_close(self.db_ptr)
         # clean hashmap
         hashmap_free(self.seenTN)
@@ -942,12 +980,13 @@ cdef class stdfSummarizer:
             err = self.onMIR(recHeader, binaryLen, rawData)
         elif recHeader == 542: # WCR 542
             err = self.onWCR(recHeader, binaryLen, rawData)
+        elif recHeader == 286: # PCR 286
+            err = self.onPCR(recHeader, binaryLen, rawData)
         return err
             
         # FAR 10
         # ATR 20
         # MRR 276
-        # PCR 286
         # PGR 318
         # PLR 319
         # RDR 326
@@ -963,226 +1002,222 @@ cdef class stdfSummarizer:
         cdef time_t timeStamp
         cdef tm*    tmPtr
         cdef char   stringBuffer[256]
-        cdef const char* insertFileInfo = '''INSERT INTO File_Info VALUES (?,?)'''
-        cdef sqlite3_stmt* insertFileInfo_stmt
-        err = csqlite3_prepare_v2(self.db_ptr, insertFileInfo, &insertFileInfo_stmt)
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
 
         # Endianess
         if not err:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "BYTE_ORD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, self.endian, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "BYTE_ORD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, self.endian, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # U4  SETUP_T
         if not err:
             timeStamp = <time_t>((<MIR*>self.pRec).SETUP_T)
             tmPtr = localtime(&timeStamp)
             strftime(stringBuffer, 26, "%Y-%m-%d %H:%M:%S (UTC)", tmPtr)
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SETUP_T", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SETUP_T", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # U4  START_T
         if not err:
             timeStamp = <time_t>((<MIR*>self.pRec).START_T)
             tmPtr = localtime(&timeStamp)
             strftime(stringBuffer, 26, "%Y-%m-%d %H:%M:%S (UTC)", tmPtr)
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "START_T", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "START_T", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # U1  STAT_NUM
         if not err:
             sprintf(stringBuffer, "%d", (<MIR*>self.pRec).STAT_NUM)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "STAT_NUM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "STAT_NUM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # C1  MODE_COD
         if not err and (<MIR*>self.pRec).MODE_COD != 0x20:    # hex of SPACE
             sprintf(stringBuffer, "%c", (<MIR*>self.pRec).MODE_COD)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "MODE_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "MODE_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # C1  RTST_COD
         if not err and (<MIR*>self.pRec).RTST_COD != 0x20:    # hex of SPACE
             sprintf(stringBuffer, "%c", (<MIR*>self.pRec).RTST_COD)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "RTST_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "RTST_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # C1  PROT_COD
         if not err and (<MIR*>self.pRec).PROT_COD != 0x20:    # hex of SPACE
             sprintf(stringBuffer, "%c", (<MIR*>self.pRec).PROT_COD)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "PROT_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "PROT_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # U2  BURN_TIM
         if not err and (<MIR*>self.pRec).BURN_TIM != 65535:
             sprintf(stringBuffer, "%d", (<MIR*>self.pRec).BURN_TIM)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "BURN_TIM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "BURN_TIM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # C1  CMOD_COD
         if not err and (<MIR*>self.pRec).CMOD_COD != 0x20:    # hex of SPACE
             sprintf(stringBuffer, "%c", (<MIR*>self.pRec).CMOD_COD)
             stringBuffer[1] = 0x00
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "CMOD_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "CMOD_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  LOT_ID
         if not err and (<MIR*>self.pRec).LOT_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "LOT_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).LOT_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "LOT_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).LOT_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  PART_TYP
         if not err and (<MIR*>self.pRec).PART_TYP != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "PART_TYP", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).PART_TYP, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "PART_TYP", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).PART_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  NODE_NAM
         if not err and (<MIR*>self.pRec).NODE_NAM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "NODE_NAM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).NODE_NAM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "NODE_NAM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).NODE_NAM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  TSTR_TYP
         if not err and (<MIR*>self.pRec).TSTR_TYP != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "TSTR_TYP", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).TSTR_TYP, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "TSTR_TYP", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).TSTR_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  JOB_NAM
         if not err and (<MIR*>self.pRec).JOB_NAM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "JOB_NAM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).JOB_NAM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "JOB_NAM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).JOB_NAM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  JOB_REV
         if not err and (<MIR*>self.pRec).JOB_REV != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "JOB_REV", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).JOB_REV, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "JOB_REV", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).JOB_REV, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SBLOT_ID
         if not err and (<MIR*>self.pRec).SBLOT_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SBLOT_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SBLOT_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SBLOT_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SBLOT_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  OPER_NAM
         if not err and (<MIR*>self.pRec).OPER_NAM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "OPER_NAM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).OPER_NAM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "OPER_NAM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).OPER_NAM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  EXEC_TYP
         if not err and (<MIR*>self.pRec).EXEC_TYP != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "EXEC_TYP", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).EXEC_TYP, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "EXEC_TYP", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).EXEC_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  EXEC_VER
         if not err and (<MIR*>self.pRec).EXEC_VER != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "EXEC_VER", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).EXEC_VER, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "EXEC_VER", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).EXEC_VER, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  TEST_COD
         if not err and (<MIR*>self.pRec).TEST_COD != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "TEST_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).TEST_COD, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "TEST_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).TEST_COD, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  TST_TEMP
         if not err and (<MIR*>self.pRec).TST_TEMP != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "TST_TEMP", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).TST_TEMP, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "TST_TEMP", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).TST_TEMP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  USER_TXT
         if not err and (<MIR*>self.pRec).USER_TXT != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "USER_TXT", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).USER_TXT, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "USER_TXT", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).USER_TXT, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  AUX_FILE
         if not err and (<MIR*>self.pRec).AUX_FILE != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "AUX_FILE", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).AUX_FILE, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "AUX_FILE", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).AUX_FILE, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  PKG_TYP
         if not err and (<MIR*>self.pRec).PKG_TYP != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "PKG_TYP", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).PKG_TYP, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "PKG_TYP", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).PKG_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  FAMLY_ID
         if not err and (<MIR*>self.pRec).FAMLY_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "FAMLY_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).FAMLY_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "FAMLY_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).FAMLY_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  DATE_COD
         if not err and (<MIR*>self.pRec).DATE_COD != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "DATE_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).DATE_COD, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "DATE_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).DATE_COD, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  FACIL_ID
         if not err and (<MIR*>self.pRec).FACIL_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "FACIL_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).FACIL_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "FACIL_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).FACIL_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  FLOOR_ID
         if not err and (<MIR*>self.pRec).FLOOR_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "FLOOR_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).FLOOR_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "FLOOR_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).FLOOR_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  PROC_ID
         if not err and (<MIR*>self.pRec).PROC_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "PROC_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).PROC_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "PROC_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).PROC_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  OPER_FRQ
         if not err and (<MIR*>self.pRec).OPER_FRQ != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "OPER_FRQ", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).OPER_FRQ, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "OPER_FRQ", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).OPER_FRQ, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SPEC_NAM
         if not err and (<MIR*>self.pRec).SPEC_NAM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SPEC_NAM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SPEC_NAM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SPEC_NAM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SPEC_NAM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SPEC_VER
         if not err and (<MIR*>self.pRec).SPEC_VER != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SPEC_VER", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SPEC_VER, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SPEC_VER", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SPEC_VER, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  FLOW_ID
         if not err and (<MIR*>self.pRec).FLOW_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "FLOW_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).FLOW_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "FLOW_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).FLOW_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SETUP_ID
         if not err and (<MIR*>self.pRec).SETUP_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SETUP_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SETUP_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SETUP_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SETUP_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  DSGN_REV
         if not err and (<MIR*>self.pRec).DSGN_REV != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "DSGN_REV", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).DSGN_REV, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "DSGN_REV", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).DSGN_REV, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  ENG_ID
         if not err and (<MIR*>self.pRec).ENG_ID != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "ENG_ID", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).ENG_ID, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "ENG_ID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).ENG_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  ROM_COD
         if not err and (<MIR*>self.pRec).ROM_COD != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "ROM_COD", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).ROM_COD, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "ROM_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).ROM_COD, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SERL_NUM
         if not err and (<MIR*>self.pRec).SERL_NUM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SERL_NUM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SERL_NUM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SERL_NUM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SERL_NUM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
         # Cn  SUPR_NAM
         if not err and (<MIR*>self.pRec).SUPR_NAM != NULL:
-            sqlite3_bind_text(insertFileInfo_stmt, 1, "SUPR_NAM", -1, NULL)
-            sqlite3_bind_text(insertFileInfo_stmt, 2, (<MIR*>self.pRec).SUPR_NAM, -1, NULL)
-            err = csqlite3_step(insertFileInfo_stmt)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "SUPR_NAM", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MIR*>self.pRec).SUPR_NAM, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
 
-        csqlite3_finalize(insertFileInfo_stmt)
         free_record(recHeader, self.pRec)
         return err
                 
@@ -1451,13 +1486,106 @@ cdef class stdfSummarizer:
 
 
     cdef int onWCR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
-        return 0
-        # valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData[:binaryLen])
-        # # key: center_x, center_y, diameter, size_unit
-        # self.waferInfo = {"center_x": valueDict["CENTER_X"],
-        #                 "center_y": valueDict["CENTER_Y"],
-        #                 "diameter": valueDict["WAFR_SIZ"],
-        #                 "size_unit": valueDict["WF_UNITS"]}
+        cdef:
+            int err = 0
+            double WAFR_SIZ, DIE_HT, DIE_WID
+            uint8_t WF_UNITS, 
+            int16_t CENTER_X, CENTER_Y
+            char WF_FLAT[2]
+            char POS_X[2]
+            char POS_Y[2]
+            char stringBuffer[100]
+            int bufferLen
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        WAFR_SIZ = (<WCR*>self.pRec).WAFR_SIZ
+        DIE_HT = (<WCR*>self.pRec).DIE_HT
+        DIE_WID = (<WCR*>self.pRec).DIE_WID
+        WF_UNITS = (<WCR*>self.pRec).WF_UNITS
+        sprintf(WF_FLAT, "%c", (<WCR*>self.pRec).WF_FLAT)
+        CENTER_X = (<WCR*>self.pRec).CENTER_X
+        CENTER_Y = (<WCR*>self.pRec).CENTER_Y
+        sprintf(POS_X, "%c", (<WCR*>self.pRec).POS_X)
+        sprintf(POS_Y, "%c", (<WCR*>self.pRec).POS_Y)
+        WF_FLAT[1] = POS_X[1] = POS_Y[1] = 0x00
+
+        # WAFR_SIZ
+        if not err and WAFR_SIZ != 0:
+            bufferLen = sprintf(stringBuffer, "%g", WAFR_SIZ)
+            if bufferLen < 0: stringBuffer[0] = 0x00
+            else: stringBuffer[bufferLen] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "WAFR_SIZ", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+        
+        # DIE_HT
+        if not err and DIE_HT != 0:
+            bufferLen = sprintf(stringBuffer, "%g", DIE_HT)
+            if bufferLen < 0: stringBuffer[0] = 0x00
+            else: stringBuffer[bufferLen] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "DIE_HT", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        # DIE_WID
+        if not err and DIE_WID != 0:
+            bufferLen = sprintf(stringBuffer, "%g", DIE_WID)
+            if bufferLen < 0: stringBuffer[0] = 0x00
+            else: stringBuffer[bufferLen] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "DIE_WID", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        # WF_UNITS
+        if not err and WF_UNITS != 0:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "WF_UNITS", -1, NULL)
+            if WF_UNITS == 1:   # inches
+                sqlite3_bind_text(self.insertFileInfo_stmt, 2, "inch", -1, NULL)
+            elif WF_UNITS == 2:   # cm
+                sqlite3_bind_text(self.insertFileInfo_stmt, 2, "cm", -1, NULL)
+            elif WF_UNITS == 3:   # mm
+                sqlite3_bind_text(self.insertFileInfo_stmt, 2, "mm", -1, NULL)
+            else:   # mil
+                sqlite3_bind_text(self.insertFileInfo_stmt, 2, "mil", -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        # WF_FLAT
+        if not err:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "WF_FLAT", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, WF_FLAT, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        # CENTER_X
+        if not err and CENTER_X != -32768:
+            bufferLen = sprintf(stringBuffer, "%d", CENTER_X)
+            if bufferLen < 0: stringBuffer[0] = 0x00
+            else: stringBuffer[bufferLen] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "CENTER_X", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        # CENTER_Y
+        if not err and CENTER_Y != -32768:
+            bufferLen = sprintf(stringBuffer, "%d", CENTER_Y)
+            if bufferLen < 0: stringBuffer[0] = 0x00
+            else: stringBuffer[bufferLen] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "CENTER_Y", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+                        
+        # POS_X
+        if not err:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "POS_X", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, POS_X, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        # POS_Y
+        if not err:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "POS_Y", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, POS_Y, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        return err
     
     
     cdef int onWIR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
@@ -1465,8 +1593,6 @@ cdef class stdfSummarizer:
             int err = 0
             uint8_t HEAD_NUM
             char* WAFER_ID
-            char* insertWafer
-            sqlite3_stmt* insertWafer_stmt
 
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         HEAD_NUM = (<WIR*>self.pRec).HEAD_NUM
@@ -1475,27 +1601,80 @@ cdef class stdfSummarizer:
         if (MAP_OK != hashmap_put(self.head_waferIndex, HEAD_NUM, self.waferIndex)):
             err = MAP_MISSING
         
+        # the following info is also available in WRR, but it still should be updated
+        # in WIR in case the stdf is incomplete (no WRR).
         if not err:
-            insertWafer = '''INSERT INTO Wafer_Info VALUES (:HEAD_NUM, :WaferIndex, :WaferID)'''
-            csqlite3_prepare_v2(self.db_ptr, insertWafer, &insertWafer_stmt)
-            sqlite3_bind_int(insertWafer_stmt, 1, HEAD_NUM)                 # HEAD_NUM
-            sqlite3_bind_int(insertWafer_stmt, 2, self.waferIndex)          # WaferIndex
-            sqlite3_bind_text(insertWafer_stmt, 3, WAFER_ID, -1, NULL)      # WaferID
-            err = csqlite3_step(insertWafer_stmt)
-            csqlite3_finalize(insertWafer_stmt)
+            sqlite3_bind_int(self.insertWafer_stmt, 1, HEAD_NUM)                 # HEAD_NUM
+            sqlite3_bind_int(self.insertWafer_stmt, 2, self.waferIndex)          # WaferIndex
+            sqlite3_bind_text(self.insertWafer_stmt, 8, WAFER_ID, -1, NULL)      # WaferID
+            err = csqlite3_step(self.insertWafer_stmt)
         free_record(recHeader, self.pRec)
         return err
     
     
     cdef int onWRR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
-        return 0
-        # valueDict = RecordParser.parse_raw(recHeader, binaryLen, rawData[:binaryLen])
-        # if valueDict["WAFER_ID"] == "": 
-        #     valueDict["WAFER_ID"] = "Missing Name"
-        # HEAD_NUM = valueDict["HEAD_NUM"]
-        
-        # currentWaferIndex = self.head_waferIndex[HEAD_NUM]
-        # self.waferDict[currentWaferIndex].update(valueDict)
+        cdef:
+            int err = 0
+            uint8_t HEAD_NUM
+            uint32_t currentWaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, GOOD_CNT, FUNC_CNT
+            char* WAFER_ID
+            char* FABWF_ID
+            char* FRAME_ID
+            char* MASK_ID
+            char* USR_DESC
+            char* EXC_DESC
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        HEAD_NUM = (<WRR*>self.pRec).HEAD_NUM
+        PART_CNT = (<WRR*>self.pRec).PART_CNT
+        RTST_CNT = (<WRR*>self.pRec).RTST_CNT
+        ABRT_CNT = (<WRR*>self.pRec).ABRT_CNT
+        GOOD_CNT = (<WRR*>self.pRec).GOOD_CNT
+        FUNC_CNT = (<WRR*>self.pRec).FUNC_CNT
+        WAFER_ID = (<WRR*>self.pRec).WAFER_ID
+        FABWF_ID = (<WRR*>self.pRec).FABWF_ID
+        FRAME_ID = (<WRR*>self.pRec).FRAME_ID
+        MASK_ID = (<WRR*>self.pRec).MASK_ID
+        USR_DESC = (<WRR*>self.pRec).USR_DESC
+        EXC_DESC = (<WRR*>self.pRec).EXC_DESC
+
+        if (MAP_OK != hashmap_get(self.head_waferIndex, HEAD_NUM, &currentWaferIndex)):
+            err = MAP_MISSING
+
+        if not err:
+            sqlite3_bind_int(self.insertWafer_stmt, 1, HEAD_NUM)                # HEAD_NUM
+            sqlite3_bind_int(self.insertWafer_stmt, 2, currentWaferIndex)       # WaferIndex
+            sqlite3_bind_int(self.insertWafer_stmt, 3, PART_CNT)                # PART_CNT
+            if RTST_CNT != <uint32_t>0xFFFFFFFF:
+                sqlite3_bind_int(self.insertWafer_stmt, 4, RTST_CNT)            # RTST_CNT
+            else:
+                sqlite3_bind_int(self.insertWafer_stmt, 4, -1)
+
+            if ABRT_CNT != <uint32_t>0xFFFFFFFF:
+                sqlite3_bind_int(self.insertWafer_stmt, 5, ABRT_CNT)            # ABRT_CNT
+            else:
+                sqlite3_bind_int(self.insertWafer_stmt, 5, -1)
+
+            if GOOD_CNT != <uint32_t>0xFFFFFFFF:
+                sqlite3_bind_int(self.insertWafer_stmt, 6, GOOD_CNT)            # GOOD_CNT
+            else:
+                sqlite3_bind_int(self.insertWafer_stmt, 6, -1)
+
+            if FUNC_CNT != <uint32_t>0xFFFFFFFF:
+                sqlite3_bind_int(self.insertWafer_stmt, 7, FUNC_CNT)            # FUNC_CNT
+            else:
+                sqlite3_bind_int(self.insertWafer_stmt, 7, -1)
+
+            sqlite3_bind_text(self.insertWafer_stmt, 8, WAFER_ID, -1, NULL)     # WAFER_ID
+            sqlite3_bind_text(self.insertWafer_stmt, 9, FABWF_ID, -1, NULL)     # FABWF_ID
+            sqlite3_bind_text(self.insertWafer_stmt, 10, FRAME_ID, -1, NULL)    # FRAME_ID
+            sqlite3_bind_text(self.insertWafer_stmt, 11, MASK_ID, -1, NULL)     # MASK_ID
+            sqlite3_bind_text(self.insertWafer_stmt, 12, USR_DESC, -1, NULL)    # USR_DESC
+            sqlite3_bind_text(self.insertWafer_stmt, 13, EXC_DESC, -1, NULL)    # EXC_DESC
+            err = csqlite3_step(self.insertWafer_stmt)
+
+        free_record(recHeader, self.pRec)
+        return err
 
     
     cdef int onTSR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
@@ -1523,7 +1702,48 @@ cdef class stdfSummarizer:
                 if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, FAIL_CNT)):
                     err = MAP_OMEM
         return err
-    
+
+
+    cdef int onPCR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0
+            uint8_t HEAD_NUM, SITE_NUM
+            uint32_t PART_CNT, RTST_CNT, ABRT_CNT, GOOD_CNT, FUNC_CNT
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        HEAD_NUM = (<PCR*>self.pRec).HEAD_NUM
+        SITE_NUM = (<PCR*>self.pRec).SITE_NUM
+        PART_CNT = (<PCR*>self.pRec).PART_CNT
+        RTST_CNT = (<PCR*>self.pRec).RTST_CNT
+        ABRT_CNT = (<PCR*>self.pRec).ABRT_CNT
+        GOOD_CNT = (<PCR*>self.pRec).GOOD_CNT
+        FUNC_CNT = (<PCR*>self.pRec).FUNC_CNT
+        
+        sqlite3_bind_int(self.insertDutCount_stmt, 1, HEAD_NUM)                # HEAD_NUM
+        sqlite3_bind_int(self.insertDutCount_stmt, 2, SITE_NUM)                # SITE_NUM
+        sqlite3_bind_int(self.insertDutCount_stmt, 3, PART_CNT)                # PART_CNT
+        if RTST_CNT != <uint32_t>0xFFFFFFFF:
+            sqlite3_bind_int(self.insertDutCount_stmt, 4, RTST_CNT)            # RTST_CNT
+        else:
+            sqlite3_bind_int(self.insertDutCount_stmt, 4, -1)
+
+        if ABRT_CNT != <uint32_t>0xFFFFFFFF:
+            sqlite3_bind_int(self.insertDutCount_stmt, 5, ABRT_CNT)            # ABRT_CNT
+        else:
+            sqlite3_bind_int(self.insertDutCount_stmt, 5, -1)
+
+        if GOOD_CNT != <uint32_t>0xFFFFFFFF:
+            sqlite3_bind_int(self.insertDutCount_stmt, 6, GOOD_CNT)            # GOOD_CNT
+        else:
+            sqlite3_bind_int(self.insertDutCount_stmt, 6, -1)
+
+        if FUNC_CNT != <uint32_t>0xFFFFFFFF:
+            sqlite3_bind_int(self.insertDutCount_stmt, 7, FUNC_CNT)            # FUNC_CNT
+        else:
+            sqlite3_bind_int(self.insertDutCount_stmt, 7, -1)
+
+        err = csqlite3_step(self.insertDutCount_stmt)
+        return err    
 
     
 class stdfDataRetriever:
