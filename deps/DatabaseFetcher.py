@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Jun 19 2021
+# Last Modified: Mon Aug 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -78,9 +78,9 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         self.connection.text_factory = str
-        WaferList = []
+        WaferList = ["-\tStacked Wafer Map"]
         for row in self.cursor.execute("SELECT WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
-            WaferList.append(f"{row[0]}\t{row[1]}")
+            WaferList.append(f"#{row[0]}\t{row[1]}")
         return WaferList
     
     
@@ -342,6 +342,27 @@ class DatabaseFetcher:
             coordsDict.setdefault(SBIN, []).append((XCOORD, YCOORD))
         
         return coordsDict
+    
+    
+    def getStackedWaferData(self, head: int, site: int) -> dict[tuple, int]:
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        failDieDistribution: dict[tuple, int] = {}     # key: coords, value: fail counts
+        if site == -1:
+            sql = " SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
+                WHERE HEAD_NUM=? GROUP by XCOORD, YCOORD, Flag"
+            sql_param = (head,)
+        else:
+            sql = "SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
+                WHERE HEAD_NUM=? AND SITE_NUM=? GROUP by XCOORD, YCOORD, Flag"
+            sql_param = (head, site)
+            
+        for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
+            previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
+            if getStatus(Flag) == "Failed":
+                failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
+        
+        return failDieDistribution
 
 
 if __name__ == "__main__":
@@ -366,7 +387,7 @@ if __name__ == "__main__":
     # print(dutArray[mask])    
     
     # ** test info selDUTs
-    print(df.getTestInfo_selDUTs(201001, [7, 8, 9]))
+    print(df.getStackedWaferData(1, -1))
     
     # ** test wafer coords dict
     # print(df.getWaferCoordsDict(1, 1, 0))

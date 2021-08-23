@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Jun 19 2021
+# Last Modified: Mon Aug 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -63,6 +63,7 @@ from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
 import matplotlib
 matplotlib.use('QT5Agg')
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import RendererAgg
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -546,7 +547,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.std_handle = IndexedGzipFile(filename=f, mode='rb')
                 setattr(self.std_handle, "fpath", f)     # manually add file path to gz/bzip handler
             elif f.endswith("bz2"):
-                self.std_handle = IndexedBzip2File(f)
+                self.std_handle = IndexedBzip2File(f, parallelization = 4)  # enable back seeking
                 setattr(self.std_handle, "fpath", f)
             else:
                 self.std_handle = open(f, 'rb')
@@ -666,7 +667,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.std_handle = IndexedGzipFile(filename=f, mode='rb')
                 setattr(self.std_handle, "fpath", f)     # manually add file path to gz/bzip handler
             elif f.endswith("bz2"):
-                self.std_handle = IndexedBzip2File(f)
+                self.std_handle = IndexedBzip2File(f, parallelization = 4)
                 setattr(self.std_handle, "fpath", f)
             else:
                 self.std_handle = open(f, 'rb')            
@@ -1158,6 +1159,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def getSelectedNums(self) -> list:
         selectedIndex = None
+        numList = []
         
         if self.ui.tabControl.currentIndex() == tab.Wafer:
             selectedIndex = self.selModel_wafer.selection().indexes()
@@ -1165,9 +1167,16 @@ class MyWindow(QtWidgets.QMainWindow):
             selectedIndex = self.selModel.selection().indexes()
         
         if selectedIndex:
-            return sorted([int(ind.data().split("\t")[0].strip("#")) for ind in selectedIndex])     # wafer number begins with "#"
-        else:
-            return []
+            for ind in selectedIndex:
+                numString = ind.data().split("\t")[0].strip("#")    # wafer number begins with "#"
+                
+                if numString == "-":                                # for wafer defect map
+                    numList.append(-1)
+                else:
+                    numList.append(int(numString))
+            numList.sort()
+        
+        return numList
     
     
     def onSelect(self):
@@ -1565,6 +1574,11 @@ class MyWindow(QtWidgets.QMainWindow):
             head = kargs["head"]
             site = kargs["site"]
             rowList = []
+            
+            if waferIndex == -1:
+                # -1 indicates stacked map, return empty table
+                return rowList
+            
             # we need sbin dict to retrieve software bin name
             bin_dict = self.SBIN_dict
             
@@ -1715,8 +1729,10 @@ class MyWindow(QtWidgets.QMainWindow):
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
                             rowList = self.prepareStatTableContent(tabType, bin=binType, head=head, site=site)
-                            tableData.append(rowList)
-                            rowColorType.append(color_dict)
+                            if rowList:
+                                # append only if rowList is not empty
+                                tableData.append(rowList)
+                                rowColorType.append(color_dict)
             else:
                 # wafer tab, only cares sbin
                 color_dict = self.settingParams.sbinColor
@@ -1724,8 +1740,10 @@ class MyWindow(QtWidgets.QMainWindow):
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
                             rowList = self.prepareStatTableContent(tabType, waferIndex=waferIndex, head=head, site=site)
-                            tableData.append(rowList)
-                            rowColorType.append(color_dict)
+                            if rowList:
+                                # append only if rowList is not empty
+                                tableData.append(rowList)
+                                rowColorType.append(color_dict)
 
             for rowList, color_dict in zip(tableData, rowColorType):
                 qitemList = []
@@ -1955,40 +1973,69 @@ class MyWindow(QtWidgets.QMainWindow):
             ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
             
         elif tabType == tab.Wafer:   # Wafermap
-            waferDict = self.waferInfoDict[test_num]
             ax = fig.add_subplot(111, aspect=1)
-            ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            # set limits
             waferBounds = self.DatabaseFetcher.getWaferBounds()
             xmin = waferBounds["xmin"]
             ymin = waferBounds["ymin"]
             xmax = waferBounds["xmax"]
-            ymax = waferBounds["ymax"]
-            # group coords by soft bin, 
-            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(test_num, head, site)
-            # draw
-            dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
-            legendHandles = []
-            for sbin in sorted(coordsDict.keys()):
-                sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
-                sbinCnt = len(coordsDict[sbin])
-                percent = 100 * sbinCnt / dutCnt
-                label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
-                rects = []
-                # skip dut with invalid coords
-                for (x, y) in coordsDict[sbin]:
-                    rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
-                pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100)
-                ax.add_collection(pc)
-                proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
-                legendHandles.append(proxyArtist)
-            # set limits
+            ymax = waferBounds["ymax"]            
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
-            # set ticks & draw coord lines
-            ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
-            ax.yaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
+            # dynamic label size
             Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
             labelsize = Tsize(max(xmax-xmin, ymax-ymin))
+                        
+            if test_num == -1:
+                # -1 indicates stacked wafer map
+                ax.set_title("Stacked Wafer Map - %s - %s"%("Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+                failDieDistribution = self.DatabaseFetcher.getStackedWaferData(head, site)
+                x_mesh = np.arange(xmin-0.5, xmax+1, 1)     # xmin-0.5, xmin+0.5, ..., xmax+0.5
+                y_mesh = np.arange(ymin-0.5, ymax+1, 1)
+                # initialize a full -1 2darray
+                failCount_meash = np.full((len(x_mesh)-1, len(y_mesh)-1), -1)
+                # fill the count into 2darray
+                for (xcoord, ycoord), count in failDieDistribution.items():
+                    failCount_meash[xcoord-xmin, ycoord-ymin] = count
+                # x is row and y is col, whereas in xycoords, x should be col and y should be row
+                failCount_meash = failCount_meash.transpose()
+                # get a colormap segment
+                cmap_seg = matplotlib.colors.LinearSegmentedColormap.from_list("seg", plt.get_cmap("nipy_spectral")(np.linspace(0.55, 0.9, 128)))
+                # draw color mesh, replace all -1 to NaN to hide rec with no value
+                pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg)
+                # create a new axis for colorbar
+                ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.1, ax.get_position().width, 0.02])
+                cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
+                cbar.set_label("Total failed dies")
+                cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+                
+            else:
+                waferDict = self.waferInfoDict[test_num]
+                ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+                # group coords by soft bin
+                coordsDict = self.DatabaseFetcher.getWaferCoordsDict(test_num, head, site)
+                dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
+                legendHandles = []
+                # draw recs for each SBIN
+                for sbin in sorted(coordsDict.keys()):
+                    sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
+                    sbinCnt = len(coordsDict[sbin])
+                    percent = 100 * sbinCnt / dutCnt
+                    label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
+                    rects = []
+                    # skip dut with invalid coords
+                    for (x, y) in coordsDict[sbin]:
+                        rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
+                    pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100)
+                    ax.add_collection(pc)
+                    proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
+                    legendHandles.append(proxyArtist)
+                # legend
+                ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            
+            # set ticks & draw coord lines
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(5))            
             ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
             # Turn spines off and create white grid.
             for edge, spine in ax.spines.items():
@@ -1996,8 +2043,6 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
             ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
             ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
-            # legend
-            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
             # switch x, y positive direction if WCR specified the orientation.
             if self.fileInfoDict.get("POS_X", "") == "L":   # x towards left
                 ax.invert_xaxis()
