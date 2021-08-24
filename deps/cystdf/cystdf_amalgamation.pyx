@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Sat Jun 19 2021
+# Last Modified: Thu Aug 19 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,6 +27,7 @@
 
 
 import logging
+import platform
 import numpy as np
 import threading as th
 
@@ -43,13 +44,17 @@ from tsqueue_src.tsqueue_libc cimport *
 
 from libc.time cimport time_t, strftime, tm, gmtime, localtime
 from libc.stdint cimport *
+from libc.stddef cimport wchar_t
 from libc.math cimport NAN
 from libc.string cimport memcpy, strcpy, strrchr, strcmp
 from posix.stdio cimport fseeko, ftello
 from posix.unistd cimport usleep
-from libc.stdio cimport FILE, fopen, fread, fclose, SEEK_SET, SEEK_CUR, SEEK_END, sprintf
+from libc.stdio cimport sprintf
 from libc.stdlib cimport malloc, free
 
+# including a str to wchar_t func that missed from cython
+cdef extern from "Python.h":
+    wchar_t* PyUnicode_AsWideCharString(object, Py_ssize_t *)
 
 logger = logging.getLogger("STDF Viewer")
 
@@ -91,7 +96,7 @@ ctypedef struct dataCluster:
 
 # arg struct
 ctypedef struct parse_arg:
-    const char*     filename
+    void*           filename
     tsQueue*        q
     bint*           p_needByteSwap
     bint*           stopFlag
@@ -220,7 +225,6 @@ cdef void* parse(void* input_args) nogil:
     status = stdf_open(&std, args.filename)
 
     if status != STD_OK:
-        stdf_close(std)
         ele.error   = OS_FAIL
         ele.operation     = FINISH
         message_queue_write(q, ele)
@@ -247,8 +251,17 @@ cdef void* parse(void* input_args) nogil:
 # *** STDF Analyzer *** #
 #########################
 def analyzeSTDF(str filepath):
-    cdef bytes filepath_byte = filepath.encode('utf-8')
-    cdef const char* fpath = filepath_byte
+    cdef const wchar_t* filepath_wc
+    cdef bytes filepath_byte
+    cdef const char* filepath_c
+    cdef bint isWin = platform.system() == "Windows"
+
+    if isWin:
+        filepath_wc = PyUnicode_AsWideCharString(filepath, NULL)
+    else:
+        filepath_byte = filepath.encode('utf-8')
+        filepath_c = filepath_byte      # for parser in pthread
+    
     cdef str resultLog = ""
 
     rec_name = {REC_FAR:"FAR",
@@ -291,7 +304,7 @@ def analyzeSTDF(str filepath):
     message_queue_init(&q, sizeof(dataCluster), 1024*8)
     # args for parser
     cdef parse_arg args
-    args.filename = fpath
+    args.filename = <void*>filepath_wc if isWin else <void*>filepath_c
     args.q = &q
     args.p_needByteSwap = &needByteSwap
     args.stopFlag = &stopFlag
@@ -557,26 +570,19 @@ cdef int writeFailCount(void* sql_stmt, uint32_t TEST_NUM, uint32_t count) nogil
 # ** End of Callback ** #
 
 
-cdef uint64_t getFileSize(const char* filepath) nogil:
+cdef uint64_t getFileSize(str filepath):
     cdef uint64_t fsize
-    cdef uint32_t gz_fsize = 0   # for gz file only
-    cdef FILE* fd
-    cdef char* ext = strrchr(filepath, 0x2E)    # 0x2E = '.'
 
-    fd = fopen(filepath, "rb")
-    if fd == NULL:
-        fsize = 0
+    pyfh = open(filepath, "rb")
 
-    if (ext and (not strcmp(ext, ".gz"))):
+    if filepath.endswith(".gz"):
         # for gzip, read last 4 bytes as filesize
-        fseeko(fd, -4, SEEK_END)
-        fread(&gz_fsize, 4, 1, fd)
-        fsize = <uint64_t>(gz_fsize)
+        pyfh.seek(-4, 2)
+        fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
     else:
         # bzip file size is not known before uncompressing, return compressed file size instead
-        fseeko(fd, 0, SEEK_END)
-        fsize = <uint64_t>ftello(fd)
-    fclose(fd)
+        fsize = <uint64_t>(pyfh.seek(0, 2))
+    pyfh.close()
     return fsize
 
 
@@ -585,13 +591,14 @@ cdef class stdfSummarizer:
         object QSignal, flag, pb_thread
         uint64_t offset, fileSize
         uint32_t dutIndex, waferIndex
-        bint reading, isLittleEndian, stopFlag
+        bint reading, isLittleEndian, stopFlag, isWindows
         dict pinDict
         bytes filepath_bt
         void* pRec
         char* endian
         char* TEST_TXT
         const char* filepath_c
+        const wchar_t*  filepath_wc
         sqlite3 *db_ptr
         sqlite3_stmt *insertFileInfo_stmt
         sqlite3_stmt *insertDut_stmt
@@ -762,10 +769,14 @@ cdef class stdfSummarizer:
         # get file size in Bytes
         if not isinstance(filepath, str):
             raise TypeError("File path is not type <str>")
-        # get c string filepath and file size
-        self.filepath_bt = filepath.encode("utf-8")
-        self.filepath_c = self.filepath_bt      # for parser in pthread
-        self.fileSize = getFileSize(self.filepath_c)
+        # get wchar_t* string on Win and char* string on mac & linux
+        self.isWindows = platform.system() == "Windows"
+        if self.isWindows:
+            self.filepath_wc = PyUnicode_AsWideCharString(filepath, NULL)
+        else:
+            self.filepath_bt = filepath.encode("utf-8")
+            self.filepath_c = self.filepath_bt      # for parser in pthread
+        self.fileSize = getFileSize(filepath)
         if self.fileSize == 0:
             raise OSError("File cannot be opened")
         # python signal
@@ -844,7 +855,7 @@ cdef class stdfSummarizer:
         if message_queue_init(&parseQ, sizeof(dataCluster), 2**22) != 0:
             raise MemoryError("Unable to start parsing queue")
         # args for parser
-        args.filename = self.filepath_c
+        args.filename = <void*>self.filepath_wc if self.isWindows else <void*>self.filepath_c
         args.q = &parseQ
         args.p_needByteSwap = &needByteSwap
         args.stopFlag = &self.stopFlag

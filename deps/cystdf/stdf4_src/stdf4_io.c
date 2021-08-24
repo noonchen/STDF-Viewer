@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Thu May 20 2021
+ * Last Modified: Thu Aug 19 2021
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -30,14 +30,40 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <wchar.h>
+#ifdef _WIN32
+    #include <io.h>
+    #include <share.h>
+    #include <locale.h>
+    #include <stdio.h>
+#endif
+
+int get_fd_with_unicode_path(const char* utf8_filename, const wchar_t* wchar_filename) {
+#ifdef _WIN32
+    // open file descriptor with wchar_t path in windows
+    return _wsopen(wchar_filename, _O_BINARY | _O_RDONLY, _SH_DENYWR);
+#else
+    // linux and mac support utf8 path natively
+    return open(utf8_filename, O_RDONLY);
+#endif
+}
 
 
 /* Uncompressed */
-int _stdf_open_org(void* stdf, const char* filename){
+int _stdf_open_org(void* stdf, void* filename){
     STDF* std = (STDF*)stdf;
-    std->orgF = fopen(filename, "rb");
+
+#ifdef _WIN32
+    int fd = get_fd_with_unicode_path(NULL, (wchar_t*)filename);
+    std->orgF = _wfdopen(fd, L"rb");
+#else
+    int fd = get_fd_with_unicode_path((char*)filename, NULL);
+    std->orgF = fdopen(fd, "rb");
+#endif
 
     if (std->orgF == NULL) {
+        printf("file handler is null\n");
         fclose(std->orgF);
         return OS_FAIL;
     }
@@ -80,9 +106,14 @@ stdf_fops stdf_fops_org = {
 
 
 /* GZ */
-int _stdf_open_gz(void* stdf, const char* filename){
+int _stdf_open_gz(void* stdf, void* filename){
     STDF* std = (STDF*)stdf;
-    std->gzF = gzopen(filename, "rb");
+#ifdef _WIN32
+    int fd = get_fd_with_unicode_path(NULL, (wchar_t*)filename);
+#else
+    int fd = get_fd_with_unicode_path((char*)filename, NULL);
+#endif
+    std->gzF = gzdopen(fd, "rb");
 
     if (std->gzF == NULL) {
         gzclose(std->gzF);
@@ -126,9 +157,14 @@ stdf_fops stdf_fops_gz = {
 
 
 /* BZ & BZ2 */
-int _stdf_open_bz(void* stdf, const char* filename){
+int _stdf_open_bz(void* stdf, void* filename){
     STDF* std = (STDF*)stdf;
-    std->bzF = BZ2_bzopen(filename, "rb");
+#ifdef _WIN32
+    int fd = get_fd_with_unicode_path(NULL, (wchar_t*)filename);
+#else
+    int fd = get_fd_with_unicode_path((char*)filename, NULL);
+#endif
+    std->bzF = BZ2_bzdopen(fd, "rb");
 
     if (std->bzF == NULL) {
         BZ2_bzclose(std->bzF);
@@ -173,16 +209,28 @@ stdf_fops stdf_fops_bz = {
 
 /* API */
 
-STDERR stdf_open(STDF** sh_ptr, const char* filename) {
+STDERR stdf_open(STDF** sh_ptr, void* filename) {
     *sh_ptr = (STDF*)malloc(sizeof(STDF));
     STDF* sh = *sh_ptr;
     if (sh == NULL) {
         free(sh);
         return NO_MEMORY;
     }
-
     sh->filepath = filename;
-    char* ext = strrchr(filename, '.');
+    
+#ifdef _WIN32
+    wchar_t* ext = wcsrchr((wchar_t*)filename, L'.');
+    if (!_wcsnicmp(ext, L".gz", 3)){
+        sh->fmt = GZ_compressed;
+    } else if (!_wcsnicmp(ext, L".bz", 3)){
+        sh->fmt = BZ_compressed;
+    } else if (!_wcsnicmp(ext, L".bz2", 4)){
+        sh->fmt = BZ_compressed;
+    } else {
+        sh->fmt = NotCompressed;
+    }
+#else
+    char* ext = strrchr((char*)filename, '.');
     if (!strncasecmp(ext, ".gz", 3)){
         sh->fmt = GZ_compressed;
     } else if (!strncasecmp(ext, ".bz", 3)){
@@ -192,6 +240,7 @@ STDERR stdf_open(STDF** sh_ptr, const char* filename) {
     } else {
         sh->fmt = NotCompressed;
     }
+#endif
 
     // set file operations
     switch (sh->fmt) {
