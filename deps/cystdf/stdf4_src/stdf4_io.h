@@ -29,9 +29,6 @@
 #include <stdint.h>
 #include "zlib_src/zlib.h"
 #include "bzip2_src/bzlib.h"
-// #include "bzseek_src/bzseek.h"
-// #include <zlib.h>
-// #include <bzlib.h>
 
 #ifndef __STDF_IO_TYPES__
 #define __STDF_IO_TYPES__
@@ -54,7 +51,7 @@ typedef enum {
 
 
 typedef struct _stdf_fops {
-    int (*stdf_open)(void* stdf, const char* filename);
+    int (*stdf_open)(void* stdf, void* filename);
     int (*stdf_read)(void* stdf, void* buf, int length);
     int (*stdf_skip)(void* stdf, int num);
     int (*stdf_close)(void* stdf);
@@ -62,18 +59,17 @@ typedef struct _stdf_fops {
 
 
 typedef struct _stdf_handler {
-    const char*     filepath;
+    void*           filepath;
     stdf_format     fmt;
     FILE*           orgF;
     gzFile          gzF;
     BZFILE*         bzF;
-    // bzseek_file*    bzseekF;
     stdf_fops*      fops;
 } STDF;
 
 #endif //__STDF_IO_TYPES__
 
-extern STDERR stdf_open(STDF** sh, const char* filename);
+extern STDERR stdf_open(STDF** sh, void* filename);
 
 extern STDERR stdf_reopen(STDF* sh);
 

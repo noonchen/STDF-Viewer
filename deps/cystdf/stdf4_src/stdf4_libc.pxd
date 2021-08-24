@@ -326,7 +326,7 @@ cdef extern from "stdf4_func.c" nogil:
 
 
 cdef extern from "stdf4_io.c" nogil:
-    STDERR stdf_open(STDF** sh, const char* filename)
+    STDERR stdf_open(STDF** sh, void* filename)
     STDERR stdf_close(STDF* sh)
 
 
@@ -341,7 +341,7 @@ cdef extern from "stdf4_io.h" nogil:
         TERMINATE
 
     ctypedef struct stdf_fops:
-        int (*stdf_open)(void* stdf, const char* filename) nogil
+        int (*stdf_open)(void* stdf, void* filename) nogil
         int (*stdf_read)(void* stdf, void* buf, int length) nogil
         int (*stdf_skip)(void* stdf, int num) nogil
         int (*stdf_close)(void* stdf) nogil
@@ -350,7 +350,7 @@ cdef extern from "stdf4_io.h" nogil:
         stdf_fops*      fops
         pass
 
-    STDERR stdf_open(STDF** sh, const char* filename)
+    STDERR stdf_open(STDF** sh, void* filename)
 
     STDERR stdf_reopen(STDF* sh)
 
