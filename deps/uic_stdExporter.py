@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -275,7 +275,7 @@ class reportGenerator(QtCore.QObject):
             if tab.DUT in self.contL:
                 # Sheet for DUT summary & Test raw data
                 DutSheet:Worksheet = sheetDict[tab.DUT]
-                headerLabelList = [["", "Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"],
+                headerLabelList = [["", "Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "Wafer ID", "(X, Y)", "DUT Flag"],
                                     ["Test Number"],
                                     ["Upper Limit"],
                                     ["Lower Limit"],

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -139,7 +139,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.removeColumns(0, self.tmodel.columnCount())
         self.tmodel.removeRows(0, self.tmodel.rowCount())
         # header
-        self.hh = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"] + [tmp[0] for tmp in self.dutData]
+        self.hh = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "Wafer ID", "(X, Y)", "DUT Flag"] + [tmp[0] for tmp in self.dutData]
         vh_base = ["Test Number", "HiLimit", "LoLimit", "Unit"]
         self.vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
         vh_len = len(vh_base)

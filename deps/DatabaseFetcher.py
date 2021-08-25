@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Aug 23 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -195,7 +195,7 @@ class DatabaseFetcher:
         sql = "SELECT * FROM Dut_Info ORDER by DUTIndex"
         sqlResult = self.cursor.execute(sql)
         
-        for head, site, DUTIndex, testCount, Testtime, partID, hbin, sbin, prrFlag, _, _, _ in sqlResult:
+        for head, site, DUTIndex, testCount, Testtime, partID, hbin, sbin, prrFlag, waferIndex, xcoord, ycoord in sqlResult:
             prrStat = getStatus(prrFlag)
             tmpRow = [partID if partID else b"MissingID", 
                     b"Head %d - Site %d" % (head, site),
@@ -203,6 +203,8 @@ class DatabaseFetcher:
                     b"%d ms" % Testtime,
                     b"Bin %d" % hbin,
                     b"Bin %d" % sbin,
+                    b"%d" % waferIndex if waferIndex is not None else b"-",
+                    b"(%d, %d)" % (xcoord, ycoord) if not (xcoord is None or ycoord is None) else b"-",
                     f"{prrStat} - 0x{prrFlag:02x}".encode()]
             dutInfoDict[DUTIndex] = tmpRow
             

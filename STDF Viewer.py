@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Aug 23 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1082,6 +1082,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_dut.removeRows(0, self.tmodel_dut.rowCount())
         self.tmodel_dut.removeColumns(0, self.tmodel_dut.columnCount())
         headerLabels = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
+        if self.containsWafer:
+            headerLabels[-1:-1] = ["Wafer ID", "(X, Y)"]    # insert before "DUT Flag"
         self.tmodel_dut.setHorizontalHeaderLabels(headerLabels)
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
@@ -1094,7 +1096,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.updateStatus(f"Please wait, reading DUT information...")
         
         for dutIndex in self.dutArray:
-            itemRow = self.dutSummaryDict[dutIndex]
+            itemRow = self.dutSummaryDict[dutIndex] if self.containsWafer else \
+                self.dutSummaryDict[dutIndex][0:-3]+[self.dutSummaryDict[dutIndex][-1]]
             self.tmodel_dut.appendRow(genQItemList(itemRow))
             
             progress = 100 * dutIndex / totalDutCnt
@@ -1774,7 +1777,7 @@ class MyWindow(QtWidgets.QMainWindow):
         exportImg: bool = ("exportImg" in kargs) and (kargs["exportImg"] == True)
         dataInvalid = False     # for trend & histo chart
         # create fig & canvas
-        figsize = (7.5, 9) if tabType == tab.Wafer else (10, 4)
+        figsize = (7.5, 8) if tabType == tab.Wafer else (10, 4)
         fig = plt.Figure(figsize=figsize)
         fig.set_tight_layout(True)
                 
@@ -1973,6 +1976,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
             
         elif tabType == tab.Wafer:   # Wafermap
+            fig.set_tight_layout(False)
             ax = fig.add_subplot(111, aspect=1)
             # set limits
             waferBounds = self.DatabaseFetcher.getWaferBounds()
@@ -1982,6 +1986,8 @@ class MyWindow(QtWidgets.QMainWindow):
             ymax = waferBounds["ymax"]            
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
+            # scaling xy coords to be a square
+            ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')            
             # dynamic label size
             Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
             labelsize = Tsize(max(xmax-xmin, ymax-ymin))
@@ -2004,10 +2010,14 @@ class MyWindow(QtWidgets.QMainWindow):
                 # draw color mesh, replace all -1 to NaN to hide rec with no value
                 pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg)
                 # create a new axis for colorbar
-                ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.1, ax.get_position().width, 0.02])
+                ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
                 cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
-                cbar.set_label("Total failed dies")
                 cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+                cbar.set_label("Total failed dies")
+                # ax_colorbar = fig.add_axes([ax.get_position().x1+0.03, ax.get_position().y0, 0.02, ax.get_position().height])
+                # cbar = fig.colorbar(pcmesh, cax=ax_colorbar)
+                # cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+                # cbar.set_label("Total failed dies", rotation=270, va="bottom")
                 
             else:
                 waferDict = self.waferInfoDict[test_num]

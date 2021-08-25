@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Wed Jun 09 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -127,10 +127,8 @@ class DutSortFilter(QSortFilterProxyModel):
                 # sort hbin / sbin
                 return getNum(textLeft) < getNum(textRight)
 
-            elif left.column() == 6:
-                # sort flag
-                # getHexNum = lambda text: int(text.split("/")[-1], 16)
-                # return getHexNum(textLeft) < getHexNum(textRight)
+            elif left.column() == 6 or left.column() == 7 or left.column() == 8:
+                # sort flag, wafer id, (X, Y)
                 pass
             
         return super().lessThan(left, right)
