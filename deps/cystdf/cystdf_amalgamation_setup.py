@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 20th 2021
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Wed Aug 25 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -60,6 +60,7 @@ if isMac:
       # no need for link args because we used static link by specifying omp location
       # link_args.extend(['-Xpreprocessor', '-fopenmp', '-lomp'])
 else:
+      library_dirs.append(os.path.join(os.getcwd(), "vcruntime"))
       compile_args.extend(['-fopenmp'])
       link_args.extend(['-fopenmp'])
 
