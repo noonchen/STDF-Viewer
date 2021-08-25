@@ -65,3 +65,37 @@ jobs:
         working-directory: ./deps/cystdf
         run: |
           python cystdf_amalgamation_setup.py build_ext --inplace
+
+
+  windows-cp39:
+    # The type of runner that the job will run on
+    runs-on: windows-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+      
+      - name: Setup Python
+        uses: actions/setup-python@v2.2.2
+        with:
+          python-version: 3.9
+          architecture: x64
+          
+      - name: Set Mingw as default compiler for python
+        working-directory: .
+        run: |
+          # add distutils.cfg
+          python -c "import os, distutils; f=open(os.path.join(os.path.dirname(distutils.__file__), 'distutils.cfg'), 'w'); f.writelines('[build]\ncompiler = mingw32\n\n[build_ext]\ncompiler=mingw32'); f.close()"
+          # add a patch to cygwinccompiler.py
+          python -c "import os, distutils, string; cypath=os.path.join(os.path.dirname(distutils.__file__), 'cygwinccompiler.py'); patchpath=os.path.join('.github', 'workflows', 'cy.patch'); command='patch -u '+cypath+' '+patchpath; os.system(command)"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install cython==3.0a6
+          python -m pip install numpy
+        
+      - name: Compile cystdf module
+        working-directory: ./deps/cystdf
+        run: |
+          python cystdf_amalgamation_setup.py build_ext --inplace --compile=mingw32
