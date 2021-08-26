@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 25th 2021
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Thu Aug 26 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,8 +24,12 @@
 
 
 
-from . import _cystdf
 import numpy as np
+try:
+    from . import _cystdf
+except ImportError as e:
+    e.msg = "cystdf module should be built before running STDF-Viewer"
+    raise
 
 __all__ = ["stdfDataRetriever", "stdfRecordAnalyzer", "stdfParser", "setByteSwap"]
 
