@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 11th 2021
  * -----
- * Last Modified: Mon May 17 2021
+ * Last Modified: Fri Aug 27 2021
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -582,8 +582,17 @@ void parse_PMR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     read_Cn(&record->CHAN_NAM, rawData, binaryLen, &pos);
     read_Cn(&record->PHY_NAM, rawData, binaryLen, &pos);
     read_Cn(&record->LOG_NAM, rawData, binaryLen, &pos);
-    read_U1(&record->HEAD_NUM, rawData, binaryLen, &pos);
-    read_U1(&record->SITE_NUM, rawData, binaryLen, &pos);
+    // default value for head & site is 1
+    if (pos < binaryLen) {
+        read_U1(&record->HEAD_NUM, rawData, binaryLen, &pos);
+    } else {
+        record->HEAD_NUM = 1;
+    }
+    if (pos < binaryLen) {
+        read_U1(&record->SITE_NUM, rawData, binaryLen, &pos);
+    } else {
+        record->SITE_NUM = 1;
+    }
 
     *pRec = record;
 }

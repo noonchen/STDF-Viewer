@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Thu Aug 19 2021
+# Last Modified: Mon Aug 30 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -49,7 +49,7 @@ from libc.math cimport NAN
 from libc.string cimport memcpy, strcpy, strrchr, strcmp
 from posix.stdio cimport fseeko, ftello
 from posix.unistd cimport usleep
-from libc.stdio cimport sprintf
+from libc.stdio cimport sprintf, printf
 from libc.stdlib cimport malloc, free
 
 # including a str to wchar_t func that missed from cython
@@ -153,7 +153,7 @@ cdef void get_offset(STDF* std, tsQueue* q, bint* p_needByteSwap, bint* stopFlag
             if (recHeader == REC_MIR or recHeader == REC_WCR or recHeader == REC_WIR or recHeader == REC_WRR or
                 recHeader == REC_PTR or recHeader == REC_FTR or recHeader == REC_MPR or recHeader == REC_TSR or
                 recHeader == REC_PIR or recHeader == REC_PRR or recHeader == REC_HBR or recHeader == REC_SBR or 
-                recHeader == REC_PCR):
+                recHeader == REC_PCR or recHeader == REC_PMR or recHeader == REC_PGR or recHeader == REC_PLR):
                 # get binaryLen and read rawData
                 # alloc memory
                 ele = <dataCluster*>message_queue_message_alloc_blocking(q)
@@ -251,9 +251,9 @@ cdef void* parse(void* input_args) nogil:
 # *** STDF Analyzer *** #
 #########################
 def analyzeSTDF(str filepath):
-    cdef const wchar_t* filepath_wc
+    cdef wchar_t* filepath_wc
     cdef bytes filepath_byte
-    cdef const char* filepath_c
+    cdef char* filepath_c
     cdef bint isWin = platform.system() == "Windows"
 
     if isWin:
@@ -533,13 +533,13 @@ cdef int csqlite3_step(sqlite3_stmt *stmt) nogil:
     # cdef const char *errMsg
 
     exitcode = sqlite3_step(stmt)
-    # clear bindings and reset stmt for next step
-    sqlite3_reset(stmt)
-    sqlite3_clear_bindings(stmt)
 
     if exitcode != SQLITE_DONE:
         return exitcode
     else:
+        # clear bindings and reset stmt for next step if success
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
         return 0
 
 
@@ -612,6 +612,11 @@ cdef class stdfSummarizer:
         # sqlite3_stmt *updateSBIN_stmt
         sqlite3_stmt *insertWafer_stmt
         sqlite3_stmt *insertDutCount_stmt
+        sqlite3_stmt *insertPinMap_stmt
+        sqlite3_stmt *updateFrom_GRP_stmt
+        sqlite3_stmt *insertGRP_NAM_stmt
+        sqlite3_stmt *insertPinInfo_stmt
+        sqlite3_stmt *insertTestPin_stmt
         map_t   seenTN          # ele: TEST_NUM
         map_t   TestFailCount
         map_t   head_site_dutIndex
@@ -632,6 +637,11 @@ cdef class stdfSummarizer:
         # self.updateSBIN_stmt        = NULL
         self.insertDutCount_stmt    = NULL
         self.insertWafer_stmt       = NULL
+        self.insertPinMap_stmt      = NULL
+        self.updateFrom_GRP_stmt    = NULL
+        self.insertGRP_NAM_stmt     = NULL
+        self.insertPinInfo_stmt     = NULL
+        self.insertTestPin_stmt     = NULL
         self.pRec                   = NULL
         self.seenTN                 = NULL
         self.TestFailCount          = NULL
@@ -644,10 +654,14 @@ cdef class stdfSummarizer:
         cdef:
             const char* createTableSql = '''DROP TABLE IF EXISTS File_Info;
                                         DROP TABLE IF EXISTS Dut_Info;
+                                        DROP TABLE IF EXISTS Dut_Counts;
                                         DROP TABLE IF EXISTS Test_Info;
                                         DROP TABLE IF EXISTS Test_Offsets;
                                         DROP TABLE IF EXISTS Bin_Info;
                                         DROP TABLE IF EXISTS Wafer_Info;
+                                        DROP TABLE IF EXISTS Pin_Map;
+                                        DROP TABLE IF EXISTS Pin_Info;
+                                        DROP TABLE IF EXISTS TestPin_Map;
                                         VACUUM;
                                         
                                         CREATE TABLE IF NOT EXISTS File_Info (
@@ -701,7 +715,9 @@ cdef class stdfSummarizer:
                                                                 HLimit INTEGER,
                                                                 Unit TEXT,
                                                                 OPT_FLAG INTEGER,
-                                                                FailCount INTEGER);
+                                                                FailCount INTEGER,
+                                                                RTN_ICNT INTEGER,
+                                                                RSLT_PGM_CNT INTEGER);
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
@@ -716,6 +732,31 @@ cdef class stdfSummarizer:
                                                                 BIN_NAME TEXT,
                                                                 BIN_PF TEXT,
                                                                 PRIMARY KEY (BIN_TYPE, BIN_NUM));
+
+                                        CREATE TABLE IF NOT EXISTS Pin_Map (
+                                                                HEAD_NUM INTEGER, 
+                                                                SITE_NUM INTEGER, 
+                                                                PMR_INDX INTEGER,
+                                                                CHAN_TYP INTEGER,
+                                                                CHAN_NAM TEXT,
+                                                                PHY_NAM TEXT,
+                                                                LOG_NAM TEXT,
+                                                                From_GRP INTEGER);
+
+                                        CREATE TABLE IF NOT EXISTS Pin_Info (
+                                                                P_PG_INDX INTEGER PRIMARY KEY, 
+                                                                GRP_NAM TEXT, 
+                                                                GRP_MODE INTEGER,
+                                                                GRP_RADX INTEGER,
+                                                                PGM_CHAR TEXT,
+                                                                PGM_CHAL TEXT,
+                                                                RTN_CHAR TEXT,
+                                                                RTN_CHAL TEXT);
+
+                                        CREATE TABLE IF NOT EXISTS TestPin_Map (
+                                                                TEST_NUM INTEGER, 
+                                                                PMR_INDX INTEGER,
+                                                                PIN_TYPE TEXT);
                                                                 
                                         DROP INDEX IF EXISTS dutKey;
                                         PRAGMA synchronous = OFF;
@@ -735,7 +776,7 @@ cdef class stdfSummarizer:
             # I am not adding IGNORE below, since tracking seen test_nums can skip a huge amount of codes
             const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_NUM, :recHeader, :TEST_NAME, 
                                                                         :RES_SCAL, :LLimit, :HLimit, 
-                                                                        :Unit, :OPT_FLAG, :FailCount);'''
+                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT);'''
             const char* insertHBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("H", :HBIN_NUM, :HBIN_NAME, :PF);'''
             # const char* updateHBIN = '''UPDATE Bin_Info SET BIN_NAME=:HBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="H" AND BIN_NUM=:HBIN_NUM'''
             const char* insertSBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("S", :SBIN_NUM, :SBIN_NAME, :PF);'''
@@ -745,6 +786,16 @@ cdef class stdfSummarizer:
             const char* insertWafer = '''INSERT OR REPLACE INTO Wafer_Info VALUES (:HEAD_NUM, :WaferIndex, :PART_CNT, :RTST_CNT, :ABRT_CNT, 
                                                                                 :GOOD_CNT, :FUNC_CNT, :WAFER_ID, :FABWF_ID, :FRAME_ID, 
                                                                                 :MASK_ID, :USR_DESC, :EXC_DESC);'''
+            const char* insertPinMap = '''INSERT INTO Pin_Map VALUES (:HEAD_NUM, :SITE_NUM, :PMR_INDX, :CHAN_TYP, 
+                                                                        :CHAN_NAM, :PHY_NAM, :LOG_NAM, :From_GRP);'''
+            const char* updateFrom_GRP = '''UPDATE Pin_Map SET From_GRP=:From_GRP WHERE PMR_INDX=:PMR_INDX;'''
+            # create a row with GRP_NAME in Pin_Info if PGR exists
+            const char* insertGRP_NAM = '''INSERT INTO Pin_Info (P_PG_INDX, GRP_NAM) VALUES (:P_PG_INDX, :GRP_NAM);'''
+            # insert rows in Pin_Info and keep GRP_NAM
+            const char* insertPinInfo = '''INSERT OR REPLACE INTO Pin_Info VALUES (:P_PG_INDX, (SELECT GRP_NAM FROM Pin_Info WHERE P_PG_INDX=:P_PG_INDX), 
+                                                                        :GRP_MODE, :GRP_RADX, 
+                                                                        :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);'''
+            const char* insertTestPin = '''INSERT INTO TestPin_Map VALUES (:TEST_NUM, :PMR_INDX, :PIN_TYPE);'''
 
         # init sqlite3 database api
         try:
@@ -762,6 +813,11 @@ cdef class stdfSummarizer:
             # csqlite3_prepare_v2(self.db_ptr, updateSBIN, &self.updateSBIN_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertDutCount, &self.insertDutCount_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertWafer, &self.insertWafer_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertPinMap, &self.insertPinMap_stmt)
+            csqlite3_prepare_v2(self.db_ptr, updateFrom_GRP, &self.updateFrom_GRP_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertGRP_NAM, &self.insertGRP_NAM_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertPinInfo, &self.insertPinInfo_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertTestPin, &self.insertTestPin_stmt)
         except Exception:
             csqlite3_close(self.db_ptr)
             raise
@@ -952,6 +1008,11 @@ cdef class stdfSummarizer:
         # csqlite3_finalize(self.updateSBIN_stmt)
         csqlite3_finalize(self.insertDutCount_stmt)
         csqlite3_finalize(self.insertWafer_stmt)
+        csqlite3_finalize(self.insertPinMap_stmt)
+        csqlite3_finalize(self.updateFrom_GRP_stmt)
+        csqlite3_finalize(self.insertGRP_NAM_stmt)
+        csqlite3_finalize(self.insertPinInfo_stmt)
+        csqlite3_finalize(self.insertTestPin_stmt)
         csqlite3_close(self.db_ptr)
         # clean hashmap
         hashmap_free(self.seenTN)
@@ -987,6 +1048,10 @@ cdef class stdfSummarizer:
             err = self.onSBR(recHeader, binaryLen, rawData)
         elif recHeader == 316: # PMR 316
             err = self.onPMR(recHeader, binaryLen, rawData)
+        elif recHeader == 318: # PGR 318
+            err = self.onPGR(recHeader, binaryLen, rawData)
+        elif recHeader == 319: # PLR 319
+            err = self.onPLR(recHeader, binaryLen, rawData)
         elif recHeader == 266: # MIR 266
             err = self.onMIR(recHeader, binaryLen, rawData)
         elif recHeader == 542: # WCR 542
@@ -998,8 +1063,6 @@ cdef class stdfSummarizer:
         # FAR 10
         # ATR 20
         # MRR 276
-        # PGR 318
-        # PLR 319
         # RDR 326
         # SDR 336
         # BPS 5130
@@ -1236,19 +1299,112 @@ cdef class stdfSummarizer:
     cdef int onPMR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
         cdef:
             int err = 0
+            int         HEAD_NUM, SITE_NUM, CHAN_TYP
             uint16_t    PMR_INDX
             char*       CHAN_NAM
             char*       PHY_NAM
             char*       LOG_NAM
-            
+        
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
 
+        HEAD_NUM = (<PMR*>self.pRec).HEAD_NUM
+        SITE_NUM = (<PMR*>self.pRec).SITE_NUM
         PMR_INDX = (<PMR*>self.pRec).PMR_INDX
         CHAN_NAM = (<PMR*>self.pRec).CHAN_NAM
+        CHAN_TYP = (<PMR*>self.pRec).CHAN_TYP
         PHY_NAM = (<PMR*>self.pRec).PHY_NAM
         LOG_NAM = (<PMR*>self.pRec).LOG_NAM
-        # self.pinDict[PMR_INDX] = [CHAN_NAM, PHY_NAM, LOG_NAM]
+        
+        sqlite3_bind_int(self.insertPinMap_stmt, 1, HEAD_NUM)
+        sqlite3_bind_int(self.insertPinMap_stmt, 2, SITE_NUM)
+        sqlite3_bind_int(self.insertPinMap_stmt, 3, PMR_INDX)
+        sqlite3_bind_int(self.insertPinMap_stmt, 4, CHAN_TYP)
+        if CHAN_NAM != NULL:
+            sqlite3_bind_text(self.insertPinMap_stmt, 5, CHAN_NAM, -1, NULL)
+        if PHY_NAM != NULL:
+            sqlite3_bind_text(self.insertPinMap_stmt, 6, PHY_NAM, -1, NULL)
+        if LOG_NAM != NULL:
+            sqlite3_bind_text(self.insertPinMap_stmt, 7, LOG_NAM, -1, NULL)
+        # From_GRP is intentionally unbinded
+        err = csqlite3_step(self.insertPinMap_stmt)
+        
+        free_record(recHeader, self.pRec)
+        return err
 
+
+    cdef int onPGR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, i = 0
+            uint16_t    GRP_INDX, INDX_CNT, PMR_INDX
+            char*       GRP_NAM
+            uint16_t*   pPMR_INDX
+        
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+
+        GRP_INDX = (<PGR*>self.pRec).GRP_INDX
+        GRP_NAM = (<PGR*>self.pRec).GRP_NAM
+        INDX_CNT = (<PGR*>self.pRec).INDX_CNT
+        pPMR_INDX = (<PGR*>self.pRec).PMR_INDX
+
+        # create new data in Pin_Info
+        if GRP_NAM != NULL:
+            sqlite3_bind_int(self.insertGRP_NAM_stmt, 1, GRP_INDX)
+            sqlite3_bind_text(self.insertGRP_NAM_stmt, 2, GRP_NAM, -1, NULL)
+            err = csqlite3_step(self.insertGRP_NAM_stmt)
+        
+        # update From_GRP in Pin_Map
+        for i in range(INDX_CNT):
+            if not err:
+                PMR_INDX = pPMR_INDX[i]   # get element [i] from array pPMR_INDX
+                sqlite3_bind_int(self.updateFrom_GRP_stmt, 1, GRP_INDX)
+                sqlite3_bind_int(self.updateFrom_GRP_stmt, 2, PMR_INDX)
+                err = csqlite3_step(self.updateFrom_GRP_stmt)
+        
+        free_record(recHeader, self.pRec)
+        return err
+    
+
+    cdef int onPLR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, i = 0
+            uint16_t    GRP_CNT
+            uint16_t*   pGRP_INDX
+            uint16_t*   pGRP_MODE
+            uint8_t*    pGRP_RADX
+            char**      pPGM_CHAR
+            char**      pRTN_CHAR
+            char**      pPGM_CHAL
+            char**      pRTN_CHAL
+        
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+
+        GRP_CNT = (<PLR*>self.pRec).GRP_CNT
+        pGRP_INDX = (<PLR*>self.pRec).GRP_INDX      # Pin or Pin_Group
+        pGRP_MODE = (<PLR*>self.pRec).GRP_MODE
+        pGRP_RADX = (<PLR*>self.pRec).GRP_RADX
+        pPGM_CHAR = (<PLR*>self.pRec).PGM_CHAR
+        pRTN_CHAR = (<PLR*>self.pRec).RTN_CHAR
+        pPGM_CHAL = (<PLR*>self.pRec).PGM_CHAL
+        pRTN_CHAL = (<PLR*>self.pRec).RTN_CHAL
+        
+        # insert info into Pin_Info
+        for i in range(GRP_CNT):
+            if not err:
+                sqlite3_bind_int(self.insertPinInfo_stmt, 1, (pGRP_INDX + i)[0])
+                # Even there are 2 :P_PG_INDX, no need to bind the 2nd :P_PG_INDX again
+                # sqlite3_bind_int(self.insertPinInfo_stmt, 2, (pGRP_INDX + i)[0])
+                sqlite3_bind_int(self.insertPinInfo_stmt, 2, (pGRP_MODE + i)[0])
+                sqlite3_bind_int(self.insertPinInfo_stmt, 3, (pGRP_RADX + i)[0])
+                if (pPGM_CHAR + i)[0] != NULL:
+                    sqlite3_bind_text(self.insertPinInfo_stmt, 4, (pPGM_CHAR + i)[0], -1, NULL)
+                if (pPGM_CHAL + i)[0] != NULL:
+                    sqlite3_bind_text(self.insertPinInfo_stmt, 5, (pPGM_CHAL + i)[0], -1, NULL)
+                if (pRTN_CHAR + i)[0] != NULL:
+                    sqlite3_bind_text(self.insertPinInfo_stmt, 6, (pRTN_CHAR + i)[0], -1, NULL)
+                if (pRTN_CHAL + i)[0] != NULL:
+                    sqlite3_bind_text(self.insertPinInfo_stmt, 7, (pRTN_CHAL + i)[0], -1, NULL)
+                err = csqlite3_step(self.insertPinInfo_stmt)
+        
         free_record(recHeader, self.pRec)
         return err
     
@@ -1281,11 +1437,15 @@ cdef class stdfSummarizer:
         cdef:
             uint32_t TEST_NUM, currentDutIndex
             uint8_t HEAD_NUM, SITE_NUM, OPT_FLAG
-            int RES_SCAL, err = 0
+            uint16_t RTN_ICNT = 0, RSLT_PGM_CNT = 0     # For FTR & MPR
+            int i, RES_SCAL, err = 0
             double LLimit, HLimit
             bint No_RES_SCAL = False, No_LLimit = False, No_HLimit = False
             char* TEST_TXT
             char* Unit
+            uint16_t*   pRTN_INDX = NULL   # For FTR & MPR
+            uint16_t*   pPGM_INDX = NULL   # For FTR
+
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         # read testNum headNum and siteNum
         if recHeader == REC_PTR:
@@ -1324,7 +1484,12 @@ cdef class stdfSummarizer:
                 No_RES_SCAL = No_LLimit = No_HLimit = True
                 TEST_TXT    = (<FTR*>self.pRec).TEST_TXT
                 OPT_FLAG    = (<FTR*>self.pRec).OPT_FLAG
-                Unit = ""
+                Unit        = ""
+                RTN_ICNT    = (<FTR*>self.pRec).RTN_ICNT
+                RSLT_PGM_CNT= (<FTR*>self.pRec).PGM_ICNT
+                pRTN_INDX   = (<FTR*>self.pRec).RTN_INDX
+                pPGM_INDX   = (<FTR*>self.pRec).PGM_INDX
+
             elif recHeader == REC_PTR:
                 No_RES_SCAL = No_LLimit = No_HLimit = False
                 TEST_TXT    = (<PTR*>self.pRec).TEST_TXT
@@ -1333,6 +1498,7 @@ cdef class stdfSummarizer:
                 HLimit      = (<PTR*>self.pRec).HI_LIMIT
                 Unit        = (<PTR*>self.pRec).UNITS
                 OPT_FLAG    = (<PTR*>self.pRec).OPT_FLAG
+
             else:
                 No_RES_SCAL = No_LLimit = No_HLimit = False
                 TEST_TXT    = (<MPR*>self.pRec).TEST_TXT
@@ -1341,6 +1507,9 @@ cdef class stdfSummarizer:
                 HLimit      = (<MPR*>self.pRec).HI_LIMIT
                 Unit        = (<MPR*>self.pRec).UNITS
                 OPT_FLAG    = (<MPR*>self.pRec).OPT_FLAG
+                RTN_ICNT    = (<MPR*>self.pRec).RTN_ICNT
+                RSLT_PGM_CNT= (<MPR*>self.pRec).RSLT_CNT
+                pRTN_INDX   = (<MPR*>self.pRec).RTN_INDX
 
             if Unit == NULL: Unit = ""
             if not err:
@@ -1356,7 +1525,28 @@ cdef class stdfSummarizer:
                 sqlite3_bind_text(self.insertTestInfo_stmt, 7, Unit, -1, NULL)          # Unit
                 sqlite3_bind_int(self.insertTestInfo_stmt, 8, OPT_FLAG)                 # OPT_FLAG
                 sqlite3_bind_int(self.insertTestInfo_stmt, 9, -1)                       # FailCnt, default -1
+                if RTN_ICNT > 0:
+                    sqlite3_bind_int(self.insertTestInfo_stmt, 10, RTN_ICNT)            # RTN_ICNT for FTR & MPR
+                if RSLT_PGM_CNT > 0:
+                    sqlite3_bind_int(self.insertTestInfo_stmt, 11, RSLT_PGM_CNT)        # RSLT or PGM for MPR or FTR
                 err = csqlite3_step(self.insertTestInfo_stmt)
+
+            # store PMR indexes of each FTR & MPR
+            if not err and recHeader != REC_PTR:
+                if RTN_ICNT > 0 and pRTN_INDX != NULL:
+                    for i in range(RTN_ICNT):
+                        sqlite3_bind_int(self.insertTestPin_stmt, 1, TEST_NUM)
+                        sqlite3_bind_int(self.insertTestPin_stmt, 2, pRTN_INDX[i])
+                        sqlite3_bind_text(self.insertTestPin_stmt, 3, "RTN", -1, NULL)
+                        err = csqlite3_step(self.insertTestPin_stmt)
+
+                if RSLT_PGM_CNT > 0 and pPGM_INDX != NULL:
+                    for i in range(RTN_ICNT):
+                        sqlite3_bind_int(self.insertTestPin_stmt, 1, TEST_NUM)
+                        sqlite3_bind_int(self.insertTestPin_stmt, 2, pPGM_INDX[i])
+                        sqlite3_bind_text(self.insertTestPin_stmt, 3, "PGM", -1, NULL)
+                        err = csqlite3_step(self.insertTestPin_stmt)
+
         free_record(recHeader, self.pRec)
         return err
                             

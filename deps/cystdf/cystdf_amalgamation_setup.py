@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 20th 2021
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Thu Aug 26 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -60,12 +60,12 @@ if isMac:
       # no need for link args because we used static link by specifying omp location
       # link_args.extend(['-Xpreprocessor', '-fopenmp', '-lomp'])
 else:
-      library_dirs.append(os.path.join(os.getcwd(), "vcruntime"))
       compile_args.extend(['-fopenmp'])
       link_args.extend(['-fopenmp'])
 
 # static link in windows
 if isWindows:
+      library_dirs.append(os.path.join(os.getcwd(), "vcruntime"))
       compile_args.append('-DMS_WIN64')
       link_args.extend(['-static-libgcc',
                         '-static-libstdc++',
@@ -87,4 +87,4 @@ setup(ext_modules = cythonize(Extension(
       )))
 
 # python3 cystdf_amalgamation_setup.py build_ext --inplace
-# python cystdf_amalgamation_setup.py build_ext --inplace
+# python cystdf_amalgamation_setup.py build_ext --inplace --compile=mingw32
