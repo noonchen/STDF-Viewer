@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 19th 2021
 # -----
-# Last Modified: Sat Jun 19 2021
+# Last Modified: Fri Aug 27 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -165,8 +165,22 @@ cdef extern from "stdf4_func.c" nogil:
         U1  HEAD_NUM
         U1  SITE_NUM
     
-    ctypedef struct PGR
-    ctypedef struct PLR
+    ctypedef struct PGR:
+        U2      GRP_INDX
+        Cn      GRP_NAM
+        U2      INDX_CNT
+        kxU2    PMR_INDX
+
+    ctypedef struct PLR:
+        U2      GRP_CNT
+        kxU2    GRP_INDX
+        kxU2    GRP_MODE
+        kxU1    GRP_RADX
+        kxCn    PGM_CHAR
+        kxCn    RTN_CHAR
+        kxCn    PGM_CHAL
+        kxCn    RTN_CHAL
+
     ctypedef struct RDR
     ctypedef struct SDR
     ctypedef struct WIR:
