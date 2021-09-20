@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Sat Sep 18 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -102,6 +102,22 @@ class DatabaseFetcher:
         for head, in self.cursor.execute("SELECT DISTINCT HEAD_NUM FROM Dut_Info"):
             HeadList.add(head)
         return HeadList
+    
+    
+    def getPinNames(self, testNum:int, pinType:str = "RTN"):
+        # return a list of dicts contains bin info
+        if self.cursor is None: raise RuntimeError("No database is connected")
+            
+        self.connection.text_factory = str        
+        
+        pinNameDict = {"PMR": [], "LOG_NAM": []}
+        sql = "SELECT DISTINCT PMR_INDX, LOG_NAM FROM Pin_Map WHERE PMR_INDX in (SELECT PMR_INDX FROM TestPin_Map WHERE TEST_NUM=? AND PIN_TYPE=?)"
+        sqlResult = self.cursor.execute(sql, [testNum, pinType])
+        for pmr_index, logic_name in sqlResult:
+            pinNameDict["PMR"].append(pmr_index)
+            pinNameDict["LOG_NAM"].append("No pin name" if logic_name is None else logic_name)
+            
+        return pinNameDict
     
     
     def getBinInfo(self, bin="HBIN"):

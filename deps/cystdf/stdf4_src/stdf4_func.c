@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 11th 2021
  * -----
- * Last Modified: Fri Aug 27 2021
+ * Last Modified: Wed Sep 15 2021
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -326,14 +326,28 @@ void read_kxN1(uint16_t k, kxN1* desptr, const unsigned char* rawData, uint16_t 
     } else {
         U2 bytecount = k/2 + k%2;   // k = nibble counts, 1 byte = 2 nibble
         if (*pos + bytecount <= binaryLen) {
-            *desptr = (kxN1)malloc(bytecount * sizeof(U1));
+            // we use U1 to store 4bits value
+            *desptr = (kxN1)malloc(k * sizeof(U1));
             if (*desptr == NULL) {
                 free(*desptr);
 
             } else {
                 // read data if count is not 0
-                memcpy(*desptr, &rawData[*pos], bytecount);
-                (*pos) += bytecount;
+                int i;
+                uint8_t tmp;
+                for (i=0; i<bytecount; i++){
+                    // read 1 byte into tmp each iteration
+                    memcpy(&tmp, &rawData[*pos], 1);
+                    (*pos) += 1;
+
+                    // tmp contans data of k = 2i and k = 2i+1
+                    // write lower 4bits into k = 2i
+                    *(*desptr + 2*i) = tmp & 0x0F;
+                    // before write higher 4bits, we should check if 2i+1 is out of bound
+                    if (2*i+1 < k) {
+                        *(*desptr + 2*i+1) = (tmp & 0xF0) >> 4;
+                    }
+                }
             }
 
         } else {
@@ -1134,10 +1148,10 @@ void free_PLR(PLR* record) {
     free(record->GRP_RADX);
     int i;
     for (i=0; i<(record->GRP_CNT); i++) {
-        free(*(record->PGM_CHAR)+i);    // *(record->PGM_CHAR) points to char*
-        free(*(record->RTN_CHAR)+i);
-        free(*(record->PGM_CHAL)+i);
-        free(*(record->RTN_CHAL)+i);
+        free(*(record->PGM_CHAR+i));    // *(record->PGM_CHAR+i) points to the ith char*
+        free(*(record->RTN_CHAR+i));
+        free(*(record->PGM_CHAL+i));
+        free(*(record->RTN_CHAL+i));
     }
     free(record->PGM_CHAR);
     free(record->RTN_CHAR);

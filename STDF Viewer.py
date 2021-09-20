@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Tue Sep 21 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -35,7 +35,7 @@ from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.DatabaseFetcher import DatabaseFetcher
-from deps.cystdf import stdfParser, setByteSwap
+from deps.cystdf import stdf_MPR_Parser, stdf_PFTR_Parser, setByteSwap
 
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
@@ -145,8 +145,8 @@ def calculateCanvasIndex(_test_num: int, _head: int, _site: int, canvasIndexDict
 
 # convert from pixel coords to data coords
 toDCoord = lambda ax, point: ax.transData.inverted().transform(point)
-# check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass;
-isPass = lambda flag: True if flag & 0b11000000 == 0 else (False if flag & 0b01000000 == 0 else True)
+# check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass; treat negative flag (indicate not tested) as pass
+isPass = lambda flag: True if flag < 0 or flag & 0b11000000 == 0 else (False if flag & 0b01000000 == 0 else True)
 
 # dut flag parser
 def dut_flag_parser(flag: int) -> str:
@@ -169,6 +169,9 @@ def dut_flag_parser(flag: int) -> str:
 # test flag parser
 def test_flag_parser(flag: int) -> str:
     '''return detailed description of a test flag'''
+    # treat negative flag (indicate not tested) as pass
+    flag = 0 if flag < 0 else flag
+    
     flagString = f"{flag:>08b}"
     bitInfo = {7: "Bit7: Test failed",
                6: "Bit6: Test completed with no pass/fail indication",
@@ -355,7 +358,7 @@ class PlotCanvas(QtWidgets.QWidget):
 
 class MagCursor(object):
     '''A class includes interactive callbacks for matplotlib figures'''
-    def __init__(self, line, precision, mainGUI=None):
+    def __init__(self, line, precision, notation, mainGUI=None):
         self.pixRange = 20
         self.line = line
         self.ax = line.axes
@@ -377,10 +380,10 @@ class MagCursor(object):
         self.hint.set_visible(False)
         # mainGUI for show dut date table
         self.mainGUI = mainGUI
-        self.updatePrecision(precision)
+        self.updatePrecision(precision, notation)
             
-    def updatePrecision(self, precision):
-        self.valueFormat = "%%.%df" % precision
+    def updatePrecision(self, precision, notation):
+        self.valueFormat = "%%.%d%s" % (precision, notation)
         
     def copyBackground(self):
         self.marker.set_visible(False)
@@ -701,7 +704,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onAbout(self):
-        Version = "V3.0.5"
+        Version = "V3.1.0"
         msgBox = QtWidgets.QMessageBox(self)
         msgBox.setWindowTitle("About")
         msgBox.setTextFormat(QtCore.Qt.RichText)
@@ -821,12 +824,8 @@ class MyWindow(QtWidgets.QMainWindow):
             for test_num in selTestNums:
                 # get test value of selected DUTs
                 testDict = self.getData(test_num, selHeads, selSites)
-                
-                test_data_list = ["%d" % test_num,
-                                "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
-                                "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
-                                testDict["Unit"]]
-                test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
+                test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+                test_data_list.pop(0)   # remove test name
                 test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
                 test_flagInfo_list = [""] * vh_len + list(map(test_flag_parser, testDict["flagList"]))
                 
@@ -1244,6 +1243,41 @@ class MyWindow(QtWidgets.QMainWindow):
         self.onSelect()
     
     
+    def stringifyTestData(self, test_num: int, testDict: dict, valueFormat: str) -> list:
+        '''Stringify data for displaying and saving to reports'''
+        recHeader = testDict["recHeader"]
+        test_data_list = [testDict["TEST_NAME"], 
+                          "%d" % test_num,
+                          "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                          "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                          testDict["Unit"]]
+            
+        if recHeader == REC.FTR:
+            # FTR only contains test flag
+            test_data_list += ["Not Tested" if np.isnan(data) else "Test Flag: %d" % data for data in testDict["dataList"]]
+            
+        elif recHeader == REC.PTR:
+            test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
+            
+        else:
+            # MPR
+            if testDict["dataList"].size == 0:
+                # No PMR related and no test data in MPR, use test flag instead
+                test_data_list += ["Not Tested" if flag < 0 else "Test Flag: %d" % flag for flag in testDict["flagList"]]
+            else:
+                # Test data may exist, use semicolon to separate multiple test values
+                data_string_list = []
+                for mprDataList, mprFlag in zip(testDict["dataList"].T, testDict["flagList"]):
+                    if mprFlag < 0:
+                        # flag of not tested is -1
+                        data_string_list.append("Not Tested")
+                    else:
+                        data_string_list.append("\n".join(["%s: " % pinName + valueFormat % data for pinName, data in zip(testDict["PIN_NAME"], mprDataList)]))
+                test_data_list += data_string_list
+                
+        return test_data_list
+    
+    
     def isTestFail(self, test_num):        
         if test_num in self.failCntDict:
             # test synopsis for current test item contains valid fail count
@@ -1267,11 +1301,16 @@ class MyWindow(QtWidgets.QMainWindow):
             lengthL = testInfo["BinaryLen"]
             recHeader = testInfo["recHeader"]
             record_flag = testInfo["OPT_FLAG"]
-            result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR else 0
-            result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR else 0
-            result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR else 0
+            result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None else 0
+            result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None else 0
+            result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None else 0
             
-            parsedData = stdfParser(recHeader, offsetL, lengthL, self.std_handle)
+            if recHeader == REC.MPR:
+                pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
+                rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
+                parsedData = stdf_MPR_Parser(recHeader, pinCount, rsltCount, offsetL, lengthL, self.std_handle)
+            else:
+                parsedData = stdf_PFTR_Parser(recHeader, offsetL, lengthL, self.std_handle)
             
             if not failStateChecked:
                 for stat in map(isPass, parsedData["flagList"]):
@@ -1286,17 +1325,32 @@ class MyWindow(QtWidgets.QMainWindow):
                 for head in self.availableHeads:
                     for site in self.availableSites:
                         selMask = self.getMaskFromHeadsSites([head], [site])
-                        datalist = parsedData["dataList"][selMask]
+                        
+                        if recHeader == REC.MPR:
+                            # MPR's datalist can be empty or a 2d array
+                            # for 2d array, selMask is for masking columns, transpose is required.
+                            datalist = ((parsedData["dataList"].T)[selMask]).T
+                            datalist = datalist * 10 ** result_scale
+                        
+                        elif recHeader == REC.PTR:
+                            # PTR, manually increase the dimension to 2d array to match MPR
+                            datalist = [parsedData["dataList"][selMask] * 10 ** result_scale]
+                            
+                        else:
+                            # FTR
+                            datalist = [parsedData["dataList"][selMask]]
         
-                        datalist = datalist if recHeader == REC.FTR else datalist * 10 ** result_scale
                         LL = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
                         HL = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
                         
-                        _, _, cpk = calc_cpk(LL, HL, datalist)
-                        if not np.isnan(cpk):
-                            # check cpk only if it's valid
-                            if cpk < self.settingParams.cpkThreshold:
-                                return "cpkFailed"
+                        for sublist in datalist:
+                            # For PTR and FTR, sublist IS the original datalist
+                            # For MPR, sublists are the data of each pin or pin group
+                            _, _, cpk = calc_cpk(LL, HL, sublist)
+                            if not np.isnan(cpk):
+                                # check cpk only if it's valid
+                                if cpk < self.settingParams.cpkThreshold:
+                                    return "cpkFailed"
             
             return "testPassed"
         
@@ -1309,39 +1363,47 @@ class MyWindow(QtWidgets.QMainWindow):
             qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.BackgroundRole)
                         
                        
+    def getDataFromOffsets(self, testInfo:dict) -> dict:
+        sel_offset = testInfo.pop("Offset")
+        sel_length = testInfo.pop("BinaryLen")
+        recHeader = testInfo["recHeader"]
+        # parse data on-the-fly
+        if recHeader == REC.MPR:
+            pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
+            rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
+            testDict = stdf_MPR_Parser(recHeader, pinCount, rsltCount, sel_offset, sel_length, self.std_handle)
+            pinNameList = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], "RTN")["LOG_NAM"]
+            testDict["PIN_NAME"] = pinNameList
+        else:
+            testDict = stdf_PFTR_Parser(recHeader, sel_offset, sel_length, self.std_handle)
+        
+        record_flag = testInfo["OPT_FLAG"]
+        result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None else 0
+        result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None else 0
+        result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None else 0
+        result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
+        
+        testDict["recHeader"] = recHeader
+        testDict["TEST_NAME"] = testInfo["TEST_NAME"]
+        testDict["dataList"] = np.array(testDict["dataList"], dtype="float")
+        testDict["flagList"] = np.array(testDict["flagList"], dtype=int)
+                
+        testDict["dataList"] = testDict["dataList"] if recHeader == REC.FTR else testDict["dataList"] * 10 ** result_scale
+        testDict["LL"] = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
+        testDict["HL"] = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
+        testDict["Unit"] = "" if recHeader == REC.FTR else unit_prefix.get(result_scale, "") + result_unit
+        
+        return testDict
+    
+    
     def getTestValueOfDUTs(self, selDUTs: list, test_num: int) -> tuple:
         # read data of test num
         testInfo = self.DatabaseFetcher.getTestInfo_selDUTs(test_num, selDUTs)
-        sel_offset = testInfo.pop("Offset")
-        sel_length = testInfo.pop("BinaryLen")
-        
-        recHeader = testInfo["recHeader"]
-        # parse data on-the-fly
-        testDict = stdfParser(recHeader, sel_offset, sel_length, self.std_handle)
-        # Add new keys
-        testInfo["dataList"] = np.array(testDict["dataList"], dtype="float64")
-        testInfo["flagList"] = np.array(testDict["flagList"], dtype=int)
-        
-        record_flag = testInfo["OPT_FLAG"]
-        result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR else 0
-        result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR else 0
-        result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR else 0
-        result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
-        
-        testInfo["dataList"] = testInfo["dataList"] if recHeader == REC.FTR else testInfo["dataList"] * 10 ** result_scale
-        testInfo["LL"] = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
-        testInfo["HL"] = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
-        testInfo["Unit"] = "" if recHeader == REC.FTR else unit_prefix.get(result_scale, "") + result_unit
-        
+        testDict = self.getDataFromOffsets(testInfo)
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-        test_info_header = [testInfo["TEST_NAME"],
-                            "%d" % test_num,
-                            "N/A" if testInfo["HL"] is None else valueFormat % testInfo["HL"],
-                            "N/A" if testInfo["LL"] is None else valueFormat % testInfo["LL"],
-                            testInfo["Unit"]]
-        test_data_list = test_info_header + ["Not Tested" if np.isnan(data) else valueFormat % data for data in testInfo["dataList"]]
-        test_stat_list = [True] * len(test_info_header) + list(map(isPass, testInfo["flagList"]))
-        test_flagInfo_list = [""] * len(test_info_header) + list(map(test_flag_parser, testInfo["flagList"]))
+        test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+        test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))
+        test_flagInfo_list = [""] * 5 + list(map(test_flag_parser, testDict["flagList"]))
         
         return (test_data_list, test_stat_list, test_flagInfo_list)
     
@@ -1359,27 +1421,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             # read the newly selected test num
             testInfo = self.DatabaseFetcher.getTestInfo_AllDUTs(test_num)
-            offsetL = testInfo.pop("Offset")
-            lengthL = testInfo.pop("BinaryLen")
-            recHeader = testInfo["recHeader"]
-            # parse data on-the-fly
-            testDict = stdfParser(recHeader, offsetL, lengthL, self.std_handle)
-            # Add new keys
-            testInfo["dataList"] = np.array(testDict["dataList"], dtype="float64")
-            testInfo["flagList"] = np.array(testDict["flagList"], dtype=int)
-            
-            record_flag = testInfo["OPT_FLAG"]
-            result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR else 0
-            result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR else 0
-            result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR else 0
-            result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
-            
-            testInfo["dataList"] = testInfo["dataList"] if recHeader == REC.FTR else testInfo["dataList"] * 10 ** result_scale
-            testInfo["LL"] = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
-            testInfo["HL"] = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
-            testInfo["Unit"] = "" if recHeader == REC.FTR else unit_prefix.get(result_scale, "") + result_unit
-            
-            self.selData[test_num] = testInfo
+            self.selData[test_num] = self.getDataFromOffsets(testInfo)
             
             
     def getData(self, test_num, selectHeads, selectSites):
@@ -1388,6 +1430,8 @@ class MyWindow(QtWidgets.QMainWindow):
         
         outData = {}
         selMask = self.getMaskFromHeadsSites(selectHeads, selectSites)
+        recHeader = self.selData[test_num]["recHeader"]
+        outData["recHeader"] = recHeader
         outData["TEST_NAME"] = self.selData[test_num]["TEST_NAME"]
         outData["TEST_NUM"] = test_num
         outData["LL"] = self.selData[test_num]["LL"]
@@ -1395,11 +1439,25 @@ class MyWindow(QtWidgets.QMainWindow):
         outData["Unit"] = self.selData[test_num]["Unit"]
         outData["DUTIndex"] = self.dutArray[selMask]
         outData["flagList"] = self.selData[test_num]["flagList"][selMask]
-        outData["dataList"] = self.selData[test_num]["dataList"][selMask]
-        outData["Min"] = np.nanmin(outData["dataList"])
-        outData["Max"] = np.nanmax(outData["dataList"])
-        outData["Median"] = np.nanmedian(outData["dataList"])
-        outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LL"], outData["HL"], outData["dataList"])
+        
+        if recHeader == REC.MPR:
+            outData["PIN_NAME"] = self.selData[test_num]["PIN_NAME"]
+            outData["dataList"] = ((self.selData[test_num]["dataList"].T)[selMask]).T
+            # get statistics of each pin
+            outData["Min"] = np.nanmin(outData["dataList"], axis=1)
+            outData["Max"] = np.nanmax(outData["dataList"], axis=1)
+            outData["Median"] = np.nanmedian(outData["dataList"], axis=1)
+
+            tmpContainer = []
+            for pinDataList in outData["dataList"]:
+                tmpContainer.append(calc_cpk(outData["LL"], outData["HL"], pinDataList))
+            outData["Mean"], outData["SDev"], outData["Cpk"] = np.array(tmpContainer).T
+        else:
+            outData["dataList"] = self.selData[test_num]["dataList"][selMask]
+            outData["Min"] = np.nanmin(outData["dataList"])
+            outData["Max"] = np.nanmax(outData["dataList"])
+            outData["Median"] = np.nanmedian(outData["dataList"])
+            outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LL"], outData["HL"], outData["dataList"])
         return outData
                 
                 
@@ -1525,18 +1583,36 @@ class MyWindow(QtWidgets.QMainWindow):
             # return data for statistic table
             testDict = self.getData(test_num, [head], [site])
             if testDict:
+                if testDict["recHeader"] == REC.MPR:
+                    pinNameList = testDict["PIN_NAME"]
+                    CpkString = "\n".join(["%s: " % pinName + "%s" % "∞" if cpkPerPin == np.inf else ("N/A" if np.isnan(cpkPerPin) else valueFormat % cpkPerPin)\
+                        for pinName, cpkPerPin in zip(pinNameList, testDict["Cpk"])])
+                    MeanString = "\n".join(["%s: " % pinName + valueFormat % avgPerPin for pinName, avgPerPin in zip(pinNameList, testDict["Mean"])])
+                    MedianString = "\n".join(["%s: " % pinName + valueFormat % medPerPin for pinName, medPerPin in zip(pinNameList, testDict["Median"])])
+                    SDevString = "\n".join(["%s: " % pinName + valueFormat % sdevPerPin for pinName, sdevPerPin in zip(pinNameList, testDict["SDev"])])
+                    MinString = "\n".join(["%s: " % pinName + valueFormat % minPerPin for pinName, minPerPin in zip(pinNameList, testDict["Min"])])
+                    MaxString = "\n".join(["%s: " % pinName + valueFormat % maxPerPin for pinName, maxPerPin in zip(pinNameList, testDict["Max"])])
+                
+                else:
+                    CpkString = "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"])
+                    MeanString = valueFormat % testDict["Mean"]
+                    MedianString = valueFormat % testDict["Median"]
+                    SDevString = valueFormat % testDict["SDev"]
+                    MinString = valueFormat % testDict["Min"]
+                    MaxString = valueFormat % testDict["Max"]
+                
                 rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                         testDict["TEST_NAME"],
                         testDict["Unit"],
                         "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
                         "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
                         "%d" % list(map(isPass, testDict["flagList"])).count(False),
-                        "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"]),
-                        valueFormat % testDict["Mean"],
-                        valueFormat % testDict["Median"],
-                        valueFormat % testDict["SDev"],
-                        valueFormat % testDict["Min"],
-                        valueFormat % testDict["Max"]]
+                        CpkString,
+                        MeanString,
+                        MedianString,
+                        SDevString,
+                        MinString,
+                        MaxString]
             else:
                 # some weird files might in this case, in which the number of 
                 # test items in different sites are not the same
@@ -1612,15 +1688,8 @@ class MyWindow(QtWidgets.QMainWindow):
             test_num = kargs["test_num"]
             # get test value of selected DUTs
             testDict = self.getData(test_num, selHeads, selSites)
-            
-            test_data_list = [testDict["TEST_NAME"],
-                              "%d" % test_num,
-                              "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
-                              "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
-                              testDict["Unit"]]
-            vh_len = len(test_data_list)
-            test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
-            test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
+            test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+            test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
             result = [test_data_list, test_stat_list]
         
         elif "test_num" not in kargs:
@@ -1705,9 +1774,19 @@ class MyWindow(QtWidgets.QMainWindow):
                                         qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                                 elif index == indexOfCpk:
                                     if item != "N/A" and item != "∞":
-                                        if float(item) < self.settingParams.cpkThreshold:
-                                            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                            qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                                        try:
+                                            if float(item) < self.settingParams.cpkThreshold:
+                                                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                                qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                                        except ValueError:
+                                            # cpk of MPR has the format of pin: value\n...
+                                            cpkList = [ele.split(": ")[-1] for ele in item.split("\n")]
+                                            for cpkString in cpkList:
+                                                if cpkString != "N/A" and cpkString != "∞":
+                                                    if float(item) < self.settingParams.cpkThreshold:
+                                                        qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                                        qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                                                        break
                                 qitemList.append(qitem)
                             self.tmodel.appendRow(qitemList)
                         
@@ -1773,292 +1852,25 @@ class MyWindow(QtWidgets.QMainWindow):
             self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
-    def genPlot(self, head, site, test_num, tabType, **kargs):
+    def genPlot(self, head:int, site:int, test_num:int, tabType:tab, **kargs):
         exportImg: bool = ("exportImg" in kargs) and (kargs["exportImg"] == True)
-        dataInvalid = False     # for trend & histo chart
         # create fig & canvas
-        figsize = (7.5, 8) if tabType == tab.Wafer else (10, 4)
+        figsize = (10, 4)
         fig = plt.Figure(figsize=figsize)
         fig.set_tight_layout(True)
                 
         if tabType == tab.Trend:   # Trend
-            selData = self.getData(test_num, [head], [site])
-            ax = fig.add_subplot(111)
-            ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
-            y_raw = selData["dataList"]
-            dataInvalid = np.all(np.isnan(y_raw))
-
-            if dataInvalid:
-                # show a warning text in figure
-                ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-            else:
-                # select not nan value
-                x_arr = self.dutArray[self.getMaskFromHeadsSites([head], [site])][~np.isnan(y_raw)]
-                y_arr = y_raw[~np.isnan(y_raw)]
-                HL = selData["HL"]
-                LL = selData["LL"]
-                med = selData["Median"]
-                avg = selData["Mean"]
-                # plot            
-                trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
-                # axes label
-                ax.ticklabel_format(useOffset=False)    # prevent + sign
-                ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
-                ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma")
-                ax.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
-                # limits
-                if len(x_arr) == 1:
-                    ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
-                else:
-                    ax.set_xlim(left = x_arr[0] - (x_arr[-1]-x_arr[0]) * 0.05)
-                data_max = max(selData["Max"], HL) if HL != None else selData["Max"]
-                data_min = min(selData["Min"], LL) if LL != None else selData["Min"]
-                dataDelta = data_max - data_min
-                
-                headroomY = 5 if dataDelta == 0 else dataDelta * 0.1
-                ax.set_ylim((data_min-headroomY, data_max+headroomY))
-
-                # blended transformation
-                transXaYd = matplotlib.transforms.blended_transform_factory(ax.transAxes, ax.transData)
-                # HL/LL lines
-                if self.settingParams.showHL_trend: 
-                    if HL != None: 
-                        ax.axhline(y = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-                        ax.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-                if self.settingParams.showLL_trend:
-                    if LL != None: 
-                        ax.axhline(y = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
-                        ax.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-                # add med and avg text at the right edge of the plot
-                m_obj = None
-                a_obj = None
-                if self.settingParams.showMed_trend:
-                    med_text = ("$x̃ = %.3f $\n" if med > avg else "\n$x̃ = %.3f $") % med
-                    m_obj = ax.text(x=0.99, y=med, s=med_text, color='k', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-                    ax.axhline(y = med, linewidth=1, color='k', zorder = 1, label="Median")
-                if self.settingParams.showMean_trend:
-                    avg_text = ("\n$x̅ = %.3f $" if med > avg else "$x̅ = %.3f $\n") % avg
-                    a_obj = ax.text(x=0.99, y=avg, s=avg_text, color='orange', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-                    ax.axhline(y = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
-                    
-                if self.settingParams.showMed_trend or self.settingParams.showMean_trend:
-                    if len(x_arr) != 1:
-                        # get the length of median text in axes coords
-                        text_object = m_obj if m_obj else a_obj     # get the non-None text object
-                        if self.textRender is None:
-                            self.textRender = RendererAgg(*fig.get_size_inches(), fig.dpi)
-                        bb_pixel = text_object.get_window_extent(renderer=self.textRender)
-                        text_leftEdge_Axes = ax.transAxes.inverted().transform(bb_pixel)[0][0]
-                        # extend x limit to avoid data point overlapped with the text
-                        rightLimit = (x_arr[-1] + 2) * 1 / text_leftEdge_Axes
-                        ax.set_xlim(right = rightLimit)
-        
+            ax, trendLine = self.genTrendPlot(fig, head, site, test_num)
+            
         elif tabType == tab.Histo:   # Histogram
-            selData = self.getData(test_num, [head], [site])
-            ax = fig.add_subplot(111)
-            ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
-            dataInvalid = np.all(np.isnan(selData["dataList"]))
-
-            if dataInvalid:
-                # show a warning text in figure
-                ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-            else:
-                dataList = selData["dataList"][~np.isnan(selData["dataList"])]
-                HL = selData["HL"]
-                LL = selData["LL"]
-                med = selData["Median"]
-                avg = selData["Mean"]
-                sd = selData["SDev"]
-                bin_num = self.settingParams.binCount
-                # note: len(bin_edges) = len(hist) + 1
-                # we use a filter to remove the data that's beyond 9 sigma
-                # otherwise we cannot to see the detailed distribution of the main data set
-                filteredDataList = dataList[np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))]
-                hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
-                bin_width = bin_edges[1]-bin_edges[0]
-                # use bar to draw histogram, only for its "align" option 
-                ax.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label="Histo Chart")
-                # draw boxplot
-                if self.settingParams.showBoxp_histo:
-                    ax_box = ax.twinx()
-                    ax_box.axis('off')  # hide axis and tick for boxplot
-                    ax_box.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.5, patch_artist=True,
-                                boxprops=dict(color='b', facecolor=(1, 1, 1, 0)),
-                                capprops=dict(color='b'),
-                                whiskerprops=dict(color='b'))
-                # ax.hist(dataList, bins="auto", facecolor="green", zorder = 0)
-                if self.settingParams.showHL_histo:
-                    if HL != None: 
-                        ax.axvline(x = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-                if self.settingParams.showLL_histo:
-                    if LL != None: 
-                        ax.axvline(x = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
-
-                # set xlimit and draw fitting curve only when standard deviation is not 0
-                if sd != 0:
-                    if self.settingParams.showGaus_histo:
-                        # gauss fitting
-                        g_x = np.linspace(avg - sd * 10, avg + sd * 10, 1000)
-                        g_y = max(hist) * np.exp( -0.5 * (g_x - avg)**2 / sd**2 )
-                        ax.plot(g_x, g_y, "r--", label="Normalized Gauss Curve")
-                    # set x limit
-                    if bin_edges[0] > avg - sd * 10:
-                        ax.set_xlim(left=avg - sd * 10)
-                    if bin_edges[-1] < avg + sd * 10:
-                        ax.set_xlim(right=avg + sd * 10)
-                ax.set_ylim(top=max(hist)*1.1)
-                    
-                # blended transformation
-                transXdYa = matplotlib.transforms.blended_transform_factory(ax.transData, ax.transAxes)
-                # vertical lines for n * σ
-                sigmaList = [int(i) for i in self.settingParams.showSigma.split(",")]
-                for n in sigmaList:
-                    position_pos = avg + sd * n
-                    position_neg = avg - sd * n
-                    ax.axvline(x = position_pos, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="%dσ"%n)
-                    ax.axvline(x = position_neg, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="-%dσ"%n)
-                    ax.text(x = position_pos, y = 0.99, s="%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
-                    ax.text(x = position_neg, y = 0.99, s="-%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
-                # med avg text labels / lines
-                med_text = ("\n $x̃ = %.3f $") % med
-                avg_text = ("\n $x̅ = %.3f $") % avg
-                if self.settingParams.showMed_histo:
-                    ax.text(x=med, y=1, s=med_text, color='k', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left" if med>avg else "right", va="center", transform=transXdYa)
-                    ax.axvline(x = med, linewidth=1, color='black', zorder = 1, label="Median")
-                if self.settingParams.showMean_histo:
-                    ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
-                    ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
-                ax.ticklabel_format(useOffset=False)    # prevent + sign
-                ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
-                ax.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
+            ax = self.genHistoPlot(fig, head, site, test_num)
             
         elif tabType == tab.Bin:   # Bin Chart
-            fig.suptitle("%s - %s - %s"%("Bin Summary", "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
-            ax_l = fig.add_subplot(121)
-            ax_r = fig.add_subplot(122)
-            Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
-            # HBIN plot
-            binStats = self.DatabaseFetcher.getBinStats(head, site, "HBIN")
-            HList = [BIN for BIN in sorted(binStats.keys())]
-            HCnt = [binStats[BIN] for BIN in HList]
-            HLable = []
-            HColor = []
-            for ind, i in enumerate(HList):
-                HLable.append(self.HBIN_dict[i]["BIN_NAME"])
-                HColor.append(self.settingParams.hbinColor[i])
-                ax_l.text(x=ind, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
-                
-            ax_l.bar(np.arange(len(HCnt)), HCnt, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary")
-            ax_l.set_xticks(np.arange(len(HCnt)))
-            ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)))    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
-            ax_l.set_xlim(-.5, max(3, len(HCnt))-.5)
-            ax_l.set_ylim(top=max(HCnt)*1.2)
-            ax_l.set_xlabel("Hardware Bin", fontsize=12, fontname="Tahoma")
-            ax_l.set_ylabel("Hardware Bin Counts", fontsize=12, fontname="Tahoma")
-
-            # SBIN plot
-            binStats = self.DatabaseFetcher.getBinStats(head, site, "SBIN")
-            SList = [BIN for BIN in sorted(binStats.keys())]
-            SCnt = [binStats[BIN] for BIN in SList]
-            SLable = []
-            SColor = []
-            for ind, i in enumerate(SList):
-                SLable.append(self.SBIN_dict[i]["BIN_NAME"])
-                SColor.append(self.settingParams.sbinColor[i])
-                ax_r.text(x=ind, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
-                
-            ax_r.bar(np.arange(len(SCnt)), SCnt, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary")
-            ax_r.set_xticks(np.arange(len(SCnt)))
-            ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)))
-            ax_r.set_xlim(-.5, max(3, len(SCnt))-.5)
-            ax_r.set_ylim(top=max(SCnt)*1.2)
-            ax_r.set_xlabel("Software Bin", fontsize=12, fontname="Tahoma")
-            ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
+            self.genBinPlot(fig, head, site)
             
         elif tabType == tab.Wafer:   # Wafermap
-            fig.set_tight_layout(False)
-            ax = fig.add_subplot(111, aspect=1)
-            # set limits
-            waferBounds = self.DatabaseFetcher.getWaferBounds()
-            xmin = waferBounds["xmin"]
-            ymin = waferBounds["ymin"]
-            xmax = waferBounds["xmax"]
-            ymax = waferBounds["ymax"]            
-            ax.set_xlim(xmin-1, xmax+1)
-            ax.set_ylim(ymin-1, ymax+1)
-            # scaling xy coords to be a square
-            ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')            
-            # dynamic label size
-            Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
-            labelsize = Tsize(max(xmax-xmin, ymax-ymin))
-                        
-            if test_num == -1:
-                # -1 indicates stacked wafer map
-                ax.set_title("Stacked Wafer Map - %s - %s"%("Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
-                failDieDistribution = self.DatabaseFetcher.getStackedWaferData(head, site)
-                x_mesh = np.arange(xmin-0.5, xmax+1, 1)     # xmin-0.5, xmin+0.5, ..., xmax+0.5
-                y_mesh = np.arange(ymin-0.5, ymax+1, 1)
-                # initialize a full -1 2darray
-                failCount_meash = np.full((len(x_mesh)-1, len(y_mesh)-1), -1)
-                # fill the count into 2darray
-                for (xcoord, ycoord), count in failDieDistribution.items():
-                    failCount_meash[xcoord-xmin, ycoord-ymin] = count
-                # x is row and y is col, whereas in xycoords, x should be col and y should be row
-                failCount_meash = failCount_meash.transpose()
-                # get a colormap segment
-                cmap_seg = matplotlib.colors.LinearSegmentedColormap.from_list("seg", plt.get_cmap("nipy_spectral")(np.linspace(0.55, 0.9, 128)))
-                # draw color mesh, replace all -1 to NaN to hide rec with no value
-                pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg)
-                # create a new axis for colorbar
-                ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
-                cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
-                cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
-                cbar.set_label("Total failed dies")
-                # ax_colorbar = fig.add_axes([ax.get_position().x1+0.03, ax.get_position().y0, 0.02, ax.get_position().height])
-                # cbar = fig.colorbar(pcmesh, cax=ax_colorbar)
-                # cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
-                # cbar.set_label("Total failed dies", rotation=270, va="bottom")
-                
-            else:
-                waferDict = self.waferInfoDict[test_num]
-                ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
-                # group coords by soft bin
-                coordsDict = self.DatabaseFetcher.getWaferCoordsDict(test_num, head, site)
-                dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
-                legendHandles = []
-                # draw recs for each SBIN
-                for sbin in sorted(coordsDict.keys()):
-                    sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
-                    sbinCnt = len(coordsDict[sbin])
-                    percent = 100 * sbinCnt / dutCnt
-                    label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
-                    rects = []
-                    # skip dut with invalid coords
-                    for (x, y) in coordsDict[sbin]:
-                        rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
-                    pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100)
-                    ax.add_collection(pc)
-                    proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
-                    legendHandles.append(proxyArtist)
-                # legend
-                ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            ax = self.genWaferPlot(fig, head, site, test_num)
             
-            # set ticks & draw coord lines
-            ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
-            ax.yaxis.set_major_locator(ticker.MultipleLocator(5))            
-            ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
-            # Turn spines off and create white grid.
-            for edge, spine in ax.spines.items():
-                spine.set_visible(False)
-            ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
-            ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
-            ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
-            # switch x, y positive direction if WCR specified the orientation.
-            if self.fileInfoDict.get("POS_X", "") == "L":   # x towards left
-                ax.invert_xaxis()
-            if self.fileInfoDict.get("POS_Y", "") == "D":   # y towards down
-                ax.invert_yaxis()
-                    
         if exportImg:
             imgData = io.BytesIO()
             fig.savefig(imgData, format="png", dpi=fig.dpi, bbox_inches="tight")
@@ -2080,10 +1892,13 @@ class MyWindow(QtWidgets.QMainWindow):
                 index = kargs["insertIndex"]
                 qfigLayout.insertWidget(index, canvas)
                 
-            if tabType == tab.Trend and not dataInvalid:
+            if tabType == tab.Trend and (trendLine is not None):
                 # connect magnet cursor
                 cursorKey = "%d_%d_%d"%(head, test_num, site)
-                self.cursorDict[cursorKey] = MagCursor(trendLine, self.settingParams.dataPrecision, mainGUI=self)
+                self.cursorDict[cursorKey] = MagCursor(trendLine, 
+                                                       self.settingParams.dataPrecision, 
+                                                       self.settingParams.dataNotation, 
+                                                       mainGUI=self)
                 canvas.mpl_connect('motion_notify_event', self.cursorDict[cursorKey].mouse_move)
                 canvas.mpl_connect('resize_event', self.cursorDict[cursorKey].canvas_resize)
                 canvas.mpl_connect('pick_event', self.cursorDict[cursorKey].on_pick)
@@ -2095,9 +1910,459 @@ class MyWindow(QtWidgets.QMainWindow):
                 # self.cursorDict[cursorKey].copyBackground()   # not required, as updating the tab will trigger canvas resize event
             
             
+    def genTrendPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
+        selData = self.getData(test_num, [head], [site])
+        ax = fig.add_subplot(111)
+        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        y_raw = selData["dataList"]
+        dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
+        dataInvalid = np.all(np.isnan(y_raw))
+        testInvalid = np.all(selData["flagList"] < 0)
+
+        if dataInvalid and testInvalid:
+            # show a warning text in figure
+            ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            trendLine = None
+        else:
+            if selData["recHeader"] == REC.MPR:
+                if dataInvalid:
+                    # MPR contains only test flag but no data, replace y_raw with test flags
+                    y_raw = selData["flagList"]
+                    # replace -1 (invalid test flag) with nan
+                    y_raw[y_raw < 0] = np.nan
+                else:
+                    # MPR with multiple data
+                    HL = selData["HL"]
+                    LL = selData["LL"]
+                    pinList = selData["PIN_NAME"]
+                    pinCount = len(pinList)
+                    # remove gaps between subplots
+                    fig.set_tight_layout(False)
+                    fig.subplots_adjust(hspace=0)
+                    # resize fig size according to pin#
+                    if pinCount > 2:
+                        fig.set_size_inches(10, 1.5 * pinCount)
+                    # iterate data of each pin
+                    for index, pinName, pinData in zip(range(pinCount), pinList, y_raw):
+                        # select not nan value
+                        x_arr = dutListFromSiteHead[~np.isnan(pinData)]
+                        y_arr = pinData[~np.isnan(pinData)]
+                        tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
+                        trendLine, = tmpAx.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label=pinName)
+                        # HL/LL lines
+                        transXaYd = matplotlib.transforms.blended_transform_factory(tmpAx.transAxes, tmpAx.transData)
+                        if self.settingParams.showHL_trend: 
+                            if HL != None: 
+                                tmpAx.axhline(y = HL, linewidth=2, color='r', zorder = -10, label="Upper Limit")
+                                tmpAx.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                        if self.settingParams.showLL_trend:
+                            if LL != None: 
+                                tmpAx.axhline(y = LL, linewidth=2, color='b', zorder = -10, label="Lower Limit")
+                                tmpAx.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                        # y limits
+                        data_max = max(selData["Max"][index], HL) if HL != None else selData["Max"][index]
+                        data_min = min(selData["Min"][index], LL) if LL != None else selData["Min"][index]
+                        dataDelta = data_max - data_min
+                        headroomY = 5 if dataDelta == 0 else dataDelta * 0.2
+                        tmpAx.set_ylim((data_min-headroomY, data_max+headroomY))
+                        
+                        # add pin name at the right side of plots
+                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
+                        if index == int(pinCount/2):
+                            # middle plot, use ax will cause overlapping
+                            tmpAx.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
+                        if index != pinCount-1:
+                            tmpAx.xaxis.set_visible(False)                            
+                            
+                    # x limits
+                    if len(x_arr) == 1:
+                        ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
+                    else:
+                        headroomX = (x_arr[-1]-x_arr[0]) * 0.1
+                        ax.set_xlim(left = x_arr[0] - headroomX, right = x_arr[-1] + headroomX)
+                    ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
+                    ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma", labelpad=6)
+                    ax.set_yticklabels([])
+                    ax.yaxis.set_ticks_position('none')
+                    return ax, trendLine
+            
+            # default drawing code for PTR, FTR and "MPR without data"
+            # select not nan value
+            x_arr = dutListFromSiteHead[~np.isnan(y_raw)]
+            y_arr = y_raw[~np.isnan(y_raw)]
+            HL = selData["HL"]
+            LL = selData["LL"]
+            med = selData["Median"]
+            avg = selData["Mean"]
+            # plot            
+            trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
+            # axes label
+            ax.ticklabel_format(useOffset=False)    # prevent + sign
+            ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
+            ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma")
+            if selData["recHeader"] == REC.FTR:
+                ax.set_ylabel("Test Flag", fontsize=12, fontname="Tahoma")
+            else:
+                ax.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
+            # limits
+            if len(x_arr) == 1:
+                ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
+            else:
+                headroomX = (x_arr[-1]-x_arr[0]) * 0.05
+                ax.set_xlim(left = x_arr[0] - headroomX, right = x_arr[-1] + headroomX)
+            data_max = max(selData["Max"], HL) if HL != None else selData["Max"]
+            data_min = min(selData["Min"], LL) if LL != None else selData["Min"]
+            dataDelta = data_max - data_min
+            
+            headroomY = 5 if dataDelta == 0 else dataDelta * 0.15
+            ax.set_ylim((data_min-headroomY, data_max+headroomY))
+
+            # blended transformation
+            transXaYd = matplotlib.transforms.blended_transform_factory(ax.transAxes, ax.transData)
+            # HL/LL lines
+            if self.settingParams.showHL_trend: 
+                if HL != None: 
+                    ax.axhline(y = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
+                    ax.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+            if self.settingParams.showLL_trend:
+                if LL != None: 
+                    ax.axhline(y = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
+                    ax.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+            # add med and avg text at the right edge of the plot
+            m_obj = None
+            a_obj = None
+            if self.settingParams.showMed_trend:
+                med_text = ("$x̃ = %.3f $\n" if med > avg else "\n$x̃ = %.3f $") % med
+                m_obj = ax.text(x=0.99, y=med, s=med_text, color='k', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                ax.axhline(y = med, linewidth=1, color='k', zorder = 1, label="Median")
+            if self.settingParams.showMean_trend:
+                avg_text = ("\n$x̅ = %.3f $" if med > avg else "$x̅ = %.3f $\n") % avg
+                a_obj = ax.text(x=0.99, y=avg, s=avg_text, color='orange', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                ax.axhline(y = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
+                
+            if self.settingParams.showMed_trend or self.settingParams.showMean_trend:
+                if len(x_arr) != 1:
+                    # get the length of median text in axes coords
+                    text_object = m_obj if m_obj else a_obj     # get the non-None text object
+                    if self.textRender is None:
+                        self.textRender = RendererAgg(*fig.get_size_inches(), fig.dpi)
+                    bb_pixel = text_object.get_window_extent(renderer=self.textRender)
+                    text_leftEdge_Axes = ax.transAxes.inverted().transform(bb_pixel)[0][0]
+                    # extend x limit to avoid data point overlapped with the text
+                    rightLimit = (x_arr[-1] + 2) * 1 / text_leftEdge_Axes
+                    ax.set_xlim(right = rightLimit)
+                    
+        # for cursor binding
+        return ax, trendLine
+    
+    
+    def genHistoPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
+        selData = self.getData(test_num, [head], [site])
+        ax = fig.add_subplot(111)
+        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        y_raw = selData["dataList"]
+        dataInvalid = np.all(np.isnan(selData["dataList"]))
+        testInvalid = np.all(selData["flagList"] < 0)
+
+        if dataInvalid and testInvalid:
+            # show a warning text in figure
+            ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+        else:
+            if selData["recHeader"] == REC.MPR:
+                if dataInvalid:
+                    # MPR contains only test flag but no data, replace y_raw with test flags
+                    y_raw = selData["flagList"]
+                    # replace -1 (invalid test flag) with nan
+                    y_raw[y_raw < 0] = np.nan
+                else:
+                    # MPR with multiple data
+                    HL = selData["HL"]
+                    LL = selData["LL"]
+                    bin_num = self.settingParams.binCount
+                    pinList = selData["PIN_NAME"]
+                    pinCount = len(pinList)
+                    # remove gaps between subplots
+                    fig.set_tight_layout(False)
+                    fig.subplots_adjust(hspace=0)
+                    # resize fig size according to pin#
+                    if pinCount > 2:
+                        fig.set_size_inches(10, 1.5 * pinCount)
+                    # iterate data of each pin
+                    for index, pinName, pinData in zip(range(pinCount), pinList, y_raw):
+                        # med = selData["Median"][index]
+                        avg = selData["Mean"][index]
+                        sd = selData["SDev"][index]
+                        # select not nan value
+                        dataList = pinData[~np.isnan(pinData)]
+                        tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
+                        filteredDataList = dataList[np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))]
+                        hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
+                        bin_width = bin_edges[1]-bin_edges[0]
+                        # use bar to draw histogram, only for its "align" option 
+                        tmpAx.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label=pinName)
+                        # add pin name at the right side of plots
+                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
+                        # draw boxplot
+                        if self.settingParams.showBoxp_histo:
+                            ax_box = tmpAx.twinx()
+                            ax_box.axis('off')  # hide axis and tick for boxplot
+                            ax_box.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.5, patch_artist=True,
+                                        boxprops=dict(color='b', facecolor=(1, 1, 1, 0)),
+                                        capprops=dict(color='b'),
+                                        whiskerprops=dict(color='b'))
+                        # draw LL HL
+                        if self.settingParams.showHL_histo:
+                            if HL != None: 
+                                tmpAx.axvline(x = HL, linewidth=3, color='r', zorder = 10, label="Upper Limit")
+                        if self.settingParams.showLL_histo:
+                            if LL != None: 
+                                tmpAx.axvline(x = LL, linewidth=3, color='b', zorder = 10, label="Lower Limit")
+
+                        # draw fitting curve only when standard deviation is not 0
+                        if sd != 0:
+                            if self.settingParams.showGaus_histo:
+                                # gauss fitting
+                                g_x = np.linspace(avg - sd * 10, avg + sd * 10, 1000)
+                                g_y = max(hist) * np.exp( -0.5 * (g_x - avg)**2 / sd**2 )
+                                tmpAx.plot(g_x, g_y, "r--", label="Normalized Gauss Curve")
+                        tmpAx.set_ylim(top=max(hist)*1.2)
+                        tmpAx.yaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
+                        
+                        if index == int(pinCount/2):
+                            # middle plot, use ax will cause overlapping
+                            tmpAx.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
+                        if index != pinCount-1:
+                            tmpAx.xaxis.set_visible(False)
+                    
+                    # set x limit on common axis (ax)
+                    if sd != 0:
+                        if bin_edges[0] > avg - sd * 10:
+                            ax.set_xlim(left=avg - sd * 10)
+                        if bin_edges[-1] < avg + sd * 10:
+                            ax.set_xlim(right=avg + sd * 10)
+                    else:
+                        if avg == 0:
+                            ax.set_xlim(-1, 1)
+                        else:
+                            ax.set_xlim(avg*0.5, avg*1.5)
+                        
+                    ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma", labelpad=6)
+                    ax.set_yticklabels([])
+                    ax.yaxis.set_ticks_position('none')
+                    return ax
+            
+            dataList = y_raw[~np.isnan(y_raw)]
+            HL = selData["HL"]
+            LL = selData["LL"]
+            med = selData["Median"]
+            avg = selData["Mean"]
+            sd = selData["SDev"]
+            bin_num = self.settingParams.binCount
+            # note: len(bin_edges) = len(hist) + 1
+            # we use a filter to remove the data that's beyond 9 sigma
+            # otherwise we cannot to see the detailed distribution of the main data set
+            filteredDataList = dataList[np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))]
+            hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
+            bin_width = bin_edges[1]-bin_edges[0]
+            # use bar to draw histogram, only for its "align" option 
+            ax.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label="Histo Chart")
+            # draw boxplot
+            if self.settingParams.showBoxp_histo:
+                ax_box = ax.twinx()
+                ax_box.axis('off')  # hide axis and tick for boxplot
+                ax_box.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.5, patch_artist=True,
+                            boxprops=dict(color='b', facecolor=(1, 1, 1, 0)),
+                            capprops=dict(color='b'),
+                            whiskerprops=dict(color='b'))
+            # ax.hist(dataList, bins="auto", facecolor="green", zorder = 0)
+            if self.settingParams.showHL_histo:
+                if HL != None: 
+                    ax.axvline(x = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
+            if self.settingParams.showLL_histo:
+                if LL != None: 
+                    ax.axvline(x = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
+
+            # set xlimit and draw fitting curve only when standard deviation is not 0
+            if sd != 0:
+                if self.settingParams.showGaus_histo:
+                    # gauss fitting
+                    g_x = np.linspace(avg - sd * 10, avg + sd * 10, 1000)
+                    g_y = max(hist) * np.exp( -0.5 * (g_x - avg)**2 / sd**2 )
+                    ax.plot(g_x, g_y, "r--", label="Normalized Gauss Curve")
+                # set x limit
+                if bin_edges[0] > avg - sd * 10:
+                    ax.set_xlim(left=avg - sd * 10)
+                if bin_edges[-1] < avg + sd * 10:
+                    ax.set_xlim(right=avg + sd * 10)
+            ax.set_ylim(top=max(hist)*1.1)
+                
+            # blended transformation
+            transXdYa = matplotlib.transforms.blended_transform_factory(ax.transData, ax.transAxes)
+            # vertical lines for n * σ
+            sigmaList = [int(i) for i in self.settingParams.showSigma.split(",")]
+            for n in sigmaList:
+                position_pos = avg + sd * n
+                position_neg = avg - sd * n
+                ax.axvline(x = position_pos, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="%dσ"%n)
+                ax.axvline(x = position_neg, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="-%dσ"%n)
+                ax.text(x = position_pos, y = 0.99, s="%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
+                ax.text(x = position_neg, y = 0.99, s="-%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
+            # med avg text labels / lines
+            med_text = ("\n $x̃ = %.3f $") % med
+            avg_text = ("\n $x̅ = %.3f $") % avg
+            if self.settingParams.showMed_histo:
+                ax.text(x=med, y=1, s=med_text, color='k', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left" if med>avg else "right", va="center", transform=transXdYa)
+                ax.axvline(x = med, linewidth=1, color='black', zorder = 1, label="Median")
+            if self.settingParams.showMean_histo:
+                ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
+                ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
+            ax.ticklabel_format(useOffset=False)    # prevent + sign
+            if selData["recHeader"] == REC.FTR:
+                ax.set_xlabel("Test Flag", fontsize=12, fontname="Tahoma")
+            else:
+                ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
+            ax.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
+            
+        return ax
+    
+    
+    def genBinPlot(self, fig:plt.Figure, head:int, site:int):
+        fig.suptitle("%s - %s - %s"%("Bin Summary", "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        ax_l = fig.add_subplot(121)
+        ax_r = fig.add_subplot(122)
+        Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
+        # HBIN plot
+        binStats = self.DatabaseFetcher.getBinStats(head, site, "HBIN")
+        HList = [BIN for BIN in sorted(binStats.keys())]
+        HCnt = [binStats[BIN] for BIN in HList]
+        HLable = []
+        HColor = []
+        for ind, i in enumerate(HList):
+            HLable.append(self.HBIN_dict[i]["BIN_NAME"])
+            HColor.append(self.settingParams.hbinColor[i])
+            ax_l.text(x=ind, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
+            
+        ax_l.bar(np.arange(len(HCnt)), HCnt, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary")
+        ax_l.set_xticks(np.arange(len(HCnt)))
+        ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)))    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
+        ax_l.set_xlim(-.5, max(3, len(HCnt))-.5)
+        ax_l.set_ylim(top=max(HCnt)*1.2)
+        ax_l.set_xlabel("Hardware Bin", fontsize=12, fontname="Tahoma")
+        ax_l.set_ylabel("Hardware Bin Counts", fontsize=12, fontname="Tahoma")
+
+        # SBIN plot
+        binStats = self.DatabaseFetcher.getBinStats(head, site, "SBIN")
+        SList = [BIN for BIN in sorted(binStats.keys())]
+        SCnt = [binStats[BIN] for BIN in SList]
+        SLable = []
+        SColor = []
+        for ind, i in enumerate(SList):
+            SLable.append(self.SBIN_dict[i]["BIN_NAME"])
+            SColor.append(self.settingParams.sbinColor[i])
+            ax_r.text(x=ind, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
+            
+        ax_r.bar(np.arange(len(SCnt)), SCnt, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary")
+        ax_r.set_xticks(np.arange(len(SCnt)))
+        ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)))
+        ax_r.set_xlim(-.5, max(3, len(SCnt))-.5)
+        ax_r.set_ylim(top=max(SCnt)*1.2)
+        ax_r.set_xlabel("Software Bin", fontsize=12, fontname="Tahoma")
+        ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
+        
+        return ax_l, ax_r
+    
+    
+    def genWaferPlot(self, fig:plt.Figure, head:int, site:int, wafer_num:int):
+        fig.set_size_inches(7.5, 8)
+        fig.set_tight_layout(False)
+        ax = fig.add_subplot(111, aspect=1)
+        # set limits
+        waferBounds = self.DatabaseFetcher.getWaferBounds()
+        xmin = waferBounds["xmin"]
+        ymin = waferBounds["ymin"]
+        xmax = waferBounds["xmax"]
+        ymax = waferBounds["ymax"]            
+        ax.set_xlim(xmin-1, xmax+1)
+        ax.set_ylim(ymin-1, ymax+1)
+        # scaling xy coords to be a square
+        ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')            
+        # dynamic label size
+        Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
+        labelsize = Tsize(max(xmax-xmin, ymax-ymin))
+                    
+        if wafer_num == -1:
+            # -1 indicates stacked wafer map
+            ax.set_title("Stacked Wafer Map - %s - %s"%("Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            failDieDistribution = self.DatabaseFetcher.getStackedWaferData(head, site)
+            x_mesh = np.arange(xmin-0.5, xmax+1, 1)     # xmin-0.5, xmin+0.5, ..., xmax+0.5
+            y_mesh = np.arange(ymin-0.5, ymax+1, 1)
+            # initialize a full -1 2darray
+            failCount_meash = np.full((len(x_mesh)-1, len(y_mesh)-1), -1)
+            # fill the count into 2darray
+            for (xcoord, ycoord), count in failDieDistribution.items():
+                failCount_meash[xcoord-xmin, ycoord-ymin] = count
+            # x is row and y is col, whereas in xycoords, x should be col and y should be row
+            failCount_meash = failCount_meash.transpose()
+            # get a colormap segment
+            cmap_seg = matplotlib.colors.LinearSegmentedColormap.from_list("seg", plt.get_cmap("nipy_spectral")(np.linspace(0.55, 0.9, 128)))
+            # draw color mesh, replace all -1 to NaN to hide rec with no value
+            pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg)
+            # create a new axis for colorbar
+            ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
+            cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
+            cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+            cbar.set_label("Total failed dies")
+            # ax_colorbar = fig.add_axes([ax.get_position().x1+0.03, ax.get_position().y0, 0.02, ax.get_position().height])
+            # cbar = fig.colorbar(pcmesh, cax=ax_colorbar)
+            # cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+            # cbar.set_label("Total failed dies", rotation=270, va="bottom")
+            
+        else:
+            waferDict = self.waferInfoDict[wafer_num]
+            ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            # group coords by soft bin
+            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(wafer_num, head, site)
+            dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
+            legendHandles = []
+            # draw recs for each SBIN
+            for sbin in sorted(coordsDict.keys()):
+                sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
+                sbinCnt = len(coordsDict[sbin])
+                percent = 100 * sbinCnt / dutCnt
+                label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
+                rects = []
+                # skip dut with invalid coords
+                for (x, y) in coordsDict[sbin]:
+                    rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
+                pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100)
+                ax.add_collection(pc)
+                proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
+                legendHandles.append(proxyArtist)
+            # legend
+            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+        
+        # set ticks & draw coord lines
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(5))            
+        ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
+        # Turn spines off and create white grid.
+        for edge, spine in ax.spines.items():
+            spine.set_visible(False)
+        ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
+        ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
+        ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
+        # switch x, y positive direction if WCR specified the orientation.
+        if self.fileInfoDict.get("POS_X", "") == "L":   # x towards left
+            ax.invert_xaxis()
+        if self.fileInfoDict.get("POS_Y", "") == "D":   # y towards down
+            ax.invert_yaxis()
+            
+        return ax
+    
+    
     def updateCursorPrecision(self):
         for _, cursor in self.cursorDict.items():
-            cursor.updatePrecision(self.settingParams.dataPrecision)
+            cursor.updatePrecision(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             
             
     def clearOtherTab(self, currentTab):
