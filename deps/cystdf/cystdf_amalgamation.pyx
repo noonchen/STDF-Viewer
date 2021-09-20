@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Aug 30 2021
+# Last Modified: Mon Sep 20 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -45,7 +45,8 @@ from tsqueue_src.tsqueue_libc cimport *
 from libc.time cimport time_t, strftime, tm, gmtime, localtime
 from libc.stdint cimport *
 from libc.stddef cimport wchar_t
-from libc.math cimport NAN
+from libc.math cimport NAN, isinf
+from libc.float cimport FLT_MAX, FLT_MIN
 from libc.string cimport memcpy, strcpy, strrchr, strcmp
 from posix.stdio cimport fseeko, ftello
 from posix.unistd cimport usleep
@@ -378,9 +379,9 @@ def analyzeSTDF(str filepath):
 # *** funcs of Record Parser *** #
 ##################################
 NPINT = int
-NPDOUBLE = np.double
+NPFLOAT = np.float
 ctypedef cnp.int_t NPINT_t
-ctypedef cnp.double_t NPDOUBLE_t
+ctypedef cnp.float_t NPFLOAT_t
 cdef bint* p_needByteSwap = &needByteSwap
 cdef bint py_needByteSwap = False
 
@@ -407,16 +408,19 @@ cdef int32_t max(int32_t[:] inputArray) nogil:
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def parse_rawList(uint16_t recHeader, int64_t[:] offsetArray, int32_t[:] lengthArray, object file_handle):
-    cdef int i
+def parsePFTR_rawList(uint16_t recHeader, int64_t[:] offsetArray, int32_t[:] lengthArray, object file_handle):
+    if recHeader != REC_PTR and recHeader != REC_FTR:
+        raise TypeError("This function is for parsering PTR & FTR only")
+
+    cdef int i, infType
     cdef void* pRec
     cdef Py_ssize_t cnt = offsetArray.shape[0]
     cdef int32_t maxL = max(lengthArray)
 
     # data containers & views for nogil operation
-    cdef cnp.ndarray[NPDOUBLE_t, ndim=1] dataList = np.full(cnt, NAN, dtype=NPDOUBLE)
+    cdef cnp.ndarray[NPFLOAT_t, ndim=1] dataList = np.full(cnt, NAN, dtype=NPFLOAT)
     cdef cnp.ndarray[NPINT_t, ndim=1] flagList = np.zeros(cnt, dtype=NPINT)
-    cdef NPDOUBLE_t[:] dataList_view = dataList
+    cdef NPFLOAT_t [:] dataList_view = dataList
     cdef NPINT_t   [:] flagList_view = flagList
 
     if maxL < 0:
@@ -455,24 +459,113 @@ def parse_rawList(uint16_t recHeader, int64_t[:] offsetArray, int32_t[:] lengthA
     for i in prange(cnt, nogil=True):
         if lengthArray[i] < 0:
             dataList_view[i] = NAN
-            flagList_view[i] = 0
+            flagList_view[i] = -1
         else:
             parse_record(&pRec, recHeader, &rawDataView[i,0], lengthArray[i])
 
             if recHeader == REC_PTR:
                 flagList_view[i] = (<PTR*>pRec).TEST_FLG
-                dataList_view[i] = (<PTR*>pRec).RESULT
+                infType = isinf((<PTR*>pRec).RESULT)
+                if infType > 0:
+                    # replace +inf with max float
+                    dataList_view[i] = FLT_MAX
+                elif infType < 0:
+                    # replace -inf with min float
+                    dataList_view[i] = FLT_MIN
+                else:
+                    dataList_view[i] = (<PTR*>pRec).RESULT
             elif recHeader == REC_FTR:
                 flagList_view[i] = (<FTR*>pRec).TEST_FLG
-                dataList_view[i] = <NPDOUBLE_t>flagList_view[i]
-            else:
-                flagList_view[i] = (<MPR*>pRec).TEST_FLG
-                dataList_view[i] = <NPDOUBLE_t>flagList_view[i]
+                dataList_view[i] = <NPFLOAT_t>flagList_view[i]
             
             free_record(recHeader, pRec)
             pRec = NULL
 
     return {"dataList":dataList, "flagList":flagList}
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def parseMPR_rawList(uint16_t recHeader, uint16_t pinCount, uint16_t rsltCount, int64_t[:] offsetArray, int32_t[:] lengthArray, object file_handle):
+    if recHeader != REC_MPR:
+        raise TypeError("This function is for parsering MPR only")
+
+    cdef int i, j, infType
+    cdef void* pRec
+    cdef Py_ssize_t cnt = offsetArray.shape[0]
+    cdef int32_t maxL = max(lengthArray)
+
+    # data containers & views for nogil operation
+    # Pin as row, dut as column
+    cdef cnp.ndarray[NPINT_t, ndim=2] statesList = np.full([pinCount, cnt], 16, dtype=NPINT)  # use 0xF as the invalid states
+    cdef cnp.ndarray[NPFLOAT_t, ndim=2] dataList = np.full([rsltCount, cnt], NAN, dtype=NPFLOAT)
+    cdef cnp.ndarray[NPINT_t, ndim=1] flagList = np.zeros(cnt, dtype=NPINT)
+    cdef NPINT_t   [:,:] statesList_view = statesList
+    cdef NPFLOAT_t [:,:] dataList_view = dataList
+    cdef NPINT_t   [:] flagList_view = flagList
+
+    if maxL < 0:
+        # no valid result
+        return {"dataList":dataList, "statesList":statesList, "flagList":flagList}
+
+    # memoryView to store raw bytes from file
+    cdef const unsigned char[:,:] rawDataView = cyarray(shape = (cnt, maxL),
+                                                        itemsize = sizeof(unsigned char),
+                                                        format="B")
+    # c-contiguous view for accepting bytes from read()
+    cdef const unsigned char[::1] tmpData = cyarray(shape = (maxL,),
+                                                    itemsize = sizeof(unsigned char),
+                                                    format="B")
+
+    # output dict
+    cdef dict testDict = {}
+    
+    # read raw data
+    for i in range(cnt):
+        if offsetArray[i] < 0 or lengthArray[i] < 0:
+            # rawDataView[i, :] = b'\0'    # represent invalid rawData
+            lengthArray[i] = -1
+
+        else:
+            file_handle.seek(offsetArray[i])
+            # we need to append extra bytes at the end of tmpData if maxL > lengthArray[i]
+            # otherwise the size mismatch error would be raised by the later copy process
+            tmpData = file_handle.read(lengthArray[i]) + b'\0' * (maxL - lengthArray[i])
+            rawDataView[i, :] = tmpData
+
+    # set C extern variable to the value from python side
+    global p_needByteSwap, py_needByteSwap
+    p_needByteSwap[0] = py_needByteSwap
+    # parse raw bytes
+    for i in prange(cnt, nogil=True):
+        if lengthArray[i] < 0:
+            for j in range(rsltCount):
+                dataList_view[j, i] = NAN
+            flagList_view[i] = -1
+        else:
+            parse_record(&pRec, recHeader, &rawDataView[i,0], lengthArray[i])
+
+            flagList_view[i] = (<MPR*>pRec).TEST_FLG
+            for j in range(pinCount):
+                # write MPR states into ith column of statesList
+                statesList_view[j, i] = ((<MPR*>pRec).RTN_STAT)[j]
+            
+            for j in range(rsltCount):
+                # write MPR data into ith column of dataList
+                infType = isinf(((<MPR*>pRec).RTN_RSLT)[j])
+                if infType > 0:
+                    # replace +inf with max float
+                    dataList_view[j, i] = FLT_MAX
+                elif infType < 0:
+                    # replace -inf with min float
+                    dataList_view[j, i] = FLT_MIN
+                else:
+                    dataList_view[j, i] = ((<MPR*>pRec).RTN_RSLT)[j]
+            
+            free_record(recHeader, pRec)
+            pRec = NULL
+
+    return {"dataList":dataList, "statesList":statesList, "flagList":flagList}
 
 # *** end of Record Parser *** #
 
@@ -789,8 +882,8 @@ cdef class stdfSummarizer:
             const char* insertPinMap = '''INSERT INTO Pin_Map VALUES (:HEAD_NUM, :SITE_NUM, :PMR_INDX, :CHAN_TYP, 
                                                                         :CHAN_NAM, :PHY_NAM, :LOG_NAM, :From_GRP);'''
             const char* updateFrom_GRP = '''UPDATE Pin_Map SET From_GRP=:From_GRP WHERE PMR_INDX=:PMR_INDX;'''
-            # create a row with GRP_NAME in Pin_Info if PGR exists
-            const char* insertGRP_NAM = '''INSERT INTO Pin_Info (P_PG_INDX, GRP_NAM) VALUES (:P_PG_INDX, :GRP_NAM);'''
+            # create a row with GRP_NAME in Pin_Info if PGR exists, in some rare cases, PMR shows after PGR, ignore it.
+            const char* insertGRP_NAM = '''INSERT OR IGNORE INTO Pin_Info (P_PG_INDX, GRP_NAM) VALUES (:P_PG_INDX, :GRP_NAM);'''
             # insert rows in Pin_Info and keep GRP_NAM
             const char* insertPinInfo = '''INSERT OR REPLACE INTO Pin_Info VALUES (:P_PG_INDX, (SELECT GRP_NAM FROM Pin_Info WHERE P_PG_INDX=:P_PG_INDX), 
                                                                         :GRP_MODE, :GRP_RADX, 

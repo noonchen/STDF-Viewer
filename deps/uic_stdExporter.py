@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Tue Sep 21 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -779,7 +779,10 @@ class stdfExporter(QtWidgets.QDialog):
         self.headL, self.siteL = self.getHeads_Sites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()
-        self.numWafer = sorted([int(item.split("\t")[0]) for item in self.parent.completeWaferList])
+        self.numWafer = sorted([-1 if item.split("\t")[0] == "-" else int(item.split("\t")[0]) for item in self.parent.completeWaferList])
+        if len(self.numWafer) < 2:
+            # only default stacked wafer is in list, no actual wafer data exists
+            self.numWafer = []
        
         message = ""
         if len(self.numL) == 0 or len(self.headL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path is None:
@@ -841,7 +844,8 @@ class stdfExporter(QtWidgets.QDialog):
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"')
+            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
+                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
         else:                                   # linux variants
             subprocess.call(('xdg-open', filepath))
         
@@ -851,7 +855,8 @@ class stdfExporter(QtWidgets.QDialog):
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', '-R', filepath))
         elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'explorer /select,"{filepath}"')
+            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
+                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
         else:                                   # linux variants
             subprocess.call(('xdg-open', os.path.dirname(filepath)))
             
