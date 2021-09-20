@@ -2089,7 +2089,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         fig.set_size_inches(10, 1.5 * pinCount)
                     # iterate data of each pin
                     for index, pinName, pinData in zip(range(pinCount), pinList, y_raw):
-                        med = selData["Median"][index]
+                        # med = selData["Median"][index]
                         avg = selData["Mean"][index]
                         sd = selData["SDev"][index]
                         # select not nan value
