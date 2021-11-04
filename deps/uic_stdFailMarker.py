@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Wed Nov 03 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -45,16 +45,14 @@ class FailMarker(QtWidgets.QWidget):
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
         self.parent = parent
+        self.translator = QtCore.QTranslator(self)
                 
-        self.setWindowTitle("Searching Failed Items")
+        self.setWindowTitle(self.tr("Searching Failed Items"))
         self.UI.progressBar.setFormat("%p%")
-        self.stopFlag = False
-        
-        self.show()
-        self.start()
-        self.close()
     
     def start(self):
+        self.stopFlag = False   # init at start
+        self.show()
         start_time = time.time()
         
         self.sim = self.parent.sim_list
@@ -65,7 +63,7 @@ class FailMarker(QtWidgets.QWidget):
         for i in range(self.total):
             if self.stopFlag: 
                 end_time = time.time()
-                self.parent.signals.statusSignal.emit("Fail Marker aborted, time elapsed %.2f sec."%(end_time - start_time), False, False, False)
+                self.parent.signals.statusSignal.emit(self.tr("Fail Marker aborted, time elapsed %.2f sec.") % (end_time - start_time), False, False, False)
                 return
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
@@ -87,13 +85,14 @@ class FailMarker(QtWidgets.QWidget):
         end_time = time.time()
         msg = ""
         if failCount == 0 and cpkFailCount == 0:
-            msg = "No failed test item found, "
+            msg = self.tr("No failed test item found, ")
         else:
             if failCount != 0:
-                msg += "%d failed test items found, "%failCount
+                msg += self.tr("%d failed test items found, ") % failCount
             if cpkFailCount != 0:
-                msg += "%d passed test items found with low Cpk, "%cpkFailCount
-        self.parent.signals.statusSignal.emit("%stime elapsed %.2f sec."%(msg, end_time - start_time), False, False, False)
+                msg += self.tr("%d passed test items found with low Cpk, ") % cpkFailCount
+        self.parent.signals.statusSignal.emit(self.tr("%stime elapsed %.2f sec.") % (msg, end_time - start_time), False, False, False)
+        self.close()
         
     def closeEvent(self, event):
         # close by clicking X
