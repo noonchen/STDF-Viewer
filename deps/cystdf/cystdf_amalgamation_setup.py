@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 20th 2021
 # -----
-# Last Modified: Thu Aug 26 2021
+# Last Modified: Tue Nov 02 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -52,8 +52,8 @@ macros            = [("_LARGEFILE64_SOURCE", 1),                             # e
 
 # openmp
 if isMac:
-      include_dirs.append(os.path.join(os.getcwd(), "libopm", "include"))
-      library_dirs.append(os.path.join(os.getcwd(), "libopm", "lib"))
+      include_dirs.append(os.path.join(os.getcwd(), "libomp", "include"))
+      library_dirs.append(os.path.join(os.getcwd(), "libomp", "lib"))
       libraries.append('omp')
       # clang need to preprocess openmp pragma
       compile_args.extend(['-Xpreprocessor', '-fopenmp'])

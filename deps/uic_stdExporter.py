@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Tue Sep 21 2021
+# Last Modified: Thu Nov 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -25,7 +25,7 @@
 
 
 import re
-import os
+import os, io
 from enum import IntEnum
 from xlsxwriter import Workbook
 from xlsxwriter.worksheet import Worksheet
@@ -33,19 +33,19 @@ import subprocess, platform, logging
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 from .ui.stdfViewer_exportUI import Ui_exportUI
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets
 # from PySide2.QtWidgets import QAbstractItemView, QFileDialog
-# from PySide2.QtCore import Signal, Slot
+# from PySide2.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_exportUI_side2 import Ui_exportUI
 # from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
 # from PySide6.QtWidgets import QAbstractItemView, QFileDialog
-# from PySide6.QtCore import Signal, Slot
+# from PySide6.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_exportUI_side6 import Ui_exportUI
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
@@ -108,6 +108,24 @@ def list_operation(main, method, other):
         tmp = set(main) - set(other)
         return sorted(tmp, key=lambda item: int(item.split("\t")[0]))
 
+
+def get_png_size(image: io.BytesIO):
+    '''http://coreygoldberg.blogspot.com/2013/01/python-verify-png-file-and-get-image.html '''
+    image.seek(0)
+    data = image.read(24)
+    image.seek(0, 2)    # restore position
+    
+    if data[:8] == b'\211PNG\r\n\032\n'and (data[12:16] == b'IHDR'):
+        # is png
+        width = int.from_bytes(data[16:20], byteorder="big")
+        height = int.from_bytes(data[20:24], byteorder="big")
+        return (width, height)
+    else:
+        raise TypeError("Input is not a PNG image")
+
+
+def ceil(n):
+    return int(-1 * n // 1 * -1)
 
 
 class dataChannel:
@@ -219,6 +237,15 @@ class reportGenerator(QtCore.QObject):
                     
         sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
         
+        # test if the filepath is writable
+        try:
+            test_f = open(self.path, "ab+")
+            test_f.close()
+        except Exception as e:
+            self.msgSignal.emit("Error@@@" + repr(e))
+            self.closeSignal.emit(True)
+            return
+            
         with Workbook(self.path) as wb:
             centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#CC0000", "bold": True})
@@ -226,9 +253,9 @@ class reportGenerator(QtCore.QObject):
             txWrapStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             txWrapStyle.set_text_wrap()
             # header for thrend/histo
-            header_stat = ["Test Number / Site", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Count", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
-            imageHeight_in_rowHeight = 20
-            x_scale = imageHeight_in_rowHeight * 0.21 / 4      # default cell height = 0.21 inches, image height = 4 inches
+            header_stat = [self.tr("Test Number / Site"), self.tr("Test Name"), self.tr("Unit"), self.tr("Low Limit"), 
+                           self.tr("High Limit"), self.tr("Fail Count"), self.tr("Cpk"), self.tr("Average"), 
+                           self.tr("Median"), self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
             sheetDict = {}
             loopCnt = 0     # used for representing generation progress
             sv.init_variables()
@@ -240,13 +267,13 @@ class reportGenerator(QtCore.QObject):
             for cont in [tab.FileInfo, tab.DUT, tab.Stat, tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
                 # sheet order in the xlsx is fixed
                 sheetName = ""
-                if   cont == tab.FileInfo:  sheetName = "File Info"
-                elif cont == tab.DUT:       sheetName = "DUT Summary"
-                elif cont == tab.Stat:      sheetName = "Test Statistics"
-                elif cont == tab.Trend:     sheetName = "Trend Chart"
-                elif cont == tab.Histo:     sheetName = "Histogram"
-                elif cont == tab.Bin:       sheetName = "Bin Chart"
-                elif cont == tab.Wafer:     sheetName = "Wafer Map"
+                if   cont == tab.FileInfo:  sheetName = self.tr("File Info")
+                elif cont == tab.DUT:       sheetName = self.tr("DUT Summary")
+                elif cont == tab.Stat:      sheetName = self.tr("Test Statistics")
+                elif cont == tab.Trend:     sheetName = self.tr("Trend Chart")
+                elif cont == tab.Histo:     sheetName = self.tr("Histogram")
+                elif cont == tab.Bin:       sheetName = self.tr("Bin Chart")
+                elif cont == tab.Wafer:     sheetName = self.tr("Wafer Map")
                 if cont in self.contL:      sheetDict[cont] = wb.add_worksheet(sheetName)
             
             # ** write contents independent of test numbers
@@ -254,7 +281,7 @@ class reportGenerator(QtCore.QObject):
             if tab.FileInfo in self.contL:
                 # Sheet for file information
                 FileInfoSheet:Worksheet = sheetDict[tab.FileInfo]
-                headerLabels = ["Property Name", "Value"]
+                headerLabels = [self.tr("Property Name"), self.tr("Value")]
                 col_width = [len(s) for s in headerLabels]
                 
                 FileInfoSheet.write_row(sv.finfoRow, sv.finfoCol, headerLabels, centerStyle)
@@ -275,11 +302,11 @@ class reportGenerator(QtCore.QObject):
             if tab.DUT in self.contL:
                 # Sheet for DUT summary & Test raw data
                 DutSheet:Worksheet = sheetDict[tab.DUT]
-                headerLabelList = [["", "Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "Wafer ID", "(X, Y)", "DUT Flag"],
-                                    ["Test Number"],
-                                    ["Upper Limit"],
-                                    ["Lower Limit"],
-                                    ["Unit"]]
+                headerLabelList = [["", self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
+                                    [self.tr("Test Number")],
+                                    [self.tr("Upper Limit")],
+                                    [self.tr("Lower Limit")],
+                                    [self.tr("Unit")]]
                 col_width = [len(s) for s in headerLabelList[0]]
                 col_width[0] = max([len(row[0]) for row in headerLabelList])
                 
@@ -313,8 +340,11 @@ class reportGenerator(QtCore.QObject):
                         if self.forceQuit: return
                         # get bin image from GUI thread and insert to the sheet
                         image_io = self.waitForImage(head=head, site=site, test_num=0, chartType=tab.Bin)
-                        BinSheet.insert_image(sv.binRow, 0, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                        sv.binRow += imageHeight_in_rowHeight
+                        image_width, image_height = get_png_size(image_io)
+                        # rescale the width of the image to 12 inches
+                        bin_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+                        BinSheet.insert_image(sv.binRow, 0, "", {'x_scale': bin_scale, 'y_scale': bin_scale, 'image_data': image_io})
+                        sv.binRow += ceil((image_height / 200) * bin_scale / 0.21)
                         # get hard bin list
                         dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
                         BinSheet.write_row(sv.binRow, 0, dataList_HB, txWrapStyle)
@@ -334,16 +364,17 @@ class reportGenerator(QtCore.QObject):
             if tab.Wafer in self.contL:
                 # Sheet for wafer map
                 WaferSheet:Worksheet = sheetDict[tab.Wafer]
-                waferHeight_in_rowHeight = 50
-                y_scale = waferHeight_in_rowHeight * 0.21 / 9
 
                 for wafer in self.numWafer:
                     for head in self.headL:
                         for site in self.siteL:
                             if self.forceQuit: return
                             image_io = self.waitForImage(head=head, site=site, test_num=wafer, chartType=tab.Wafer)
-                            WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': y_scale, 'y_scale': y_scale, 'image_data': image_io})
-                            sv.waferRow += waferHeight_in_rowHeight + 1
+                            image_width, image_height = get_png_size(image_io)
+                            # rescale the width of the image to 12 inches
+                            wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+                            WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': wafer_scale, 'y_scale': wafer_scale, 'image_data': image_io})
+                            sv.waferRow += ceil((image_height / 200) * wafer_scale / 0.21) + 2
                             
                             loopCnt += 1
                             sendProgress(loopCnt)
@@ -359,35 +390,38 @@ class reportGenerator(QtCore.QObject):
                 # prepare data (all sites all heads)
                 self.prepareDataSignal.emit(test_num)
                 
+                # if dut summary is selected
+                if tab.DUT in self.contL:
+                    DutSheet:Worksheet = sheetDict[tab.DUT]
+                    #append test raw data to the last column
+                    max_width = 0
+                    test_data_list, test_stat_list = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num})
+                    data_style_list = [centerStyle if stat else failedStyle for stat in test_stat_list]
+                    write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
+                    max_width = max([len(s) for s in test_data_list])
+                    DutSheet.set_column(sv.dutCol, sv.dutCol, max_width*1.1)
+                    sv.dutCol += 1
+                    # loop cnt + 1 at the end
+                    loopCnt += 1
+                    sendProgress(loopCnt)
+                
                 for head in self.headL:
                     for site in self.siteL:
                         if self.forceQuit: return
-                        
-                        # if dut summary is selected
-                        if tab.DUT in self.contL:
-                            DutSheet:Worksheet = sheetDict[tab.DUT]
-                            #append test raw data to the last column
-                            max_width = 0
-                            test_data_list, test_stat_list = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num})
-                            data_style_list = [centerStyle if stat else failedStyle for stat in test_stat_list]
-                            write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
-                            max_width = max([len(s) for s in test_data_list])
-                            DutSheet.set_column(sv.dutCol, sv.dutCol, max_width*1.1)
-                            sv.dutCol += 1
-                            # loop cnt + 1 at the end
-                            loopCnt += 1
-                            sendProgress(loopCnt)
-                        
+                                                
                         # if Trend is selected
                         if tab.Trend in self.contL:
                             # Sheet for trend plot and test data
                             TrendSheet:Worksheet = sheetDict[tab.Trend]
                             # get image and stat from main thread
                             image_io = self.waitForImage(head, site, test_num, tab.Trend)
+                            image_width, image_height = get_png_size(image_io)
+                            # rescale the width of the image to 12 inches
+                            trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
                             dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num})
                             # insert into the work sheet
-                            TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                            sv.trendRow += imageHeight_in_rowHeight
+                            TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
+                            sv.trendRow += ceil((image_height / 200) * trend_scale / 0.21)
                             TrendSheet.write_row(sv.trendRow, 0, header_stat, centerStyle)
                             sv.trendRow += 1
                             write_row_col(TrendSheet, sv.trendRow, 0, dataList, centerStyle, writeRow=True)
@@ -405,8 +439,11 @@ class reportGenerator(QtCore.QObject):
                             image_io = self.waitForImage(head, site, test_num, tab.Histo)
                             dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "test_num": test_num})
                             #
-                            HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': x_scale, 'y_scale': x_scale, 'image_data': image_io})
-                            sv.histoRow += imageHeight_in_rowHeight
+                            image_width, image_height = get_png_size(image_io)
+                            # rescale the width of the image to 12 inches
+                            histo_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+                            HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': histo_scale, 'y_scale': histo_scale, 'image_data': image_io})
+                            sv.histoRow += ceil((image_height / 200) * histo_scale / 0.21)
                             HistoSheet.write_row(sv.histoRow, 0, header_stat, centerStyle)
                             sv.histoRow += 1
                             write_row_col(HistoSheet, sv.histoRow, 0, dataList, centerStyle, writeRow=True)
@@ -453,6 +490,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
         self.closeEventByThread = False
+        self.errorOccured = False
         # thread sync
         self.mutex = QtCore.QMutex()
         self.condWait = QtCore.QWaitCondition()
@@ -460,9 +498,10 @@ class progressDisplayer(QtWidgets.QDialog):
         # for sharing data between threads
         self.channel = dataChannel()
         
-        self.setWindowTitle("Generating XLSX report...")
+        self.setWindowTitle(self.tr("Generating XLSX report..."))
         self.UI.progressBar.setMaximum(10000)
         self.signals = signals()
+        self.signals.msgSignal.connect(self.showMsg)
         self.signals.progressBarSignal.connect(self.updateProgressBar)
         self.signals.closeSignal.connect(self.closeExporter)
         self.signals.prepareDataSignal.connect(self.prepareData)
@@ -489,7 +528,7 @@ class progressDisplayer(QtWidgets.QDialog):
             event.accept()
         else:
             # close by clicking X
-            close = QtWidgets.QMessageBox.question(self, "QUIT", "Report is not finished,\nwanna terminate the process?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
+            close = QtWidgets.QMessageBox.question(self, self.tr("QUIT"), self.tr("Report is not finished,\nwanna terminate the process?"), QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
             if close == QtWidgets.QMessageBox.Yes:
                 # if user clicked yes, temrinate thread and close window
                 self.rg.forceQuit = True
@@ -500,10 +539,24 @@ class progressDisplayer(QtWidgets.QDialog):
                 event.ignore()
              
                     
+    @Slot(str)
+    def showMsg(self, msg:str):
+        msgType, msgContent = msg.split("@@@")
+        if msgType == "Error":
+            self.errorOccured = True
+            QtWidgets.QMessageBox.critical(self, msgType, msgContent)
+            logger.critical(msgContent)
+        elif msgType == "Warning":
+            QtWidgets.QMessageBox.warning(self, msgType, msgContent)
+            logger.warning(msgContent)
+        else:
+            logger.info(msgContent)
+    
+    
     @Slot(int)
     def updateProgressBar(self, num):
         self.UI.progressBar.setValue(num)
-        self.UI.progressBar.setFormat("Writing: %.02f%%" %(num/100))
+        self.UI.progressBar.setFormat(self.tr("Writing: %.02f%%") %(num/100))
       
       
     @Slot(bool)
@@ -581,12 +634,12 @@ class stdfExporter(QtWidgets.QDialog):
     
     def __init__(self, parent = None):
         super().__init__(parent)
-        self.closeEventByThread = False    # used to determine the source of close event
-
         # self.exportUI = uic.loadUi('ui/stdfViewer_exportUI.ui', self)    # uic
         self.exportUI = Ui_exportUI()
         self.exportUI.setupUi(self)
         self.parent = parent
+        self.translatorUI = QTranslator(self)
+        self.translatorCode = QTranslator(self)
         # store head, site cb objects
         self.head_cb_dict = {}
         self.site_cb_dict = {}
@@ -603,21 +656,32 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.RemoveAllbutton.clicked.connect(self.onRMAll)
         
         self.exportUI.toolButton.clicked.connect(self.outFileDialog)
-        self.exportUI.Confirm.clicked.connect(self.check_inputs)
-        self.exportUI.Cancel.clicked.connect(lambda: self.close())
+        self.exportUI.nextBtn.clicked.connect(self.gotoNextPage)
+        self.exportUI.previousBtn.clicked.connect(self.gotoPreviousPage)
         
-        try:
-            # get all test items from mainUI
-            self.remainTestItems = self.parent.completeTestList      # mutable
-            self.AllTestItems = tuple(self.remainTestItems)     # immutable
-            self.initSiteCBs()
-            self.initTestItems()
-        except Exception as e:
-            print(repr(e))
-
+        self.exportUI.Trend_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.Histo_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.Bin_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.Stat_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.DUT_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
+        
+                
+    def showUI(self):
+        self.closeEventByThread = False    # used to determine the source of close event
+        # init UI
+        self.exportUI.stackedWidget.setCurrentIndex(0)
+        self.exportUI.previousBtn.setDisabled(True)
+        self.previousPageIndex = 0
+        # get all test items from mainUI
+        self.remainTestItems = self.parent.completeTestList      # mutable
+        self.AllTestItems = tuple(self.remainTestItems)     # immutable
+        self.initSiteCBs()
+        self.initTestItems()
         self.exec_()
         
-        
+    
     def onAdd(self):
         selectedIndex = self.selModel_remain.selection().indexes()
         
@@ -654,7 +718,7 @@ class stdfExporter(QtWidgets.QDialog):
                 
         
     def outFileDialog(self):
-        outPath = QFileDialog.getSaveFileName(None, caption="Save Report As", filter="Excel file (*.xlsx)")
+        outPath = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("Excel file (*.xlsx)"))
         if outPath[0]:
             self.exportUI.plainTextEdit.setPlainText(outPath[0])
             
@@ -773,69 +837,155 @@ class stdfExporter(QtWidgets.QDialog):
         else:
             return None
     
-  
-    def check_inputs(self):
+    
+    def changeBtnStyle(self):
+        changeToConfirm = False
+        currentPage = self.exportUI.stackedWidget.currentIndex()
+        
+        if currentPage == 0:
+            # change to "Confirm" only if file info is selected
+            if self.getSelectedContents() == [tab.FileInfo]:
+                changeToConfirm = True
+        
+        elif currentPage == 2:
+            changeToConfirm = True
+            
+            
+        if changeToConfirm:
+            # in site page, change to Confirm
+            # change the next button to Confirm
+            self.exportUI.nextBtn.setStyleSheet("QPushButton {\n"
+            "color: white;\n"
+            "background-color: rgb(0, 120, 0); \n"
+            "border: 1px solid rgb(0, 120, 0); \n"
+            "border-radius: 5px;}\n"
+            "\n"
+            "QPushButton:pressed {\n"
+            "background-color: rgb(0, 50, 0); \n"
+            "border: 1px solid rgb(0, 50, 0);}")
+            self.exportUI.nextBtn.setText(QtCore.QCoreApplication.translate("exportUI", "Confirm"))
+        
+        else:
+            # restore to Next>
+            self.exportUI.nextBtn.setStyleSheet("QPushButton {\n"
+            "color: white;\n"
+            "background-color: rgb(120, 120, 120); \n"
+            "border: 1px solid rgb(120, 120, 120); \n"
+            "border-radius: 5px;}\n"
+            "\n"
+            "QPushButton:pressed {\n"
+            "background-color: rgb(50, 50, 50); \n"
+            "border: 1px solid rgb(50, 50, 50);}")
+            self.exportUI.nextBtn.setText(QtCore.QCoreApplication.translate("exportUI", "Next >"))
+    
+    
+    def gotoPreviousPage(self):
+        self.exportUI.stackedWidget.setCurrentIndex(self.previousPageIndex)
+        if self.previousPageIndex == 0:
+            self.exportUI.previousBtn.setDisabled(True)
+        if self.previousPageIndex == 1:
+            # make sure the user can return to the 1st page
+            self.previousPageIndex = 0
+        # ensure the next button shows "Next >"
+        self.changeBtnStyle()
+    
+    
+    def gotoNextPage(self):
+        currentPage = self.exportUI.stackedWidget.currentIndex()
+        if currentPage == 0:
+            # content page
+            if self.getOutPath() is None:
+                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("Output directory is invalid, not writable or not existed\n"))
+                return
+            
+            selectedContents = self.getSelectedContents()
+            if len(set(selectedContents) & {tab.Trend, tab.Histo, tab.DUT, tab.Stat}) > 0:
+                # go to test page
+                self.previousPageIndex = 0
+                self.exportUI.previousBtn.setEnabled(True)
+                self.exportUI.stackedWidget.setCurrentIndex(1)
+                
+            elif len(set(selectedContents) & {tab.Bin, tab.Wafer}) > 0:
+                # go to site page
+                self.previousPageIndex = 0
+                self.exportUI.previousBtn.setEnabled(True)
+                self.exportUI.stackedWidget.setCurrentIndex(2)
+                self.changeBtnStyle()
+                
+            else:
+                # only file info is selected
+                self.start()
+        
+        elif currentPage == 1:
+            # test page
+            testCount = len(self.getExportTestNums())
+            if testCount > 0 or (testCount == 0 and len(set(self.getSelectedContents()) & {tab.Trend, tab.Histo, tab.Stat}) == 0):
+                # go to site page
+                self.previousPageIndex = 1
+                self.exportUI.previousBtn.setEnabled(True)
+                self.exportUI.stackedWidget.setCurrentIndex(2)
+                self.changeBtnStyle()
+            else:
+                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("At least one test item should be selected if Trend/Histo/Statistic is checked\n"))
+                return
+        
+        else:
+            # site page
+            headList, siteList = self.getHeads_Sites()
+            if len(headList) == 0 or len(siteList) == 0: 
+                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("Head and Site cannot be empty\n"))
+            else:
+                # start exporting
+                self.start()
+    
+    
+    def start(self):
         self.numL = self.getExportTestNums()
         self.headL, self.siteL = self.getHeads_Sites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()
-        self.numWafer = sorted([-1 if item.split("\t")[0] == "-" else int(item.split("\t")[0]) for item in self.parent.completeWaferList])
+        self.numWafer = sorted([-1 if item.split("\t")[0] == "-" else int(item.split("\t")[0].strip("#")) for item in self.parent.completeWaferList])
         if len(self.numWafer) < 2:
             # only default stacked wafer is in list, no actual wafer data exists
             self.numWafer = []
        
-        message = ""
-        if len(self.numL) == 0 or len(self.headL) == 0 or len(self.siteL) == 0 or len(self.contL) == 0 or self.path is None:
-            # input not complete
-            if len(self.numL) == 0 and any([selTab in self.contL for selTab in [tab.Trend, tab.Histo, tab.Stat]]): 
-                message += "At least one test item should be selected if Trend/Histo/Statistic is checked\n\n"
-
-            if len(self.headL) == 0 or len(self.siteL) == 0: 
-                message += "Head and Site cannot be empty\n\n"
-                
-            if len(self.contL) == 0: 
-                message += "Content cannot be empty\n\n"
-                
-            if self.path is None: 
-                message += "Output directory is invalid, not writable or not existed\n"
-            
-        if message != "":
-            # contains error message
-            QtWidgets.QMessageBox.warning(self, "Warning", message)
-        else:
-            # report generation code here
-            self.totalLoopCnt = 0
-            if tab.Trend in self.contL:     self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
-            if tab.Histo in self.contL:     self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
-            if tab.Stat in self.contL:      self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
-            if tab.Bin in self.contL:       self.totalLoopCnt += len(self.siteL) * len(self.headL)
-            if tab.FileInfo in self.contL:  self.totalLoopCnt += 1
-            if tab.DUT in self.contL:       self.totalLoopCnt += (1 + len(self.numL) * len(self.siteL) * len(self.headL))   # dut info part + test part
-            if tab.Wafer in self.contL:     self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
+        # report generation code here
+        self.totalLoopCnt = 0
+        if tab.Trend in self.contL:     self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
+        if tab.Histo in self.contL:     self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
+        if tab.Stat in self.contL:      self.totalLoopCnt += len(self.numL) * len(self.siteL) * len(self.headL)
+        if tab.Bin in self.contL:       self.totalLoopCnt += len(self.siteL) * len(self.headL)
+        if tab.FileInfo in self.contL:  self.totalLoopCnt += 1
+        if tab.DUT in self.contL:       self.totalLoopCnt += (1 + len(self.numL))   # dut info part + test part
+        if tab.Wafer in self.contL:     self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
                     
-            self.pd = progressDisplayer(parent=self)
-            if self.pd.closeEventByThread:
-                # end normally
-                title = "Export completed!"
-                msg = "Report path:"
-            else:
-                # aborted
-                title = "Process Aborted!"
-                msg = "Partial report is saved in:"
-                
-            msgbox = QtWidgets.QMessageBox(None)
-            msgbox.setText(title)
-            msgbox.setInformativeText('%s\n\n%s\n'%(msg, self.path))
-            msgbox.setIcon(QtWidgets.QMessageBox.Information)
-            revealBtn = msgbox.addButton(" Reveal in folder ", QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton("Open...", QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton("OK", QtWidgets.QMessageBox.YesRole)
-            msgbox.setDefaultButton(okBtn)
-            msgbox.exec_()
-            if msgbox.clickedButton() == revealBtn:
-                self.revealFile(self.path)
-            elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(self.path)
+        self.pd = progressDisplayer(parent=self)
+        if self.pd.errorOccured:
+            # error occured
+            title = self.tr("Error occurred")
+            msg = self.tr("Something's wrong when exporting, you can still check the report in:")
+        elif self.pd.closeEventByThread:
+            # end normally
+            title = self.tr("Export completed!")
+            msg = self.tr("Report path:")
+        else:
+            # aborted
+            title = self.tr("Process Aborted!")
+            msg = self.tr("Partial report is saved in:")
+            
+        msgbox = QtWidgets.QMessageBox(None)
+        msgbox.setText(title)
+        msgbox.setInformativeText('%s\n\n%s\n'%(msg, self.path))
+        msgbox.setIcon(QtWidgets.QMessageBox.Information)
+        revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
+        openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
+        okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+        msgbox.setDefaultButton(okBtn)
+        msgbox.exec_()
+        if msgbox.clickedButton() == revealBtn:
+            self.revealFile(self.path)
+        elif msgbox.clickedButton() == openBtn:
+            self.openFileInOS(self.path)
                 
                 
     def openFileInOS(self, filepath):

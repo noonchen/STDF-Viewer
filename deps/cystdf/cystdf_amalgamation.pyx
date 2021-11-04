@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Mon Sep 20 2021
+# Last Modified: Tue Nov 02 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1604,6 +1604,7 @@ cdef class stdfSummarizer:
                 RSLT_PGM_CNT= (<MPR*>self.pRec).RSLT_CNT
                 pRTN_INDX   = (<MPR*>self.pRec).RTN_INDX
 
+            if TEST_TXT == NULL: TEST_TXT = ""
             if Unit == NULL: Unit = ""
             if not err:
                 sqlite3_bind_int(self.insertTestInfo_stmt, 1, TEST_NUM)                 # TEST_NUM

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Sep 21 2021
+# Last Modified: Thu Nov 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -34,6 +34,7 @@ from operator import itemgetter
 from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 from deps.ui.ImgSrc_svg import ImgDict
+from deps.ui.transSrc import transDict
 from deps.DatabaseFetcher import DatabaseFetcher
 from deps.cystdf import stdf_MPR_Parser, stdf_PFTR_Parser, setByteSwap
 
@@ -48,17 +49,17 @@ from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
-from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5.QtCore import QObject, Qt, QTranslator, pyqtSignal as Signal, pyqtSlot as Slot
 # pyside2
 # from deps.ui.stdfViewer_MainWindows_side2 import Ui_MainWindow
 # from PySide2 import QtCore, QtWidgets, QtGui
 # from PySide2.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
-# from PySide2.QtCore import Qt, Signal, Slot
+# from PySide2.QtCore import Qt, QTranslator, Signal, Slot
 # pyside6
 # from deps.ui.stdfViewer_MainWindows_side6 import Ui_MainWindow
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
-# from PySide6.QtCore import Qt, Signal, Slot
+# from PySide6.QtCore import Qt, QTranslator, Signal, Slot
 
 import matplotlib
 matplotlib.use('QT5Agg')
@@ -74,6 +75,8 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 # QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
+Version = "V3.1.0"
+    
 # save config path to sys
 rootFolder = os.path.dirname(sys.argv[0])
 setattr(sys, "rootFolder", rootFolder)
@@ -82,7 +85,7 @@ setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
 # setting attr to human string
 settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
                    ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"),
+                   ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
 
@@ -356,16 +359,17 @@ class PlotCanvas(QtWidgets.QWidget):
         self.updateGeometry()
 
 
-class MagCursor(object):
+class MagCursor(QObject):
     '''A class includes interactive callbacks for matplotlib figures'''
     def __init__(self, line, precision, notation, mainGUI=None):
+        super().__init__()
         self.pixRange = 20
         self.line = line
         self.ax = line.axes
         self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
         # create marker and data description tip, hide by default
         self.marker = self.ax.scatter(0, 0, s=40, marker="+", color='k')
-        self.dcp = self.ax.text(s="", x=0, y=0, fontname="Courier New", weight="bold", fontsize=8,
+        self.dcp = self.ax.text(s="", x=0, y=0, fontname=mainGUI.imageFont, weight="bold", fontsize=8,
                                 bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
         self.marker.set_visible(False)
         self.dcp.set_visible(False)
@@ -374,9 +378,9 @@ class MagCursor(object):
         self.shift_pressed = False
         self.picked_points = []
         self.highlights = self.ax.scatter([], [], s=30, marker="$S$", color="red")
-        self.hint = self.ax.text(s="Press 'Enter' to show DUT data of selected point(s)", 
+        self.hint = self.ax.text(s=self.tr("Press 'Enter' to show DUT data of selected point(s)"), 
                                  x=1, y=0, transform=self.ax.transAxes, va="bottom", ha="right", 
-                                 fontstyle="italic", fontsize=10, zorder=1000)
+                                 fontstyle="italic", fontname=mainGUI.imageFont, fontsize=10, zorder=1000)
         self.hint.set_visible(False)
         # mainGUI for show dut date table
         self.mainGUI = mainGUI
@@ -404,7 +408,7 @@ class MagCursor(object):
                 return
             # update the line positions
             self.marker.set_offsets([[x, y]])
-            text = 'Dut# : %d\nValue: ' % x + self.valueFormat % y
+            text = self.tr('Dut# : %d\nValue: ') % x + self.valueFormat % y
             self.dcp.set_text(text)
             self.dcp.set_position((x+self.rangeX, y+self.rangeY))
             # set visible
@@ -436,7 +440,7 @@ class MagCursor(object):
         elif event.key == 'enter':
             if self.picked_points:
                 selectedDutIndex = [x for (x, y) in self.picked_points]
-                DutDataReader(self.mainGUI, sorted(selectedDutIndex))
+                self.mainGUI.showDutDataTable(sorted(selectedDutIndex))
             
     def key_release(self, event):
         if event.key == 'shift':
@@ -503,6 +507,7 @@ class SettingParams:
         self.binCount = 30
         self.showSigma = "3, 6, 9"
         # General
+        self.language = "English"
         self.recentFolder = ""
         self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
         self.dataPrecision = 3
@@ -538,6 +543,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.containsWafer = False
         self.cursorDict = {}    # init/clear a dict to store cursors instance to prevent garbage collection
         self.init_SettingParams()
+        self.translatorUI = QTranslator(self)
+        self.translatorCode = QTranslator(self)
+        self.imageFont = "Tahoma"
         # std handler
         self.stdHandleList = [None]
         self.std_handle = None
@@ -557,11 +565,20 @@ class MyWindow(QtWidgets.QMainWindow):
                 setattr(self.std_handle, "fpath", f)
             self.stdHandleList.append(self.std_handle)
             
+        # init and connect signals
+        self.signals = signals4MainUI()
+        self.signals.parseStatusSignal.connect(self.updateData)
+        self.signals.statusSignal.connect(self.updateStatus)
+        # sub windows
+        self.loader = stdfLoader(self.signals, self)
+        self.failmarker = FailMarker(self)
+        self.exporter = stdfExporter(self)
+        self.settingUI = stdfSettings(self)
+        self.dutDataReader = DutDataReader(self)
         # update icons for actions and widgets
         self.updateIcons()
         self.init_TestList()
         self.init_DataTable()
-        self.init_SettingUI()
         self.needByteSwap = False
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
@@ -588,10 +605,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
         self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
         
-        # init and connect signals
-        self.signals = signals4MainUI()
-        self.signals.parseStatusSignal.connect(self.updateData)
-        self.signals.statusSignal.connect(self.updateStatus)
         # init search-related UI
         self.ui.SearchBox.textChanged.connect(self.proxyModel_list.setFilterWildcard)
         self.ui.ClearButton.clicked.connect(self.clearSearchBox)
@@ -616,8 +629,65 @@ class MyWindow(QtWidgets.QMainWindow):
         atexit.register(lambda: self.DatabaseFetcher.closeDB())
         # a workaround for not canvas not having render attribute
         self.textRender = None
+        self.changeLanguage()   # set language after initing subwindow & reading config
         
         
+    def changeLanguage(self):
+        _app = QApplication.instance()
+        # load language files based on the setting
+        curLang = self.settingParams.language
+        if curLang == "English":
+            self.imageFont = "Tahoma"
+            self.translatorUI.loadFromData(transDict["MainUI_en_US"])
+            self.translatorCode.loadFromData(transDict["MainCode_en_US"])
+            self.loader.translator.loadFromData(transDict["loadingUI_en_US"])
+            self.failmarker.translator.loadFromData(transDict["failmarkerCode_en_US"])
+            self.exporter.translatorUI.loadFromData(transDict["exportUI_en_US"])
+            self.exporter.translatorCode.loadFromData(transDict["exportCode_en_US"])
+            self.settingUI.translator.loadFromData(transDict["settingUI_en_US"])
+            self.dutDataReader.translator.loadFromData(transDict["dutDataCode_en_US"])
+            self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_en_US"])
+            
+        elif curLang == "中文简体":
+            self.imageFont = "Microsoft YaHei"
+            self.translatorUI.loadFromData(transDict["MainUI_zh_CN"])
+            self.translatorCode.loadFromData(transDict["MainCode_zh_CN"])
+            self.loader.translator.loadFromData(transDict["loadingUI_zh_CN"])
+            self.failmarker.translator.loadFromData(transDict["failmarkerCode_zh_CN"])
+            self.exporter.translatorUI.loadFromData(transDict["exportUI_zh_CN"])
+            self.exporter.translatorCode.loadFromData(transDict["exportCode_zh_CN"])
+            self.settingUI.translator.loadFromData(transDict["settingUI_zh_CN"])
+            self.dutDataReader.translator.loadFromData(transDict["dutDataCode_zh_CN"])
+            self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_zh_CN"])
+            
+        # retranslate UIs
+        # mainUI
+        _app.installTranslator(self.translatorUI)
+        self.ui.retranslateUi(self)
+        # loader
+        _app.installTranslator(self.loader.translator)
+        self.loader.loaderUI.retranslateUi(self.loader)
+        # exporter
+        _app.installTranslator(self.exporter.translatorUI)
+        self.exporter.exportUI.retranslateUi(self.exporter)
+        # settingUI
+        _app.installTranslator(self.settingUI.translator)
+        self.settingUI.settingsUI.retranslateUi(self.settingUI)
+        # dutTableUI
+        _app.installTranslator(self.dutDataReader.tableUI.translator)
+        self.dutDataReader.tableUI.UI.retranslateUi(self.dutDataReader.tableUI)
+        # failmarker
+        _app.installTranslator(self.failmarker.translator)
+        # dutData
+        _app.installTranslator(self.dutDataReader.translator)
+        # exporterCode
+        _app.installTranslator(self.exporter.translatorCode)
+        # mainCode
+        _app.installTranslator(self.translatorCode)
+        # need to rewrite file info table after changing language
+        self.updateFileHeader()
+    
+    
     def dumpConfigFile(self):
         # save data to toml config
         configData = {"General": {},
@@ -626,7 +696,7 @@ class MyWindow(QtWidgets.QMainWindow):
                       "Color Setting": {}}
         configName = dict(sys.CONFIG_NAME)
         for k, v in self.settingParams.__dict__.items():
-            if k in ["recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
+            if k in ["language", "recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
                 # General
                 configData["General"][configName[k]] = v
             elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
@@ -656,9 +726,9 @@ class MyWindow(QtWidgets.QMainWindow):
     def openNewFile(self, f):
         if not f:
             f, _typ = QFileDialog.getOpenFileName(self, 
-                                                  caption="Select a STD File To Open", 
+                                                  caption=self.tr("Select a STD File To Open"), 
                                                   directory=self.settingParams.recentFolder,
-                                                  filter="All Supported Files (*.std *.stdf *.std* *.gz *.bz2);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2)",)
+                                                  filter=self.tr("All Supported Files (*.std *.stdf *.std* *.gz *.bz2);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2)"),)
         else:
             f = os.path.normpath(f)
             
@@ -682,21 +752,21 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def onFailMarker(self):
         if self.dbConnected:
-            FailMarker(self)
+            self.failmarker.start()
         else:
             # no data is found, show a warning dialog
-            QtWidgets.QMessageBox.warning(self, "Warning", "No file is loaded.")
+            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
                 
     
     def onExportReport(self):
         if self.dbConnected:
-            stdfExporter(self)
+            self.exporter.showUI()
             # we have to de-select test_num(s) after exporting
             # the selected test nums may not be prepared anymore
             self.ui.TestList.clearSelection()
         else:
             # no data is found, show a warning dialog
-            QtWidgets.QMessageBox.warning(self, "Warning", "No file is loaded.")
+            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
     
     
     def onSettings(self):
@@ -704,9 +774,8 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onAbout(self):
-        Version = "V3.1.0"
         msgBox = QtWidgets.QMessageBox(self)
-        msgBox.setWindowTitle("About")
+        msgBox.setWindowTitle(self.tr("About"))
         msgBox.setTextFormat(QtCore.Qt.RichText)
         msgBox.setText(f"<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>Version: {Version}<br>Author: noonchen<br>Email: chennoon233@foxmail.com<br>")
         msgBox.setInformativeText("For instructions, please refer to the ReadMe in the repo:\
@@ -719,6 +788,11 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox.exec_()
         
     
+    def showDutDataTable(self, dutIndexes:list):
+        self.dutDataReader.setDutIndexes(dutIndexes)
+        self.dutDataReader.start()
+        
+    
     def onReadDutData_DS(self):
         # context menu callback for DUT summary
         selectedRows = self.ui.dutInfoTable.selectionModel().selectedRows()
@@ -727,7 +801,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # it should be converted back to source model rows first
             getSourceIndex = lambda pIndex: self.proxyModel_tmodel_dut.mapToSource(pIndex)
             selectedDutIndex = [self.Row_DutIndexDict[getSourceIndex(r).row()] for r in selectedRows]   # if row(s) is selected, self.Row_DutIndexDict is already updated in self.prepareDataForDUTSummary()
-            DutDataReader(self, sorted(selectedDutIndex))
+            self.showDutDataTable(sorted(selectedDutIndex))
 
 
     def onReadDutData_TS(self):
@@ -737,9 +811,9 @@ class MyWindow(QtWidgets.QMainWindow):
             allDutIndexes = [r.row()-3 for r in selectedRows]    # row4 is dutIndex 1
             selectedDutIndex = sorted([i for i in set(allDutIndexes) if i > 0])     # remove duplicates and invalid dutIndex (e.g. header rows)
             if selectedDutIndex:
-                DutDataReader(self, selectedDutIndex)
+                self.showDutDataTable(selectedDutIndex)
             else:
-                QMessageBox.information(None, "No DUTs selected", "You need to select DUT row(s) first", buttons=QMessageBox.Ok)
+                QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
   
     
     def onInfoBoxChanged(self):
@@ -791,8 +865,8 @@ class MyWindow(QtWidgets.QMainWindow):
             2nd col: site
             3rd+ col: test items
             """
-            hheaderLabels = ["Part ID", "Test Head - Site"]
-            vheaderLabels_base = ["Test Number", "HLimit", "LLimit", "Unit"]
+            hheaderLabels = [self.tr("Part ID"), self.tr("Test Head - Site")]
+            vheaderLabels_base = [self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")]
             vh_len = len(vheaderLabels_base)
             # clear raw data table
             self.tmodel_raw.removeColumns(0, self.tmodel_raw.columnCount())
@@ -995,10 +1069,6 @@ class MyWindow(QtWidgets.QMainWindow):
             # any error occurs in config file reading, simply ignore
             pass
             
-    
-    def init_SettingUI(self):
-        self.settingUI = stdfSettings(self)
-        
         
     def updateModelContent(self, model, newList):
         # clear first
@@ -1017,17 +1087,21 @@ class MyWindow(QtWidgets.QMainWindow):
         horizontalHeader.setVisible(False)
         verticalHeader.setVisible(False)
         
+        if self.std_handle is None:
+            # skip the following steps if no file is loaded
+            return
+        
         # manually add rows of std file info
         absPath = os.path.realpath(self.std_handle.fpath)
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Name: ", os.path.basename(absPath)]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["Directory Path: ", os.path.dirname(absPath)]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["File Size: ", "%.2f MB"%(os.stat(self.std_handle.fpath).st_size / 2**20)]])
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("File Name: "), os.path.basename(absPath)]])
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("Directory Path: "), os.path.dirname(absPath)]])
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("File Size: "), "%.2f MB"%(os.stat(self.std_handle.fpath).st_size / 2**20)]])
         if self.containsWafer:
-            self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["Wafers Tested: ", str(len(self.completeWaferList))]])    # WIR #
+            self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("Wafers Tested: "), str(len(self.completeWaferList))]])    # WIR #
         statsDict = self.DatabaseFetcher.getDUTStats()
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Tested: ", str(statsDict["Total"])]])    # PIR #
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Passed: ", str(statsDict["Pass"])]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in ["DUTs Failed: ", str(statsDict["Failed"])]])
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Tested: "), str(statsDict["Total"])]])    # PIR #
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Passed: "), str(statsDict["Pass"])]])
+        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Failed: "), str(statsDict["Failed"])]])
 
         extraInfoList = []
         # append mir info
@@ -1045,21 +1119,21 @@ class MyWindow(QtWidgets.QMainWindow):
         if self.containsWafer:
             wafer_unit = self.fileInfoDict.get("WF_UNITS", "")
             if "WAFR_SIZ" in self.fileInfoDict:
-                extraInfoList.append(["Wafer Size: ", f'{self.fileInfoDict["WAFR_SIZ"]} {wafer_unit}'])
+                extraInfoList.append([self.tr("Wafer Size: "), f'{self.fileInfoDict["WAFR_SIZ"]} {wafer_unit}'])
             if "DIE_WID" in self.fileInfoDict and "DIE_HT" in self.fileInfoDict:
-                extraInfoList.append(["Wafer Die Width × Height: ", f'{self.fileInfoDict["DIE_WID"]} {wafer_unit} × {self.fileInfoDict["DIE_HT"]} {wafer_unit}'])
+                extraInfoList.append([self.tr("Wafer Die Width × Height: "), f'{self.fileInfoDict["DIE_WID"]} {wafer_unit} × {self.fileInfoDict["DIE_HT"]} {wafer_unit}'])
             if "CENTER_X" in self.fileInfoDict and "CENTER_Y" in self.fileInfoDict:
-                extraInfoList.append(["Wafer Center: ", f'({self.fileInfoDict["CENTER_X"]}, {self.fileInfoDict["CENTER_Y"]})'])
+                extraInfoList.append([self.tr("Wafer Center: "), f'({self.fileInfoDict["CENTER_X"]}, {self.fileInfoDict["CENTER_Y"]})'])
             
-            direction_symbol = {"U": "Up", 
-                                "D": "Down", 
-                                "L": "Left", 
-                                "R": "Right"}
-            flat_orient = direction_symbol.get(self.fileInfoDict.get("WF_FLAT", ""), "Unknown")
-            x_orient = direction_symbol.get(self.fileInfoDict.get("POS_X", ""), "Unknown")
-            y_orient = direction_symbol.get(self.fileInfoDict.get("POS_Y", ""), "Unknown")
-            extraInfoList.append(["Wafer Flat Direction: ", f'{flat_orient}'])
-            extraInfoList.append(["Wafer XY Direction: ", f'({x_orient}, {y_orient})'])
+            direction_symbol = {"U": self.tr("Up"), 
+                                "D": self.tr("Down"), 
+                                "L": self.tr("Left"), 
+                                "R": self.tr("Right")}
+            flat_orient = direction_symbol.get(self.fileInfoDict.get("WF_FLAT", ""), self.tr("Unknown"))
+            x_orient = direction_symbol.get(self.fileInfoDict.get("POS_X", ""), self.tr("Unknown"))
+            y_orient = direction_symbol.get(self.fileInfoDict.get("POS_Y", ""), self.tr("Unknown"))
+            extraInfoList.append([self.tr("Wafer Flat Direction: "), f'{flat_orient}'])
+            extraInfoList.append([self.tr("Wafer XY Direction: "), f'({x_orient}, {y_orient})'])
             
         for tmpRow in extraInfoList:
             qitemRow = [QtGui.QStandardItem(ele) for ele in tmpRow]
@@ -1080,9 +1154,10 @@ class MyWindow(QtWidgets.QMainWindow):
         # clear
         self.tmodel_dut.removeRows(0, self.tmodel_dut.rowCount())
         self.tmodel_dut.removeColumns(0, self.tmodel_dut.columnCount())
-        headerLabels = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "DUT Flag"]
+        headerLabels = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
+                        self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("DUT Flag")]
         if self.containsWafer:
-            headerLabels[-1:-1] = ["Wafer ID", "(X, Y)"]    # insert before "DUT Flag"
+            headerLabels[-1:-1] = [self.tr("Wafer ID"), "(X, Y)"]    # insert before "DUT Flag"
         self.tmodel_dut.setHorizontalHeaderLabels(headerLabels)
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
@@ -1092,7 +1167,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
         # load all duts info into the table, dutArray is ordered and consecutive
         keyPoints = list(range(5, 106, 5))
-        self.updateStatus(f"Please wait, reading DUT information...")
+        self.updateStatus(self.tr("Please wait, reading DUT information..."))
         
         for dutIndex in self.dutArray:
             itemRow = self.dutSummaryDict[dutIndex] if self.containsWafer else \
@@ -1101,7 +1176,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             progress = 100 * dutIndex / totalDutCnt
             if progress >= keyPoints[0]:
-                self.updateStatus(f"Please wait, reading DUT information {keyPoints[0]}%...")
+                self.updateStatus(self.tr("Please wait, reading DUT information {0}%...").format(keyPoints[0]))
                 keyPoints.pop(0)
         self.updateStatus("")
         
@@ -1254,23 +1329,23 @@ class MyWindow(QtWidgets.QMainWindow):
             
         if recHeader == REC.FTR:
             # FTR only contains test flag
-            test_data_list += ["Not Tested" if np.isnan(data) else "Test Flag: %d" % data for data in testDict["dataList"]]
+            test_data_list += [self.tr("Not Tested") if np.isnan(data) else self.tr("Test Flag: %d") % data for data in testDict["dataList"]]
             
         elif recHeader == REC.PTR:
-            test_data_list += ["Not Tested" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
+            test_data_list += [self.tr("Not Tested") if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
             
         else:
             # MPR
             if testDict["dataList"].size == 0:
                 # No PMR related and no test data in MPR, use test flag instead
-                test_data_list += ["Not Tested" if flag < 0 else "Test Flag: %d" % flag for flag in testDict["flagList"]]
+                test_data_list += [self.tr("Not Tested") if flag < 0 else self.tr("Test Flag: %d") % flag for flag in testDict["flagList"]]
             else:
                 # Test data may exist, use semicolon to separate multiple test values
                 data_string_list = []
                 for mprDataList, mprFlag in zip(testDict["dataList"].T, testDict["flagList"]):
                     if mprFlag < 0:
                         # flag of not tested is -1
-                        data_string_list.append("Not Tested")
+                        data_string_list.append(self.tr("Not Tested"))
                     else:
                         data_string_list.append("\n".join(["%s: " % pinName + valueFormat % data for pinName, data in zip(testDict["PIN_NAME"], mprDataList)]))
                 test_data_list += data_string_list
@@ -1626,17 +1701,17 @@ class MyWindow(QtWidgets.QMainWindow):
             rowList = []
             
             if bin == "HBIN":
-                fullName = "Hardware Bin"
+                fullName = self.tr("Hardware Bin")
                 bin_dict = self.HBIN_dict
             elif bin == "SBIN":
-                fullName = "Software Bin"
+                fullName = self.tr("Software Bin")
                 bin_dict = self.SBIN_dict
             
             binStats = self.DatabaseFetcher.getBinStats(head, site, bin)
             # binNumList = [item[0] for item in binStats]
             total = sum([binStats[bin] for bin in binStats.keys()])
             
-            rowList.append("%s / %s / %s" % (f"{fullName}", f"Head{head}", "All Sites" if site == -1 else f"Site{site}"))
+            rowList.append("%s / %s / %s" % (f"{fullName}", f"Head{head}", self.tr("All Sites") if site == -1 else f"Site{site}"))
             for bin_num in sorted(binStats.keys()):
                 cnt = binStats[bin_num]
                 if cnt == 0: continue
@@ -1665,7 +1740,7 @@ class MyWindow(QtWidgets.QMainWindow):
             total = sum([len(coordList) for coordList in coordsDict.values()])
             waferID = self.waferInfoDict[waferIndex]["WAFER_ID"]
             
-            rowList.append("%s / %s / %s" % (f"{waferID}", f"Head{head}", "All Sites" if site == -1 else f"Site{site}"))
+            rowList.append("%s / %s / %s" % (f"{waferID}", f"Head{head}", self.tr("All Sites") if site == -1 else f"Site{site}"))
             for bin_num in sorted(coordsDict.keys()):
                 cnt = len(coordsDict[bin_num])
                 if cnt == 0: continue
@@ -1746,8 +1821,10 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
             # set col headers except Bin Chart
-            headerLabels = ["Test Name", "Unit", "Low Limit", "High Limit", "Fail Num", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
-            indexOfFail = headerLabels.index("Fail Num")    # used for pickup fail number when iterating
+            headerLabels = [self.tr("Test Name"), self.tr("Unit"), self.tr("Low Limit"), self.tr("High Limit"), 
+                            self.tr("Fail Num"), "Cpk", self.tr("Average"), self.tr("Median"), 
+                            self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
+            indexOfFail = headerLabels.index(self.tr("Fail Num"))    # used for pickup fail number when iterating
             indexOfCpk = headerLabels.index("Cpk")
             self.tmodel.setHorizontalHeaderLabels(headerLabels)     
             self.ui.dataTable.horizontalHeader().setVisible(True)
@@ -1873,7 +1950,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
         if exportImg:
             imgData = io.BytesIO()
-            fig.savefig(imgData, format="png", dpi=fig.dpi, bbox_inches="tight")
+            fig.savefig(imgData, format="png", dpi=200, bbox_inches="tight")
             return imgData
         else:
             # put figure in a canvas and display in pyqt widgets
@@ -1913,7 +1990,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def genTrendPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
         selData = self.getData(test_num, [head], [site])
         ax = fig.add_subplot(111)
-        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
         dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
         dataInvalid = np.all(np.isnan(y_raw))
@@ -1921,7 +1998,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
         if dataInvalid and testInvalid:
             # show a warning text in figure
-            ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data for "%s" \nfound in head %d - site %d') % (selData["TEST_NAME"], head, site), color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
             trendLine = None
         else:
             if selData["recHeader"] == REC.MPR:
@@ -1981,7 +2058,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         headroomX = (x_arr[-1]-x_arr[0]) * 0.1
                         ax.set_xlim(left = x_arr[0] - headroomX, right = x_arr[-1] + headroomX)
                     ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
-                    ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma", labelpad=6)
+                    ax.set_xlabel("%s"%(self.tr("DUT Index")), fontsize=12, fontname=self.imageFont, labelpad=6)
                     ax.set_yticklabels([])
                     ax.yaxis.set_ticks_position('none')
                     return ax, trendLine
@@ -1999,9 +2076,9 @@ class MyWindow(QtWidgets.QMainWindow):
             # axes label
             ax.ticklabel_format(useOffset=False)    # prevent + sign
             ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
-            ax.set_xlabel("%s"%("DUT Index"), fontsize=12, fontname="Tahoma")
+            ax.set_xlabel("%s"%(self.tr("DUT Index")), fontsize=12, fontname=self.imageFont)
             if selData["recHeader"] == REC.FTR:
-                ax.set_ylabel("Test Flag", fontsize=12, fontname="Tahoma")
+                ax.set_ylabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
             else:
                 ax.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
             # limits
@@ -2059,14 +2136,14 @@ class MyWindow(QtWidgets.QMainWindow):
     def genHistoPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
         selData = self.getData(test_num, [head], [site])
         ax = fig.add_subplot(111)
-        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
         dataInvalid = np.all(np.isnan(selData["dataList"]))
         testInvalid = np.all(selData["flagList"] < 0)
 
         if dataInvalid and testInvalid:
             # show a warning text in figure
-            ax.text(x=0.5, y=0.5, s=f'No test data for "{selData["TEST_NAME"]}" \nfound in head {head} - site {site}', color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data for "%s" \nfound in head %d - site %d') % (selData["TEST_NAME"], head, site), color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:
             if selData["recHeader"] == REC.MPR:
                 if dataInvalid:
@@ -2130,7 +2207,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         
                         if index == int(pinCount/2):
                             # middle plot, use ax will cause overlapping
-                            tmpAx.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
+                            tmpAx.set_ylabel("%s"%(self.tr("DUT Counts")), fontsize=12, fontname=self.imageFont)
                         if index != pinCount-1:
                             tmpAx.xaxis.set_visible(False)
                     
@@ -2218,16 +2295,16 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
             ax.ticklabel_format(useOffset=False)    # prevent + sign
             if selData["recHeader"] == REC.FTR:
-                ax.set_xlabel("Test Flag", fontsize=12, fontname="Tahoma")
+                ax.set_xlabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
             else:
                 ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
-            ax.set_ylabel("%s"%("DUT Counts"), fontsize=12, fontname="Tahoma")
+            ax.set_ylabel("%s"%(self.tr("DUT Counts")), fontsize=12, fontname=self.imageFont)
             
         return ax
     
     
     def genBinPlot(self, fig:plt.Figure, head:int, site:int):
-        fig.suptitle("%s - %s - %s"%("Bin Summary", "Test Head%d"%head, "All Sites" if site == -1 else "Site%d"%site), fontsize=15, fontname="Tahoma")
+        fig.suptitle("%s - %s - %s"%(self.tr("Bin Summary"), "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         ax_l = fig.add_subplot(121)
         ax_r = fig.add_subplot(122)
         Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
@@ -2247,8 +2324,8 @@ class MyWindow(QtWidgets.QMainWindow):
         ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)))    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
         ax_l.set_xlim(-.5, max(3, len(HCnt))-.5)
         ax_l.set_ylim(top=max(HCnt)*1.2)
-        ax_l.set_xlabel("Hardware Bin", fontsize=12, fontname="Tahoma")
-        ax_l.set_ylabel("Hardware Bin Counts", fontsize=12, fontname="Tahoma")
+        ax_l.set_xlabel(self.tr("Hardware Bin"), fontsize=12, fontname=self.imageFont)
+        ax_l.set_ylabel(self.tr("Hardware Bin Counts"), fontsize=12, fontname=self.imageFont)
 
         # SBIN plot
         binStats = self.DatabaseFetcher.getBinStats(head, site, "SBIN")
@@ -2266,8 +2343,8 @@ class MyWindow(QtWidgets.QMainWindow):
         ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)))
         ax_r.set_xlim(-.5, max(3, len(SCnt))-.5)
         ax_r.set_ylim(top=max(SCnt)*1.2)
-        ax_r.set_xlabel("Software Bin", fontsize=12, fontname="Tahoma")
-        ax_r.set_ylabel("Software Bin Counts", fontsize=12, fontname="Tahoma")
+        ax_r.set_xlabel(self.tr("Software Bin"), fontsize=12, fontname=self.imageFont)
+        ax_r.set_ylabel(self.tr("Software Bin Counts"), fontsize=12, fontname=self.imageFont)
         
         return ax_l, ax_r
     
@@ -2292,7 +2369,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     
         if wafer_num == -1:
             # -1 indicates stacked wafer map
-            ax.set_title("Stacked Wafer Map - %s - %s"%("Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            ax.set_title(self.tr("Stacked Wafer Map - %s - %s") % ("Head%d" % head, self.tr("All DUTs") if site == -1 else self.tr("DUT in Site%d") % site), fontsize=15, fontname=self.imageFont)
             failDieDistribution = self.DatabaseFetcher.getStackedWaferData(head, site)
             x_mesh = np.arange(xmin-0.5, xmax+1, 1)     # xmin-0.5, xmin+0.5, ..., xmax+0.5
             y_mesh = np.arange(ymin-0.5, ymax+1, 1)
@@ -2311,7 +2388,7 @@ class MyWindow(QtWidgets.QMainWindow):
             ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
             cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
             cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
-            cbar.set_label("Total failed dies")
+            cbar.set_label(self.tr("Total failed dies"), fontname=self.imageFont)
             # ax_colorbar = fig.add_axes([ax.get_position().x1+0.03, ax.get_position().y0, 0.02, ax.get_position().height])
             # cbar = fig.colorbar(pcmesh, cax=ax_colorbar)
             # cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
@@ -2319,7 +2396,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
         else:
             waferDict = self.waferInfoDict[wafer_num]
-            ax.set_title("Wafer ID: %s - %s - %s"%(waferDict["WAFER_ID"], "Test Head%d"%head, "All DUTs" if site == -1 else "DUT of Site%d"%site), fontsize=15, fontname="Tahoma")
+            ax.set_title(self.tr("Wafer ID: %s - %s - %s") % (waferDict["WAFER_ID"], "Head%d"%head, self.tr("All DUTs") if site == -1 else self.tr("DUT in Site%d") % site), fontsize=15, fontname=self.imageFont)
             # group coords by soft bin
             coordsDict = self.DatabaseFetcher.getWaferCoordsDict(wafer_num, head, site)
             dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
@@ -2400,7 +2477,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def callFileLoader(self, stdHandle):
         if stdHandle:
-            stdfLoader(stdHandle.fpath, self.signals, self)
+            self.loader.loadFile(stdHandle.fpath)
 
         
     @Slot(bool)
@@ -2481,7 +2558,7 @@ class MyWindow(QtWidgets.QMainWindow):
             for headnum in self.availableHeads:
                 if headnum in self.head_cb_dict:
                     continue
-                headName = "Test Head %d" % headnum
+                headName = "Head %d" % headnum
                 self.head_cb_dict[headnum] = QtWidgets.QCheckBox(self.ui.head_selection_tab)
                 self.head_cb_dict[headnum].setObjectName(headName)
                 self.head_cb_dict[headnum].setText(headName)
@@ -2497,7 +2574,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # get complete dut summary dict from stdf
             self.dutSummaryDict = self.DatabaseFetcher.getDUT_Summary()
             
-            self.init_SettingUI()               # remove existing color btns
+            self.settingUI.removeColorBtns()               # remove existing color btns
             self.settingUI.initColorBtns()
             self.init_SettingParams()
             self.init_Head_SiteCheckbox()
@@ -2517,12 +2594,12 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
         self.statusBar().showMessage(new_msg)
         if info: 
-            QtWidgets.QMessageBox.information(None, "Info", new_msg)
+            QtWidgets.QMessageBox.information(None, self.tr("Info"), new_msg)
         elif warning: 
-            QtWidgets.QMessageBox.warning(None, "Warning", new_msg)
+            QtWidgets.QMessageBox.warning(None, self.tr("Warning"), new_msg)
             logger.warning(new_msg)
         elif error:
-            QtWidgets.QMessageBox.critical(None, "Error", new_msg)
+            QtWidgets.QMessageBox.critical(None, self.tr("Error"), new_msg)
             sys.exit()
         QApplication.processEvents()
         

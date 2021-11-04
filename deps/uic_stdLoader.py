@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Wed Nov 03 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,15 +27,15 @@
 import time, os, sys, logging
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets
-# from PySide2.QtCore import Signal, Slot
+# from PySide2.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
-# from PySide6.QtCore import Signal, Slot
+# from PySide6.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 from .cystdf import stdfDataRetriever     # cython version
@@ -64,10 +64,10 @@ class signal4Loader(QtCore.QObject):
 
 class stdfLoader(QtWidgets.QDialog):
     
-    def __init__(self, stdPath, parentSignal = None, parent = None):
+    def __init__(self, parentSignal = None, parent = None):
         super().__init__(parent)
+        self.translator = QTranslator(self)
         self.closeEventByThread = False    # used to determine the source of close event
-        self.stdPath = stdPath
         
         self.signals = signal4Loader()
         self.signals.progressBarSignal.connect(self.updateProgressBar)
@@ -80,10 +80,13 @@ class stdfLoader(QtWidgets.QDialog):
         self.loaderUI = Ui_loadingUI()
         self.loaderUI.setupUi(self)
         self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
+        
+    def loadFile(self, stdPath):
+        self.closeEventByThread = False    # init at new file
         # create new thread and move stdReader to the new thread
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
-        self.reader.readThis(self.stdPath)
+        self.reader.readThis(stdPath)
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
@@ -91,8 +94,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.thread.start()
         # blocking parent if it's not finished
         self.exec_()
-
-        
+    
     def closeEvent(self, event):
         if self.closeEventByThread:
             # close by thread
@@ -123,12 +125,10 @@ class stdfLoader(QtWidgets.QDialog):
             self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
             self.loaderUI.progressBar.setValue(num)
         
-        
     @Slot(bool)
     def sendParseSignal(self, parseStatus):
         # parse parse status from reader to mainUI
         self.signals.parseStatusSignal_parent.emit(parseStatus)
-    
     
     @Slot(bool)
     def closeLoader(self, closeUI):

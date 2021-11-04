@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Thu Nov 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -29,19 +29,19 @@ from .customizedQtClass import StyleDelegateForTable_List
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal
+from PyQt5.QtCore import pyqtSignal as Signal, QTranslator
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
 # from PySide2.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-# from PySide2.QtCore import Signal
+# from PySide2.QtCore import Signal, QTranslator
 # from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # from .ui.stdfViewer_dutDataUI_side2 import Ui_dutData
 # pyside6
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-# from PySide6.QtCore import Signal
+# from PySide6.QtCore import Signal, QTranslator
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 # from .ui.stdfViewer_dutDataUI_side6 import Ui_dutData
 
@@ -53,24 +53,31 @@ class signal(QtCore.QObject):
     
 
 class DutDataReader(QtWidgets.QWidget):
-    def __init__(self, parent, selectedDutIndex:list):
+    def __init__(self, parent):
         super().__init__()
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
         self.parent = parent
-        self.selectedDutIndex = selectedDutIndex      # selected indexes of dut info table
+        self.translator = QTranslator(self)
+        self.selectedDutIndex = []
                 
-        self.setWindowTitle("Reading DUT data")
-        self.UI.progressBar.setFormat("%p%")
         self.stopFlag = False
         self.signal = signal()
         self.signal.hideSignal.connect(self.hide)
+        self.tableUI = dutDataDisplayer(self, self.signal.hideSignal)
         
-        self.show()
-        self.start()
+    
+    def setDutIndexes(self, selectedDutIndex:list):
+        self.selectedDutIndex = selectedDutIndex      # selected indexes of dut info table
     
     
     def start(self):
+        # init every start
+        self.setWindowTitle(self.tr("Reading DUT data"))
+        self.UI.progressBar.setFormat("%p%")
+        self.stopFlag = False
+        self.show()
+        
         self.test_number_List = sorted([int(ele.split("\t")[0]) for ele in self.parent.completeTestList])
         self.total = len(self.test_number_List)
         dutInfo = [self.parent.dutSummaryDict[i] for i in self.selectedDutIndex]
@@ -87,9 +94,10 @@ class DutDataReader(QtWidgets.QWidget):
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
             QApplication.processEvents()    # force refresh UI to update progress bar
-        self.UI.progressBar.setFormat("Filling table with data...")
+        self.UI.progressBar.setFormat(self.tr("Filling table with data..."))
         QApplication.processEvents()
-        dutDataDisplayer(self, (dutInfo, dutData, dutStat, dutFlagInfo), self.signal.hideSignal)
+        self.tableUI.setContent((dutInfo, dutData, dutStat, dutFlagInfo))
+        self.tableUI.showUI()
         self.close()
             
         
@@ -105,23 +113,29 @@ class DutDataReader(QtWidgets.QWidget):
         
         
 class dutDataDisplayer(QtWidgets.QDialog):
-    def __init__(self, parent, content, hideSignal):
+    def __init__(self, parent, hideSignal: Signal):
         super().__init__()
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
         self.parent = parent
-        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = content
+        self.translator = QTranslator(self)
         self.sd = StyleDelegateForTable_List()
+        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = ([], [], [], [])
         self.hideSignal = hideSignal
         
         self.UI.save.clicked.connect(self.onSave_csv)
         self.UI.save_xlsx.clicked.connect(self.onSave_xlsx)
         self.UI.close.clicked.connect(self.close)
         self.init_Table()
-        self.parent.parent.updateStatus("Please wait for data filling in the table...")
+        
+        
+    def setContent(self, content):
+        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = content
+        
+    
+    def showUI(self):
         self.refresh_Table()
         self.hideSignal.emit()
-        self.parent.parent.updateStatus("")
         self.exec_()
         
         
@@ -139,14 +153,16 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.removeColumns(0, self.tmodel.columnCount())
         self.tmodel.removeRows(0, self.tmodel.rowCount())
         # header
-        self.hh = ["Part ID", "Test Head - Site", "Tests Executed", "Test Time", "Hardware Bin", "Software Bin", "Wafer ID", "(X, Y)", "DUT Flag"] + [tmp[0] for tmp in self.dutData]
-        vh_base = ["Test Number", "HiLimit", "LoLimit", "Unit"]
+        self.hh = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
+                   self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), 
+                   self.tr("DUT Flag")] + [tmp[0] for tmp in self.dutData]
+        vh_base = [self.tr("Test Number"), self.tr("HiLimit"), self.tr("LoLimit"), self.tr("Unit")]
         self.vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
         vh_len = len(vh_base)
 
         # append value
         # get dut pass/fail list
-        statIndex = self.hh.index("DUT Flag")
+        statIndex = self.hh.index(self.tr("DUT Flag"))
         dutStatus = [True] * vh_len + [not dutInfo_perDUT[statIndex].startswith(b"F") for dutInfo_perDUT in self.dutInfo]        # not startswith F == Passed / None
         for col_tuple in zip(*self.dutInfo):
             tmpCol = [b""] * vh_len + list(col_tuple)
@@ -189,7 +205,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         
         
     def onSave_csv(self):
-        outPath, _ = QFileDialog.getSaveFileName(None, caption="Save Report As", filter="CSV file (*.csv)")
+        outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("CSV file (*.csv)"))
         if outPath:
             with open(outPath, "w") as f:
                 f.write(",".join([""] + self.hh)+"\n")
@@ -197,11 +213,11 @@ class dutDataDisplayer(QtWidgets.QDialog):
                     rowDataList = [self.tmodel.data(self.tmodel.index(row, col)) for col in range(self.tmodel.columnCount())]
                     f.write(",".join([self.vh[row]] + rowDataList)+"\n")
             msgbox = QtWidgets.QMessageBox(None)
-            msgbox.setText("Completed")
-            msgbox.setInformativeText("File is saved in %s"%outPath)
-            revealBtn = msgbox.addButton(" Reveal in folder ", QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton("Open...", QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton("OK", QtWidgets.QMessageBox.YesRole)
+            msgbox.setText(self.tr("Completed"))
+            msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
@@ -211,7 +227,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
             
     
     def onSave_xlsx(self):
-        outPath, _ = QFileDialog.getSaveFileName(None, caption="Save Report As", filter="Excel file (*.xlsx)")
+        outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("Excel file (*.xlsx)"))
         
         if outPath:
             def write_row(sheet, row, scol, dataL, styleList):
@@ -227,7 +243,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
                 noStyle = wb.add_format({"align": "center"})
                 failStyle = wb.add_format({"bg_color": "#CC0000", "bold": True, "align": "center"})
                 
-                sheetOBJ = wb.add_worksheet("DUT Data")
+                sheetOBJ = wb.add_worksheet(self.tr("DUT Data"))
                 colHeader = [""] + self.hh
                 write_row(sheetOBJ, 0, 0, colHeader, [noStyle]*len(colHeader))
                 col_width = [len(s) for s in colHeader]     # get max string len to adjust cell width
@@ -248,11 +264,11 @@ class dutDataDisplayer(QtWidgets.QDialog):
                 [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
                 
             msgbox = QtWidgets.QMessageBox(None)
-            msgbox.setText("Completed")
-            msgbox.setInformativeText("File is saved in %s"%outPath)
-            revealBtn = msgbox.addButton(" Reveal in folder ", QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton("Open...", QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton("OK", QtWidgets.QMessageBox.YesRole)
+            msgbox.setText(self.tr("Completed"))
+            msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:

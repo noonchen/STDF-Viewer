@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Jun 13 2021
+# Last Modified: Thu Nov 04 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -30,12 +30,15 @@ from copy import deepcopy
 from .ui.ImgSrc_svg import ImgDict
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtCore import QTranslator
 from .ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
 # from PySide2 import QtWidgets, QtGui
+# from PySide2.QtCore import QTranslator
 # from .ui.stdfViewer_settingsUI_side2 import Ui_Setting
 # pyside6
 # from PySide6 import QtWidgets, QtGui
+# from PySide6.QtCore import QTranslator
 # from .ui.stdfViewer_settingsUI_side6 import Ui_Setting
 
 
@@ -53,6 +56,10 @@ indexDic_notation = {0: "G",
                      1: "F",
                      2: "E"}
 indexDic_notation_reverse = {v:k for k, v in indexDic_notation.items()}
+
+indexDic_lang = {0: "English",
+                 1: "中文简体"}
+indexDic_lang_reverse = {v:k for k, v in indexDic_lang.items()}
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
 
@@ -111,6 +118,7 @@ class stdfSettings(QtWidgets.QDialog):
     def __init__(self, parent = None):
         super().__init__(parent)
         self.parent = parent
+        self.translator = QTranslator(self)
         if self.parent: self.originalParams = deepcopy(self.parent.settingParams)
         self.settingsUI = Ui_Setting()
         self.settingsUI.setupUi(self)
@@ -141,6 +149,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_binCount.setText(str(self.originalParams.binCount))
         self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
         # general
+        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(self.originalParams.language, "English"))
         self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
         self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if self.originalParams.checkCpk else 1)
@@ -201,6 +210,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.parent.settingParams.binCount = int(self.settingsUI.lineEdit_binCount.text())
         self.parent.settingParams.showSigma = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
         # General
+        self.parent.settingParams.language = indexDic_lang[self.settingsUI.langCombobox.currentIndex()]
         self.parent.settingParams.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
         self.parent.settingParams.dataPrecision = self.settingsUI.precisionSlider.value()
         self.parent.settingParams.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
@@ -210,31 +220,6 @@ class stdfSettings(QtWidgets.QDialog):
             self.currentColorDict(get=False, group=group)
         
         self.parent.dumpConfigFile()
-        # # save data to toml config
-        # configData = {"General": {},
-        #               "Trend Plot": {},
-        #               "Histo Plot": {},
-        #               "Color Setting": {}}
-        # configName = dict(sys.CONFIG_NAME)
-        # for k, v in self.parent.settingParams.__dict__.items():
-        #     if k in ["recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
-        #         # General
-        #         configData["General"][configName[k]] = v
-        #     elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
-        #         # Trend
-        #         configData["Trend Plot"][configName[k]] = v
-        #     elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
-        #         # Histo
-        #         configData["Histo Plot"][configName[k]] = v
-
-        #     elif k in ["siteColor", "sbinColor", "hbinColor"]:
-        #         # Color
-        #         # change Int key to string, since toml only support string keys
-        #         v = dict([(str(intKey), color) for intKey, color in v.items()])
-        #         configData["Color Setting"][configName[k]] = v
-
-        # with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
-        #     toml.dump(configData, fd)
         
         
     def isTrendChanged(self):
@@ -250,7 +235,7 @@ class stdfSettings(QtWidgets.QDialog):
          
     def isGeneralChanged(self):
         return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]])
+                        for attr in ["language", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]])
 
 
     def isColorChanged(self):
@@ -266,6 +251,7 @@ class stdfSettings(QtWidgets.QDialog):
             refreshTable = False
             refreshList = False
             refreshCursor = False
+            retranslate = False
             if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
                 refreshTab = True
                 
@@ -281,6 +267,8 @@ class stdfSettings(QtWidgets.QDialog):
                 # if cpk threshold changed, clear listView backgrounds
                 if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
                     refreshList = True
+                if self.originalParams.language != self.parent.settingParams.language:
+                    retranslate = True
                     
             if self.isColorChanged():
                 refreshTab = True
@@ -290,6 +278,7 @@ class stdfSettings(QtWidgets.QDialog):
             if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.clearTestItemBG()
             if refreshCursor: self.parent.updateCursorPrecision()
+            if retranslate: self.parent.changeLanguage()
                 
             # need to update orignal params after updating parent settings
             self.originalParams = deepcopy(self.parent.settingParams)
@@ -301,6 +290,17 @@ class stdfSettings(QtWidgets.QDialog):
         event.accept()
         
         
+    def removeColorBtns(self):
+        for layout in [self.settingsUI.gridLayout_site_color,
+                       self.settingsUI.gridLayout_sbin_color,
+                       self.settingsUI.gridLayout_hbin_color]:
+            for i in range(layout.count())[::-1]:   # delete in reverse
+                cB = layout.itemAt(i).widget()
+                layout.removeWidget(cB)
+                cB.deleteLater()
+                cB.setParent(None)
+    
+    
     def initColorBtns(self):
         # site color picker
         site_color_group = self.settingsUI.site_groupBox
