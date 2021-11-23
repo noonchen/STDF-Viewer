@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Sep 18 2021
+# Last Modified: Mon Nov 22 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -23,6 +23,7 @@
 #
 
 import sqlite3
+from matplotlib.pyplot import hlines
 import numpy as np
 
 
@@ -381,6 +382,72 @@ class DatabaseFetcher:
                 failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
         
         return failDieDistribution
+    
+    
+    def getDUTIndexFromBin(self, head:int, site:int, bin:int, binType:str = "HBIN") -> list:
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        if binType != "HBIN" and binType != "SBIN": raise RuntimeError("binType should be HBIN or SBIN")
+        
+        dutIndexList = []
+        if site == -1:
+            sql = f"SELECT DUTIndex FROM Dut_Info \
+                WHERE {binType}=? AND HEAD_NUM=?"
+            sql_param = (bin, head)
+        else:
+            sql = f"SELECT DUTIndex FROM Dut_Info \
+                WHERE {binType}=? AND HEAD_NUM=? AND SITE_NUM=?"
+            sql_param = (bin, head, site)
+            
+        for dutIndex, in self.cursor.execute(sql, sql_param):
+            dutIndexList.append(dutIndex)
+        
+        return dutIndexList
+    
+    
+    def getDUTIndexFromXY(self, x:int, y:int, wafer_num:int) -> list:
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        dutIndexList = []
+        sql = "SELECT DUTIndex FROM Dut_Info WHERE XCOORD=? AND YCOORD=?" + ("" if wafer_num == -1 else " AND WaferIndex=?")
+        sql_param = [x, y] + ([] if wafer_num == -1 else [wafer_num])
+            
+        for dutIndex, in self.cursor.execute(sql, sql_param):
+            dutIndexList.append(dutIndex)
+        
+        return dutIndexList
+    
+    
+    def getDynamicLimits(self, test_num:int, dutList:np.ndarray, LLimit:float, HLimit:float, limitScale:int):
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        hasValidLow = False
+        hasValidHigh = False
+        hasDynamicLow = False
+        hasDynamicHigh = False
+        if LLimit is not None: hasValidLow = True
+        if HLimit is not None: hasValidHigh = True
+        
+        if hasValidLow or hasValidHigh:
+            dut_index_dict = dict(zip(dutList, range(dutList.size)))
+            if hasValidLow:
+                dyLLimits = np.full(dutList.size, LLimit, np.float32)
+            if hasValidHigh:
+                dyHLimits = np.full(dutList.size, HLimit, np.float32)
+            sql = "SELECT DUTIndex, LLimit, HLimit FROM Dynamic_Limits WHERE TEST_NUM=? AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join([str(i) for i in dutList]))
+            sql_param = [test_num]
+                
+            for dutIndex, dyLL, dyHL in self.cursor.execute(sql, sql_param):
+                # replace the limit in the list of the same index as the dutIndex in dutList
+                if hasValidLow and (dyLL is not None):
+                    hasDynamicLow = True
+                    dyLLimits[dut_index_dict[dutIndex]] = dyLL * 10 ** limitScale
+                if hasValidHigh and (dyHL is not None):
+                    hasDynamicHigh = True
+                    dyHLimits[dut_index_dict[dutIndex]] = dyHL * 10 ** limitScale
+                    
+            return hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits
+        else:
+            # return empty array if all limits are None
+            return hasDynamicLow, np.array([]), hasDynamicHigh, np.array([])
 
 
 if __name__ == "__main__":
@@ -405,12 +472,15 @@ if __name__ == "__main__":
     # print(dutArray[mask])    
     
     # ** test info selDUTs
-    print(df.getStackedWaferData(1, -1))
+    # print(df.getStackedWaferData(1, -1))
     
     # ** test wafer coords dict
     # print(df.getWaferCoordsDict(1, 1, 0))
     # print('\n', df.getWaferCoordsDict(1, 1, -1))
     # print('\n', df.getWaferCoordsDict(1, 255, 0))
+    
+    # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
+    # print(df.getDUTIndexFromXY(40, -10, -1))
     
     
     e = time()

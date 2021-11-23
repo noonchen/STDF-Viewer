@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Nov 04 2021
+# Last Modified: Tue Nov 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -137,11 +137,15 @@ class stdfSettings(QtWidgets.QDialog):
         # trend
         self.settingsUI.showHL_trend.setChecked(self.originalParams.showHL_trend)
         self.settingsUI.showLL_trend.setChecked(self.originalParams.showLL_trend)
+        self.settingsUI.showHSpec_trend.setChecked(self.originalParams.showHSpec_trend)
+        self.settingsUI.showLSpec_trend.setChecked(self.originalParams.showLSpec_trend)
         self.settingsUI.showMedian_trend.setChecked(self.originalParams.showMed_trend)
         self.settingsUI.showMean_trend.setChecked(self.originalParams.showMean_trend)
         # histo
         self.settingsUI.showHL_histo.setChecked(self.originalParams.showHL_histo)
         self.settingsUI.showLL_histo.setChecked(self.originalParams.showLL_histo)
+        self.settingsUI.showHSpec_histo.setChecked(self.originalParams.showHSpec_histo)
+        self.settingsUI.showLSpec_histo.setChecked(self.originalParams.showLSpec_histo)
         self.settingsUI.showMedian_histo.setChecked(self.originalParams.showMed_histo)
         self.settingsUI.showMean_histo.setChecked(self.originalParams.showMean_histo)
         self.settingsUI.showGaus_histo.setChecked(self.originalParams.showGaus_histo)
@@ -198,11 +202,15 @@ class stdfSettings(QtWidgets.QDialog):
         # trend
         self.parent.settingParams.showHL_trend = self.settingsUI.showHL_trend.isChecked()
         self.parent.settingParams.showLL_trend = self.settingsUI.showLL_trend.isChecked()
+        self.parent.settingParams.showHSpec_trend = self.settingsUI.showHSpec_trend.isChecked()
+        self.parent.settingParams.showLSpec_trend = self.settingsUI.showLSpec_trend.isChecked()
         self.parent.settingParams.showMed_trend = self.settingsUI.showMedian_trend.isChecked()
         self.parent.settingParams.showMean_trend = self.settingsUI.showMean_trend.isChecked()
         # histo
         self.parent.settingParams.showHL_histo = self.settingsUI.showHL_histo.isChecked()
         self.parent.settingParams.showLL_histo = self.settingsUI.showLL_histo.isChecked()
+        self.parent.settingParams.showHSpec_histo = self.settingsUI.showHSpec_histo.isChecked()
+        self.parent.settingParams.showLSpec_histo = self.settingsUI.showLSpec_histo.isChecked()
         self.parent.settingParams.showMed_histo = self.settingsUI.showMedian_histo.isChecked()
         self.parent.settingParams.showMean_histo = self.settingsUI.showMean_histo.isChecked()
         self.parent.settingParams.showGaus_histo = self.settingsUI.showGaus_histo.isChecked()
@@ -224,12 +232,12 @@ class stdfSettings(QtWidgets.QDialog):
         
     def isTrendChanged(self):
         return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]])
+                        for attr in ["showHL_trend", "showLL_trend", "showHSpec_trend", "showLSpec_trend", "showMed_trend", "showMean_trend"]])
         
         
     def isHistoChanged(self):
         return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", 
+                        for attr in ["showHL_histo", "showLL_histo", "showHSpec_histo", "showLSpec_histo", "showMed_histo", "showMean_histo", 
                                      "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]])
         
          
@@ -258,17 +266,18 @@ class stdfSettings(QtWidgets.QDialog):
             if self.isHistoChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Histo): 
                 refreshTab = True
                 
-            if self.isGeneralChanged() and (self.parent.ui.tabControl.currentIndex() != tab.Bin): 
-                refreshTable = True
-                refreshCursor = True
-                # if raw data table is active, update as well
-                if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
-                    refreshTab = True
-                # if cpk threshold changed, clear listView backgrounds
-                if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
-                    refreshList = True
+            if self.isGeneralChanged(): 
                 if self.originalParams.language != self.parent.settingParams.language:
                     retranslate = True
+                if self.parent.ui.tabControl.currentIndex() != tab.Bin:
+                    refreshTable = True
+                    refreshCursor = True
+                    # if raw data table is active, update as well
+                    if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
+                        refreshTab = True
+                    # if cpk threshold changed, clear listView backgrounds
+                    if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
+                        refreshList = True
                     
             if self.isColorChanged():
                 refreshTab = True

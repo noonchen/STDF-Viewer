@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 19th 2021
 # -----
-# Last Modified: Fri Aug 27 2021
+# Last Modified: Thu Nov 18 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -130,7 +130,12 @@ cdef extern from "stdf4_func.c" nogil:
         Cn  SERL_NUM
         Cn  SUPR_NAM
     
-    ctypedef struct MRR
+    ctypedef struct MRR:
+        U4  FINISH_T
+        C1  DISP_COD
+        Cn  USR_DESC
+        Cn  EXC_DESC
+        
     ctypedef struct PCR:
         U1  HEAD_NUM
         U1  SITE_NUM

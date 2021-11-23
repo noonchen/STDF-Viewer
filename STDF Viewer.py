@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Nov 04 2021
+# Last Modified: Tue Nov 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -25,6 +25,7 @@
 
 
 import io, os, sys, gc, traceback, toml, logging, atexit
+import json, urllib.request as rq
 # from memory_profiler import profile
 import numpy as np
 from enum import IntEnum
@@ -83,8 +84,8 @@ setattr(sys, "rootFolder", rootFolder)
 base = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
 # setting attr to human string
-settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
-                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
+settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
+                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
                    ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
@@ -99,13 +100,13 @@ logFD.setFormatter(logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %
 logger.addHandler(logFD)
 
 
-def calc_cpk(L, H, data) -> tuple:
+def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
     '''return mean, sdev and Cpk of given data series, 
     discarding np.nan values'''
     sdev = np.nanstd(data)
     mean = np.nanmean(data)
     
-    if L is None or H is None:
+    if np.isnan(L) or np.isnan(H):
         return mean, sdev, np.nan
     
     T = H - L
@@ -240,14 +241,14 @@ unit_prefix = {15: "f",
               -12: "T"}
 
 # MIR field name to Description Dict
-mirFieldNames = ["BYTE_ORD", "SETUP_T", "START_T", "STAT_NUM", "MODE_COD", "RTST_COD", "PROT_COD", "BURN_TIM", "CMOD_COD", "LOT_ID", "PART_TYP", "NODE_NAM", "TSTR_TYP",
+mirFieldNames = ["BYTE_ORD", "SETUP_T", "START_T", "FINISH_T", "STAT_NUM", "MODE_COD", "RTST_COD", "PROT_COD", "BURN_TIM", "CMOD_COD", "LOT_ID", "PART_TYP", "NODE_NAM", "TSTR_TYP",
                  "JOB_NAM", "JOB_REV", "SBLOT_ID", "OPER_NAM", "EXEC_TYP", "EXEC_VER", "TEST_COD", "TST_TEMP", "USER_TXT", "AUX_FILE", "PKG_TYP", "FAMLY_ID",
-                 "DATE_COD", "FACIL_ID", "FLOOR_ID", "PROC_ID", "OPER_FRQ", "SPEC_NAM", "SPEC_VER", "FLOW_ID", "SETUP_ID", "DSGN_REV", "ENG_ID", "ROM_COD", "SERL_NUM", "SUPR_NAM"]
+                 "DATE_COD", "FACIL_ID", "FLOOR_ID", "PROC_ID", "OPER_FRQ", "SPEC_NAM", "SPEC_VER", "FLOW_ID", "SETUP_ID", "DSGN_REV", "ENG_ID", "ROM_COD", "SERL_NUM", "SUPR_NAM", "DISP_COD", "USR_DESC", "EXC_DESC"]
 
-mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Station Number", "Test Mode Code", "Retest Code", "Protection Code", "Burn-in Time", "Command Mode Code", "Lot ID", "Product ID", 
+mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time", "Station Number", "Test Mode Code", "Retest Code", "Protection Code", "Burn-in Time", "Command Mode Code", "Lot ID", "Product ID", 
                    "Node Name", "Tester Type", "Job Name", "Job Revision", "Sublot ID", "Operator ID", "Tester Software Type", "Tester Software Version", "Step ID", "Test Temperature", 
                    "User Text", "Auxiliary File Name", "Package Type", "Family ID", "Date Code", "Facility ID", "Floor ID", "Process ID", "Operation Frequency", "Test Spec Name", 
-                   "Test Spec Version", "Flow ID", "Setup ID", "Design Revision", "Engineer Lot ID", "ROM Code ID", "Serial Number", "Supervisor ID"]
+                   "Test Spec Version", "Flow ID", "Setup ID", "Design Revision", "Engineer Lot ID", "ROM Code ID", "Serial Number", "Supervisor ID", "Lot Disposition Code", "Lot Description From User", "Lot Description From Exec"]
 
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
@@ -361,37 +362,107 @@ class PlotCanvas(QtWidgets.QWidget):
 
 class MagCursor(QObject):
     '''A class includes interactive callbacks for matplotlib figures'''
-    def __init__(self, line, precision, notation, mainGUI=None):
+    def __init__(self, line=None, histo=None, binchart=None, wafer=None, mainGUI=None, **kargs):
         super().__init__()
-        self.pixRange = 20
-        self.line = line
-        self.ax = line.axes
-        self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
-        # create marker and data description tip, hide by default
-        self.marker = self.ax.scatter(0, 0, s=40, marker="+", color='k')
-        self.dcp = self.ax.text(s="", x=0, y=0, fontname=mainGUI.imageFont, weight="bold", fontsize=8,
-                                bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
-        self.marker.set_visible(False)
-        self.dcp.set_visible(False)
+        self.lineMode = False
+        self.histoMode = False
+        self.binMode = False
+        self.waferMode = False
+        
+        if line is not None:
+            self.lineMode = True
+        elif histo is not None:
+            self.histoMode = True
+        elif binchart is not None:
+            self.binMode = True
+        elif wafer is not None:
+            self.waferMode = True
+            
+        if mainGUI is None and not any(self.lineMode, self.histoMode, self.binMode, self.waferMode):
+            raise RuntimeError("MagCursor inputs not valid")
+        
+        self.ax = None
+        self.line = None
+        self.histo = None
+        self.binchart = None
+        self.wafer = None
+        # image cache for faster interaction
         self.background = None
-        # for selection
+        # for multi-selection control
         self.shift_pressed = False
         self.picked_points = []
-        self.highlights = self.ax.scatter([], [], s=30, marker="$S$", color="red")
-        self.hint = self.ax.text(s=self.tr("Press 'Enter' to show DUT data of selected point(s)"), 
-                                 x=1, y=0, transform=self.ax.transAxes, va="bottom", ha="right", 
-                                 fontstyle="italic", fontname=mainGUI.imageFont, fontsize=10, zorder=1000)
+        
+        if self.lineMode:
+            self.line = line
+            self.ax = line.axes
+            self.pixRange = 20
+            self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
+            # create hover marker and data description tip, hide by default
+            self.marker_line = self.ax.scatter(0, 0, s=40, marker="+", color='k')
+            self.dcp_line = self.ax.text(s="", x=0, y=0, fontname=mainGUI.imageFont, weight="bold", fontsize=8,
+                                    bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
+            self.marker_line.set_visible(False)
+            self.dcp_line.set_visible(False)
+            self.highlights_line = self.ax.scatter([], [], s=30, marker="$S$", color="red")
+            
+        elif self.histoMode:
+            self.histo = histo
+            self.ax = histo[0].axes     # container doesn't have axes prop
+            self.bin_dut_dict = histo.bin_dut_dict
+            self.dcp_histo = self.ax.text(s="", x=0, y=0, fontname=mainGUI.imageFont, weight="bold", fontsize=8,
+                                          bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
+            self.dcp_histo.set_visible(False)
+            # another bar plot indicates highlight selections
+            self.highlights_histo = self.ax.bar([rec._x0 for rec in self.histo], self.histo.datavalues, width=self.histo[0]._width, 
+                                                align='edge', fc=(0,0,0,0), edgecolor="red", linewidth=2, zorder=1000)
+            # hide when none selected
+            [rec_hl.set_visible(False) for rec_hl in self.highlights_histo]
+        
+        elif self.binMode:
+            self.binchart = binchart
+            self.ax = binchart[0].axes     # container doesn't have axes prop
+            # no description for bin chart, already shown on figures
+            # another bar plot indicates highlight selections
+            self.highlights_bin = self.ax.bar([rec._x0 for rec in self.binchart], self.binchart.datavalues, width=self.binchart[0]._width,
+                                              align='edge', fc=(0,0,0,0), edgecolor="red", linewidth=2, zorder=1000)
+            # hide when none selected
+            [rec_hl.set_visible(False) for rec_hl in self.highlights_bin]
+        
+        elif self.waferMode:
+            self.wafer = wafer
+            self.site = kargs["site"]
+            self.wafer_num = kargs["wafer_num"]
+            self.isStackMap = kargs["wafer_num"] == -1
+            self.ax = wafer[0].axes     # container doesn't have axes prop
+            self.dcp_wafer = self.ax.text(s="", x=0, y=0, fontname=mainGUI.imageFont, weight="bold", fontsize=8,
+                                          bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFCC"), zorder=1000)
+            self.dcp_wafer.set_visible(False)
+            self.highlights_wafer = []      # a list to store instances of ax.add_patch()
+            
+        self.hint = self.ax.text(s=self.tr("Press 'Enter' to show DUT data of selection(s)"), 
+                                 x=1, y=1, transform=self.ax.transAxes, va="bottom", ha="right", 
+                                 fontname=mainGUI.imageFont, fontsize=8, zorder=1000)
         self.hint.set_visible(False)
         # mainGUI for show dut date table
         self.mainGUI = mainGUI
-        self.updatePrecision(precision, notation)
+        self.updatePrecision(self.mainGUI.settingParams.dataPrecision, 
+                             self.mainGUI.settingParams.dataNotation)
             
     def updatePrecision(self, precision, notation):
         self.valueFormat = "%%.%d%s" % (precision, notation)
         
     def copyBackground(self):
-        self.marker.set_visible(False)
-        self.dcp.set_visible(False)        
+        # hide marker & tips only, be sure to keep highlights visible
+        if self.lineMode:
+            self.marker_line.set_visible(False)
+            self.dcp_line.set_visible(False)
+        elif self.histoMode:
+            self.dcp_histo.set_visible(False)
+        elif self.binMode:
+            pass
+        elif self.waferMode:
+            self.dcp_wafer.set_visible(False)
+            
         self.ax.figure.canvas.draw()
         self.background = self.ax.figure.canvas.copy_from_bbox(self.ax.figure.bbox)
 
@@ -399,47 +470,160 @@ class MagCursor(QObject):
         if not event.inaxes:
             return
         
-        ishover, data = self.line.contains(event)
-        if ishover:
-            ind = data["ind"][0]
-            x = self.line._xorig[ind]
-            y = self.line._yorig[ind]
-            if abs(x-event.xdata) > 2*self.rangeX or abs(y-event.ydata) > 2*self.rangeY:
+        ishover = False
+        if self.lineMode:
+            ishover, data = self.line.contains(event)
+            
+        elif self.histoMode:
+            for rec in self.histo:
+                ishover, _ = rec.contains(event)
+                if ishover:
+                    data = rec
+                    break
+                
+        elif self.binMode:
+            if id(event.inaxes) != id(self.ax):
+                # exit if not in the current axis
                 return
-            # update the line positions
-            self.marker.set_offsets([[x, y]])
-            text = self.tr('Dut# : %d\nValue: ') % x + self.valueFormat % y
-            self.dcp.set_text(text)
-            self.dcp.set_position((x+self.rangeX, y+self.rangeY))
-            # set visible
-            self.marker.set_visible(True)
-            self.dcp.set_visible(True)
+            
+            for rec in self.binchart:
+                ishover, _ = rec.contains(event)
+                if ishover:
+                    data = rec
+                    break
+        
+        elif self.waferMode:
+            ishoverOnCol = False
+            for pcol in self.wafer:
+                # loop PathCollection or quadMesh
+                ishoverOnCol, containIndex = pcol.contains(event)
+                if ishoverOnCol:
+                    data_pcol = pcol
+                    if self.isStackMap:
+                        for rec_index in containIndex["ind"]:
+                            # loop Paths in QuadMesh
+                            rec = pcol.get_paths()[rec_index]
+                            if rec.contains_point((event.xdata, event.ydata)):
+                                ishover = True
+                                data = rec
+                                break
+                    else:
+                        for rec in pcol.get_paths():
+                            # loop Paths in PathCollection
+                            if rec.contains_point((event.xdata, event.ydata)):
+                                ishover = True
+                                data = rec
+                                break
+            
+        if ishover:
+            # restore background original image without any marker or tips
             if self.background:
                 self.ax.figure.canvas.restore_region(self.background)
-            self.ax.draw_artist(self.marker)
-            self.ax.draw_artist(self.dcp)
+            
+            if self.lineMode:
+                ind = data["ind"][0]
+                x = self.line.get_xdata()[ind]
+                y = self.line.get_ydata()[ind]
+                if abs(x-event.xdata) > 2*self.rangeX or abs(y-event.ydata) > 2*self.rangeY:
+                    return
+                # update the line positions
+                self.marker_line.set_offsets([[x, y]])
+                text = self.tr('Dut# : %d\nValue: ') % x + self.valueFormat % y
+                self.dcp_line.set_text(text)
+                self.dcp_line.set_position((x+self.rangeX, y+self.rangeY))
+                # set visible
+                self.marker_line.set_visible(True)
+                self.dcp_line.set_visible(True)
+                # draw new marker and tip
+                self.ax.draw_artist(self.marker_line)
+                self.ax.draw_artist(self.dcp_line)
+                
+            elif self.histoMode:
+                count = data.get_height()
+                binEdgeL = data.get_x()
+                binEdgeR = binEdgeL + data.get_width()
+                text = self.tr('Data Range: [%s, %s)\nCount: %d') % \
+                               (self.valueFormat % binEdgeL, self.valueFormat % binEdgeR, count)
+                self.dcp_histo.set_text(text)
+                self.dcp_histo.set_position(self.ax.transData.inverted().transform((event.x+10, event.y+10)))
+                self.dcp_histo.set_visible(True)
+                self.ax.draw_artist(self.dcp_histo)
+            
+            elif self.binMode:
+                pass
+            
+            elif self.waferMode:
+                rec_bounds = data.get_extents()
+                if self.isStackMap:
+                    failCount = data_pcol.get_array()[rec_index]
+                    if isinstance(failCount, np.ma.core.MaskedConstant):
+                        # count will be masked if invalid, return if encountered
+                        return
+                    text = self.tr('XY: (%d, %d)\nFail Count: %d') % \
+                                    (rec_bounds.x0+.5, rec_bounds.y0+.5, failCount)
+                else:
+                    text = self.tr('XY: (%d, %d)\nSBIN: %s\nBin Name: %s') % \
+                                    (rec_bounds.x0+.5, rec_bounds.y0+.5, data_pcol.SBIN, self.tr(data_pcol.BIN_NAME))
+                self.dcp_wafer.set_text(text)
+                self.dcp_wafer.set_position((rec_bounds.x0+1.5, rec_bounds.y0+1.5))
+                self.dcp_wafer.set_visible(True)
+                self.ax.draw_artist(self.dcp_wafer)
+            
             self.ax.figure.canvas.blit(self.ax.bbox)
         else:
-            self.marker.set_visible(False)
-            self.dcp.set_visible(False)
             
             if self.background:
                 self.ax.figure.canvas.restore_region(self.background)            
-            self.ax.draw_artist(self.marker)
-            self.ax.draw_artist(self.dcp)
+            
+            if self.lineMode:
+                self.marker_line.set_visible(False)
+                self.dcp_line.set_visible(False)
+                self.ax.draw_artist(self.marker_line)
+                self.ax.draw_artist(self.dcp_line)
+                
+            elif self.histoMode:
+                self.dcp_histo.set_visible(False)
+                self.ax.draw_artist(self.dcp_histo)            
+            
+            elif self.binMode:
+                pass
+            
+            elif self.waferMode:
+                self.dcp_wafer.set_visible(False)
+                self.ax.draw_artist(self.dcp_wafer)
+            
             self.ax.figure.canvas.blit(self.ax.bbox)
             
     def canvas_resize(self, event):
         self.copyBackground()
-        # update range once the canvas is resized
-        self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
+        if self.lineMode:
+            # update range once the canvas is resized
+            self.rangeX, self.rangeY = [i-j for i,j in zip(toDCoord(self.ax, (self.pixRange, self.pixRange)), toDCoord(self.ax, (0, 0)))]   # convert pixel to data
         
     def key_press(self, event):
         if event.key == 'shift':
             self.shift_pressed = True
         elif event.key == 'enter':
             if self.picked_points:
-                selectedDutIndex = [x for (x, y) in self.picked_points]
+                selectedDutIndex = []
+                
+                if self.lineMode:
+                    selectedDutIndex = [x for (x, y) in self.picked_points]
+                
+                elif self.histoMode:
+                    for ind in self.picked_points:
+                        selectedDutIndex += self.bin_dut_dict[ind+1]    # ind from digitize starts from 1
+                
+                elif self.binMode:
+                    for ind in self.picked_points:
+                        binNum = self.binchart.binList[ind]
+                        selectedDutIndex += self.mainGUI.DatabaseFetcher.getDUTIndexFromBin(self.binchart.head, self.binchart.site, 
+                                                                                            binNum, self.binchart.binType)
+                
+                elif self.waferMode:
+                    for (x, y) in self.picked_points:
+                        selectedDutIndex += self.mainGUI.DatabaseFetcher.getDUTIndexFromXY(x, y, self.wafer[0].wafer_num)
+                
                 self.mainGUI.showDutDataTable(sorted(selectedDutIndex))
             
     def key_release(self, event):
@@ -447,12 +631,52 @@ class MagCursor(QObject):
             self.shift_pressed = False
             
     def button_press(self, event):
+        if not event.inaxes:
+            return
+        
         # do nothing when toolbar is active
         if self.ax.figure.canvas.toolbar.mode.value:
             return
         
         # used to check if user clicked blank area, if so, clear all selected points
-        contains, _ = self.line.contains(event)
+        contains = True     # init
+        if self.lineMode:
+            contains, _ = self.line.contains(event)
+        
+        elif self.histoMode:
+            for rec in self.histo:
+                contains, _ = rec.contains(event)
+                if contains: break
+        
+        elif self.binMode:
+            if id(event.inaxes) != id(self.ax):
+                return
+            
+            for rec in self.binchart:
+                contains, _ = rec.contains(event)
+                if contains: break
+        
+        elif self.waferMode:
+            for pcol in self.wafer:
+                # loop PathCollection or quadMesh
+                contains, containIndex = pcol.contains(event)
+                if contains:
+                    if self.isStackMap:
+                        # for stacked map, we have to make sure
+                        # user doesn't clicked on the blank area inside the QuadMesh
+                        for rec_index in containIndex["ind"]:
+                            # loop Paths in QuadMesh
+                            rec = pcol.get_paths()[rec_index]
+                            if rec.contains_point((event.xdata, event.ydata)):
+                                failCount = pcol.get_array()[rec_index]
+                                if isinstance(failCount, np.ma.core.MaskedConstant):
+                                    contains = False
+                                break
+                    else:
+                        # for normal wafermap, stop searching as long as 
+                        # the collection contains the event
+                        break
+        
         if not contains:
             self.picked_points = []
             self.resetPointSelection()
@@ -464,8 +688,56 @@ class MagCursor(QObject):
         if self.ax.figure.canvas.toolbar.mode.value:
             return
         
-        ind = event.ind[0]
-        point = (event.artist._xorig[ind], event.artist._yorig[ind])
+        if self.lineMode:
+            ind = event.ind[0]
+            point = (event.artist.get_xdata()[ind], event.artist.get_ydata()[ind])
+        
+        elif self.histoMode:
+            # use the bin index as the point
+            leftEdge = event.artist.get_x()
+            for ind, rec_hl in enumerate(self.histo):
+                if rec_hl.get_x() == leftEdge:
+                    point = ind
+                    break
+            
+        elif self.binMode:
+            if id(event.artist.axes) != id(self.ax):
+                # pick event will be fired if any artist 
+                # inside the same canvs is clicked
+                # ignore the artist not in the same axis
+                return
+            
+            # use the bin index as the point
+            leftEdge = event.artist.get_x()
+            for ind, rec_hl in enumerate(self.binchart):
+                if rec_hl.get_x() == leftEdge:
+                    point = ind
+                    break
+        
+        elif self.waferMode:
+            pcol = event.artist
+            pickIndex = event.ind
+            
+            if event.mouseevent.xdata is None or event.mouseevent.ydata is None:
+                # clicked outside of axes
+                return
+                
+            for rec_index in pickIndex:
+                # loop Paths in QuadMesh
+                rec = pcol.get_paths()[rec_index]
+                if rec.contains_point((event.mouseevent.xdata, event.mouseevent.ydata)):
+                    rec_bounds = rec.get_extents()
+                    if self.isStackMap:
+                        # check fail count only in stack map
+                        failCount = pcol.get_array()[rec_index]
+                        if isinstance(failCount, np.ma.core.MaskedConstant):
+                            return
+                    point = (rec_bounds.x0+.5, rec_bounds.y0+.5)
+                    break
+            else:
+                # in some rare cases, event.artist doesn't contains mouseevent😅
+                return
+        
         if self.shift_pressed:
             if point in self.picked_points:
                 # remove if existed
@@ -478,15 +750,44 @@ class MagCursor(QObject):
             self.picked_points = [point]
         
         if len(self.picked_points) > 0:
-            self.highlights.set_offsets(self.picked_points)
+            # show selected points on image
+            if self.lineMode:
+                self.highlights_line.set_offsets(self.picked_points)
+                
+            elif self.histoMode:
+                [rec_hl.set_visible(True) if ind in self.picked_points else rec_hl.set_visible(False) for ind, rec_hl in enumerate(self.highlights_histo)]
+            
+            elif self.binMode:
+                [rec_hl.set_visible(True) if ind in self.picked_points else rec_hl.set_visible(False) for ind, rec_hl in enumerate(self.highlights_bin)]
+            
+            elif self.waferMode:
+                # remove previous
+                # [rec.remove() for rec in self.ax.patches]
+                self.ax.patches.clear()
+                # add new
+                for (x, y) in self.picked_points:
+                    self.ax.add_patch(matplotlib.patches.Rectangle((x-0.5, y-0.5), 1, 1, fc=(0,0,0,0), ec="red", linewidth=2, zorder=100))
+                
             self.hint.set_visible(True)
         else:
             self.resetPointSelection()
         self.copyBackground()
         
     def resetPointSelection(self):
-        self.highlights.remove()
-        self.highlights = self.ax.scatter([], [], s=40, marker='$S$', color='red')
+        if self.lineMode:
+            self.highlights_line.remove()
+            self.highlights_line = self.ax.scatter([], [], s=40, marker='$S$', color='red')
+            
+        elif self.histoMode:
+            [rec_hl.set_visible(False) for rec_hl in self.highlights_histo]
+            
+        elif self.binMode:
+            [rec_hl.set_visible(False) for rec_hl in self.highlights_bin]
+        
+        elif self.waferMode:
+            # [rec.remove() for rec in self.ax.patches]
+            self.ax.patches.clear()
+        
         self.hint.set_visible(False)
 
 
@@ -495,11 +796,15 @@ class SettingParams:
         # trend
         self.showHL_trend = True
         self.showLL_trend = True
+        self.showHSpec_trend = True
+        self.showLSpec_trend = True
         self.showMed_trend = True
         self.showMean_trend = True
         # histo
         self.showHL_histo = True
         self.showLL_histo = True
+        self.showHSpec_histo = True
+        self.showLSpec_histo = True
         self.showMed_histo = True
         self.showMean_histo = True
         self.showGaus_histo = True
@@ -632,6 +937,42 @@ class MyWindow(QtWidgets.QMainWindow):
         self.changeLanguage()   # set language after initing subwindow & reading config
         
         
+    def checkNewVersion(self):
+        latestTag = Version
+
+        try:
+            res = rq.urlopen("https://api.github.com/repos/noonchen/STDF-Viewer/releases/latest")
+            resDict = json.loads(res.read())
+            latestTag = resDict["tag_name"]
+            changeList = resDict["body"]
+            releaseLink = resDict["html_url"]
+            
+            if latestTag > Version:
+                # show dialog for updating
+                msgBox = QtWidgets.QMessageBox(self)
+                msgBox.setWindowFlag(Qt.FramelessWindowHint)
+                msgBox.setTextFormat(QtCore.Qt.RichText)
+                msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;<a href='{2}'>{1}</a></span>".format(self.tr("{0} is available!").format(latestTag),
+                                                                                                                      self.tr("→Go to download page←"),
+                                                                                                                      releaseLink))
+                msgBox.setInformativeText(self.tr("Change List:") + "\n\n" + changeList)
+                msgBox.addButton(self.tr("Maybe later"), QtWidgets.QMessageBox.NoRole)
+                msgBox.exec_()
+            else:
+                msgBox = QtWidgets.QMessageBox(self)
+                msgBox.setWindowFlag(Qt.FramelessWindowHint)
+                msgBox.setTextFormat(QtCore.Qt.RichText)
+                msgBox.setInformativeText("You're using the latest version.")
+                msgBox.exec_()
+            
+        except Exception as e:
+                # tell user cannot connect to the internet
+                msgBox = QtWidgets.QMessageBox(self)
+                msgBox.setWindowFlag(Qt.FramelessWindowHint)
+                msgBox.setText("Cannot connect to Github")
+                msgBox.exec_()
+        
+    
     def changeLanguage(self):
         _app = QApplication.instance()
         # load language files based on the setting
@@ -699,10 +1040,10 @@ class MyWindow(QtWidgets.QMainWindow):
             if k in ["language", "recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
                 # General
                 configData["General"][configName[k]] = v
-            elif k in ["showHL_trend", "showLL_trend", "showMed_trend", "showMean_trend"]:
+            elif k in ["showHL_trend", "showLL_trend", "showHSpec_trend", "showLSpec_trend", "showMed_trend", "showMean_trend"]:
                 # Trend
                 configData["Trend Plot"][configName[k]] = v
-            elif k in ["showHL_histo", "showLL_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
+            elif k in ["showHL_histo", "showLL_histo", "showHSpec_histo", "showLSpec_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
                 # Histo
                 configData["Histo Plot"][configName[k]] = v
 
@@ -777,15 +1118,25 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox = QtWidgets.QMessageBox(self)
         msgBox.setWindowTitle(self.tr("About"))
         msgBox.setTextFormat(QtCore.Qt.RichText)
-        msgBox.setText(f"<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>Version: {Version}<br>Author: noonchen<br>Email: chennoon233@foxmail.com<br>")
-        msgBox.setInformativeText("For instructions, please refer to the ReadMe in the repo:\
+        msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>{0}: {1}<br>{2}: noonchen<br>{3}: chennoon233@foxmail.com<br>".format(self.tr("Version"), 
+                                                                                                                                                               Version, 
+                                                                                                                                                               self.tr("Author"), 
+                                                                                                                                                               self.tr("Email")))
+        msgBox.setInformativeText("{0}:\
             <br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a>\
             <br>\
-            <br><span style='font-size:8px'>Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.</span>")
+            <br><span style='font-size:8px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
+                                                               self.tr("Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.")))
         appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
+        ckupdateBtn = msgBox.addButton(self.tr("Check For Updates"), QtWidgets.QMessageBox.ActionRole)
+        msgBox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
         msgBox.exec_()
+        if msgBox.clickedButton() == ckupdateBtn:
+            self.checkNewVersion()
+        else:
+            msgBox.close()
         
     
     def showDutDataTable(self, dutIndexes:list):
@@ -901,7 +1252,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
                 test_data_list.pop(0)   # remove test name
                 test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
-                test_flagInfo_list = [""] * vh_len + list(map(test_flag_parser, testDict["flagList"]))
+                test_flagInfo_list = [""] * vh_len + list(map(self.tr, map(test_flag_parser, testDict["flagList"])))
                 
                 hheaderLabels.append(testDict["TEST_NAME"])  # add test name to header list
                 
@@ -1269,8 +1620,12 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if currentTab == tab.Bin:
             self.ui.TestList.setDisabled(True)
+            self.ui.SearchBox.setDisabled(True)
+            self.ui.ClearButton.setDisabled(True)
         else:
             self.ui.TestList.setDisabled(False)
+            self.ui.SearchBox.setDisabled(False)
+            self.ui.ClearButton.setDisabled(False)
         
         if self.dbConnected:
             itemNums = self.getSelectedNums()
@@ -1323,8 +1678,8 @@ class MyWindow(QtWidgets.QMainWindow):
         recHeader = testDict["recHeader"]
         test_data_list = [testDict["TEST_NAME"], 
                           "%d" % test_num,
-                          "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
-                          "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
+                          "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
+                          "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
                           testDict["Unit"]]
             
         if recHeader == REC.FTR:
@@ -1376,9 +1731,9 @@ class MyWindow(QtWidgets.QMainWindow):
             lengthL = testInfo["BinaryLen"]
             recHeader = testInfo["recHeader"]
             record_flag = testInfo["OPT_FLAG"]
-            result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None else 0
-            result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None else 0
-            result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None else 0
+            result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None and (record_flag & 0b00000001 == 0) else 0
+            result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None and (record_flag & 0b01010000 == 0) else np.nan
+            result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
             
             if recHeader == REC.MPR:
                 pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
@@ -1415,8 +1770,8 @@ class MyWindow(QtWidgets.QMainWindow):
                             # FTR
                             datalist = [parsedData["dataList"][selMask]]
         
-                        LL = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
-                        HL = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
+                        LL = result_lolimit * 10 ** result_scale
+                        HL = result_hilimit * 10 ** result_scale
                         
                         for sublist in datalist:
                             # For PTR and FTR, sublist IS the original datalist
@@ -1453,9 +1808,12 @@ class MyWindow(QtWidgets.QMainWindow):
             testDict = stdf_PFTR_Parser(recHeader, sel_offset, sel_length, self.std_handle)
         
         record_flag = testInfo["OPT_FLAG"]
-        result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None else 0
-        result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None else 0
-        result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None else 0
+        result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None and (record_flag & 0b00000001 == 0) else 0
+        result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None and (record_flag & 0b01010000 == 0) else np.nan
+        result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
+        result_lospec = testInfo["LSpec"] if recHeader != REC.FTR and testInfo["LSpec"] is not None and (record_flag & 0b00000100 == 0) else np.nan
+        result_hispec = testInfo["HSpec"] if recHeader != REC.FTR and testInfo["HSpec"] is not None and (record_flag & 0b00001000 == 0) else np.nan
+        
         result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
         
         testDict["recHeader"] = recHeader
@@ -1464,9 +1822,12 @@ class MyWindow(QtWidgets.QMainWindow):
         testDict["flagList"] = np.array(testDict["flagList"], dtype=int)
                 
         testDict["dataList"] = testDict["dataList"] if recHeader == REC.FTR else testDict["dataList"] * 10 ** result_scale
-        testDict["LL"] = None if recHeader == REC.FTR or (record_flag & 0b01000000 != 0) else result_lolimit * 10 ** result_scale
-        testDict["HL"] = None if recHeader == REC.FTR or (record_flag & 0b10000000 != 0) else result_hilimit * 10 ** result_scale
+        testDict["LL"] = result_lolimit * 10 ** result_scale
+        testDict["HL"] = result_hilimit * 10 ** result_scale
+        testDict["LSpec"] = result_lospec * 10 ** result_scale
+        testDict["HSpec"] = result_hispec * 10 ** result_scale
         testDict["Unit"] = "" if recHeader == REC.FTR else unit_prefix.get(result_scale, "") + result_unit
+        testDict["Scale"] = result_scale
         
         return testDict
     
@@ -1478,7 +1839,7 @@ class MyWindow(QtWidgets.QMainWindow):
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
         test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))
-        test_flagInfo_list = [""] * 5 + list(map(test_flag_parser, testDict["flagList"]))
+        test_flagInfo_list = [""] * 5 + list(map(self.tr, map(test_flag_parser, testDict["flagList"])))
         
         return (test_data_list, test_stat_list, test_flagInfo_list)
     
@@ -1511,7 +1872,10 @@ class MyWindow(QtWidgets.QMainWindow):
         outData["TEST_NUM"] = test_num
         outData["LL"] = self.selData[test_num]["LL"]
         outData["HL"] = self.selData[test_num]["HL"]
+        outData["LSpec"] = self.selData[test_num]["LSpec"]
+        outData["HSpec"] = self.selData[test_num]["HSpec"]
         outData["Unit"] = self.selData[test_num]["Unit"]
+        outData["Scale"] = self.selData[test_num]["Scale"]
         outData["DUTIndex"] = self.dutArray[selMask]
         outData["flagList"] = self.selData[test_num]["flagList"][selMask]
         
@@ -1573,7 +1937,7 @@ class MyWindow(QtWidgets.QMainWindow):
         tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
         
         if reDrawTab or forceUpdate:
-            # clear all contents
+            # clear all contents in current tab
             [deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())[::-1]]
             # add new widget
             qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
@@ -1581,8 +1945,19 @@ class MyWindow(QtWidgets.QMainWindow):
             qfigLayout = QtWidgets.QVBoxLayout()
             qfigWidget.setLayout(qfigLayout)
             tabLayout.addWidget(qfigWidget)
-            # clear cursor dict used in trend chart
-            if tabType == tab.Trend: self.cursorDict = {}
+            # clear cursor dict in current tab
+            if tabType == tab.Trend:
+                matchString = "trend"
+            elif tabType == tab.Histo:
+                matchString = "histo"
+            elif tabType == tab.Bin:
+                matchString = "bin"
+            else:
+                matchString = "wafer"
+            for key in list(self.cursorDict.keys()):
+                # remove cursors, get a default in case key not found (only happens when data is invalid in some sites)
+                if key.startswith(matchString):
+                    self.cursorDict.pop(key, None)
         else:
             try:
                 # get testnum/site of current canvas/toolbars and corresponding widget index
@@ -1608,8 +1983,18 @@ class MyWindow(QtWidgets.QMainWindow):
                     # bin don't care about testNum
                     deleteWidget(qfigLayout.itemAt(index).widget())
                     if tabType == tab.Trend:
-                        # remove cursors if in trend chart, get a default in case key not found (only happens when data is invalid in some sites)
-                        self.cursorDict.pop(f"{mp_head}_{mp_test_num}_{mp_site}", None)
+                        matchString = f"trend_{mp_head}_{mp_test_num}_{mp_site}"
+                    elif tabType == tab.Histo:
+                        matchString = f"histo_{mp_head}_{mp_test_num}_{mp_site}"
+                    elif tabType == tab.Bin:
+                        matchString = f"bin_{mp_head}_{mp_test_num}_{mp_site}"
+                    else:
+                        matchString = f"wafer_{mp_head}_{mp_test_num}_{mp_site}"
+                        
+                    for key in list(self.cursorDict.keys()):
+                        # remove cursors, get a default in case key not found (only happens when data is invalid in some sites)
+                        if key.startswith(matchString):
+                            self.cursorDict.pop(key, None)
                     
             canvasIndexDict = getCanvasDicts(qfigLayout)    # update after deleting some images
                     
@@ -1644,8 +2029,15 @@ class MyWindow(QtWidgets.QMainWindow):
                 # clear current content in the layout in reverse order - no use
                 [deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())]
                 if tabType == tab.Trend:
-                    # remove cursors if in trend chart
-                    self.cursorDict = {}
+                    matchString = "trend"
+                elif tabType == tab.Histo:
+                    matchString = "histo"
+                else:
+                    matchString = "wafer"
+
+                for key in list(self.cursorDict.keys()):
+                    if key.startswith(matchString):
+                        self.cursorDict.pop(key, None)
             
             
     def prepareStatTableContent(self, tabType, **kargs):
@@ -1679,8 +2071,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
                         testDict["TEST_NAME"],
                         testDict["Unit"],
-                        "N/A" if testDict["LL"] is None else valueFormat % testDict["LL"],
-                        "N/A" if testDict["HL"] is None else valueFormat % testDict["HL"],
+                        "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
+                        "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
                         "%d" % list(map(isPass, testDict["flagList"])).count(False),
                         CpkString,
                         MeanString,
@@ -1718,7 +2110,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/total), bin_num]
                 if bin_num in bin_dict:
                     # add bin name
-                    item[0] = bin_dict[bin_num]["BIN_NAME"] + "\n" + item[0]
+                    item[0] = self.tr(bin_dict[bin_num]["BIN_NAME"]) + "\n" + item[0]
                 rowList.append(item)
                                     
             return rowList
@@ -1747,7 +2139,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/total), bin_num]
                 if bin_num in bin_dict:
                     # add bin name
-                    item[0] = bin_dict[bin_num]["BIN_NAME"] + "\n" + item[0]
+                    item[0] = self.tr(bin_dict[bin_num]["BIN_NAME"]) + "\n" + item[0]
                 rowList.append(item)
                                     
             return rowList
@@ -1937,13 +2329,13 @@ class MyWindow(QtWidgets.QMainWindow):
         fig.set_tight_layout(True)
                 
         if tabType == tab.Trend:   # Trend
-            ax, trendLine = self.genTrendPlot(fig, head, site, test_num)
+            ax, trendLines = self.genTrendPlot(fig, head, site, test_num)
             
         elif tabType == tab.Histo:   # Histogram
-            ax = self.genHistoPlot(fig, head, site, test_num)
+            ax, recGroups = self.genHistoPlot(fig, head, site, test_num)
             
         elif tabType == tab.Bin:   # Bin Chart
-            self.genBinPlot(fig, head, site)
+            axs, recGroups = self.genBinPlot(fig, head, site)
             
         elif tabType == tab.Wafer:   # Wafermap
             ax = self.genWaferPlot(fig, head, site, test_num)
@@ -1969,27 +2361,52 @@ class MyWindow(QtWidgets.QMainWindow):
                 index = kargs["insertIndex"]
                 qfigLayout.insertWidget(index, canvas)
                 
-            if tabType == tab.Trend and (trendLine is not None):
+            def connectMagCursor(_canvas:PlotCanvas, cursor:MagCursor, _ax):
+                _canvas.mpl_connect('motion_notify_event', cursor.mouse_move)
+                _canvas.mpl_connect('resize_event', cursor.canvas_resize)
+                _canvas.mpl_connect('pick_event', cursor.on_pick)
+                _canvas.mpl_connect('key_press_event', cursor.key_press)
+                _canvas.mpl_connect('key_release_event', cursor.key_release)                
+                _canvas.mpl_connect('button_press_event', cursor.button_press)
+                _ax.callbacks.connect('xlim_changed', cursor.canvas_resize)
+                _ax.callbacks.connect('ylim_changed', cursor.canvas_resize)
+                # cursor.copyBackground()   # not required, as updating the tab will trigger canvas resize event
+            
+            if tabType == tab.Trend and len(trendLines) > 0:
                 # connect magnet cursor
-                cursorKey = "%d_%d_%d"%(head, test_num, site)
-                self.cursorDict[cursorKey] = MagCursor(trendLine, 
-                                                       self.settingParams.dataPrecision, 
-                                                       self.settingParams.dataNotation, 
-                                                       mainGUI=self)
-                canvas.mpl_connect('motion_notify_event', self.cursorDict[cursorKey].mouse_move)
-                canvas.mpl_connect('resize_event', self.cursorDict[cursorKey].canvas_resize)
-                canvas.mpl_connect('pick_event', self.cursorDict[cursorKey].on_pick)
-                canvas.mpl_connect('key_press_event', self.cursorDict[cursorKey].key_press)
-                canvas.mpl_connect('key_release_event', self.cursorDict[cursorKey].key_release)                
-                canvas.mpl_connect('button_press_event', self.cursorDict[cursorKey].button_press)
-                ax.callbacks.connect('xlim_changed', self.cursorDict[cursorKey].canvas_resize)
-                ax.callbacks.connect('ylim_changed', self.cursorDict[cursorKey].canvas_resize)
-                # self.cursorDict[cursorKey].copyBackground()   # not required, as updating the tab will trigger canvas resize event
+                for i, trendLine in enumerate(trendLines):
+                    cursorKey = "trend_%d_%d_%d_%d"%(head, test_num, site, i)
+                    self.cursorDict[cursorKey] = MagCursor(line=trendLine,
+                                                           mainGUI=self)
+                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
+                    
+            elif tabType == tab.Histo and len(recGroups) > 0:
+                for i, recGroup in enumerate(recGroups):
+                    cursorKey = "histo_%d_%d_%d_%d"%(head, test_num, site, i)
+                    self.cursorDict[cursorKey] = MagCursor(histo=recGroup,
+                                                           mainGUI=self)
+                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
+                    
+            elif tabType == tab.Bin and len(axs) > 0 and len(recGroups) > 0:
+                for i, (ax_bin, recGroup) in enumerate(zip(axs, recGroups)):
+                    cursorKey = "bin_%d_%d_%d_%d"%(head, test_num, site, i)
+                    self.cursorDict[cursorKey] = MagCursor(binchart=recGroup,
+                                                           mainGUI=self)
+                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax_bin)
+            
+            elif tabType == tab.Wafer:
+                cursorKey = "wafer_%d_%d_%d"%(head, test_num, site)
+                self.cursorDict[cursorKey] = MagCursor(wafer=ax.collections,
+                                                       mainGUI=self,
+                                                       site=site,
+                                                       wafer_num=test_num)
+                connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
             
             
     def genTrendPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
         selData = self.getData(test_num, [head], [site])
         ax = fig.add_subplot(111)
+        trendLines = []
         ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
         dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
@@ -1999,7 +2416,6 @@ class MyWindow(QtWidgets.QMainWindow):
         if dataInvalid and testInvalid:
             # show a warning text in figure
             ax.text(x=0.5, y=0.5, s=self.tr('No test data for "%s" \nfound in head %d - site %d') % (selData["TEST_NAME"], head, site), color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-            trendLine = None
         else:
             if selData["recHeader"] == REC.MPR:
                 if dataInvalid:
@@ -2011,6 +2427,8 @@ class MyWindow(QtWidgets.QMainWindow):
                     # MPR with multiple data
                     HL = selData["HL"]
                     LL = selData["LL"]
+                    HSpec = selData["HSpec"]
+                    LSpec = selData["LSpec"]
                     pinList = selData["PIN_NAME"]
                     pinCount = len(pinList)
                     # remove gaps between subplots
@@ -2026,19 +2444,26 @@ class MyWindow(QtWidgets.QMainWindow):
                         y_arr = pinData[~np.isnan(pinData)]
                         tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
                         trendLine, = tmpAx.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label=pinName)
+                        #FIXME disable cursor functino for MPR, performance is really laggy.
+                        # trendLines.append(trendLine)
                         # HL/LL lines
                         transXaYd = matplotlib.transforms.blended_transform_factory(tmpAx.transAxes, tmpAx.transData)
-                        if self.settingParams.showHL_trend: 
-                            if HL != None: 
-                                tmpAx.axhline(y = HL, linewidth=2, color='r', zorder = -10, label="Upper Limit")
-                                tmpAx.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-                        if self.settingParams.showLL_trend:
-                            if LL != None: 
-                                tmpAx.axhline(y = LL, linewidth=2, color='b', zorder = -10, label="Lower Limit")
-                                tmpAx.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                        if self.settingParams.showHL_trend and ~np.isnan(HL): 
+                            tmpAx.axhline(y = HL, linewidth=2, color='r', zorder = -10, label="Upper Limit")
+                            tmpAx.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                        if self.settingParams.showLL_trend and ~np.isnan(LL): 
+                            tmpAx.axhline(y = LL, linewidth=2, color='b', zorder = -10, label="Lower Limit")
+                            tmpAx.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=8, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                        # Spec lines
+                        if self.settingParams.showHSpec_trend and ~np.isnan(HSpec): 
+                            tmpAx.text(x=1, y=HSpec, s="HiSpec = %.3f \n"%HSpec, color='darkred', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                            tmpAx.axhline(y = HSpec, linewidth=2, color='darkred', zorder = -10, label="High Spec")
+                        if self.settingParams.showLSpec_trend and ~np.isnan(LSpec): 
+                            tmpAx.text(x=1, y=LSpec, s="\nLoSpec = %.3f "%LSpec, color='navy', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                            tmpAx.axhline(y = LSpec, linewidth=2, color='navy', zorder = -10, label="Low Spec")
                         # y limits
-                        data_max = max(selData["Max"][index], HL) if HL != None else selData["Max"][index]
-                        data_min = min(selData["Min"][index], LL) if LL != None else selData["Min"][index]
+                        data_max = np.nanmax([selData["Max"][index], HL, HSpec])
+                        data_min = np.nanmin([selData["Min"][index], LL, LSpec])
                         dataDelta = data_max - data_min
                         headroomY = 5 if dataDelta == 0 else dataDelta * 0.2
                         tmpAx.set_ylim((data_min-headroomY, data_max+headroomY))
@@ -2061,18 +2486,27 @@ class MyWindow(QtWidgets.QMainWindow):
                     ax.set_xlabel("%s"%(self.tr("DUT Index")), fontsize=12, fontname=self.imageFont, labelpad=6)
                     ax.set_yticklabels([])
                     ax.yaxis.set_ticks_position('none')
-                    return ax, trendLine
+                    return ax, trendLines
             
             # default drawing code for PTR, FTR and "MPR without data"
             # select not nan value
             x_arr = dutListFromSiteHead[~np.isnan(y_raw)]
             y_arr = y_raw[~np.isnan(y_raw)]
+            # for dynamic limits
+            hasDynamicLow = False
+            hasDynamicHigh = False
+            dyLLimits = np.array([])
+            dyHLimits = np.array([])
+            # default limits
             HL = selData["HL"]
             LL = selData["LL"]
+            HSpec = selData["HSpec"]
+            LSpec = selData["LSpec"]
             med = selData["Median"]
             avg = selData["Mean"]
             # plot            
             trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
+            trendLines.append(trendLine)
             # axes label
             ax.ticklabel_format(useOffset=False)    # prevent + sign
             ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
@@ -2087,8 +2521,15 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 headroomX = (x_arr[-1]-x_arr[0]) * 0.05
                 ax.set_xlim(left = x_arr[0] - headroomX, right = x_arr[-1] + headroomX)
-            data_max = max(selData["Max"], HL) if HL != None else selData["Max"]
-            data_min = min(selData["Min"], LL) if LL != None else selData["Min"]
+            
+            if self.settingParams.showHL_trend or self.settingParams.showMean_trend: 
+                # try to get dynamic limits only if one of limits is enabled
+                hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits = self.DatabaseFetcher.getDynamicLimits(test_num, x_arr, LL, HL, selData["Scale"])
+            # when hasDynamic is true, the limit is definitely not np.nan
+            limit_max = max(HL, np.max(dyHLimits)) if hasDynamicHigh else HL
+            limit_min = min(LL, np.min(dyLLimits)) if hasDynamicLow else LL
+            data_max = np.nanmax([selData["Max"], limit_max])
+            data_min = np.nanmin([selData["Min"], limit_min])
             dataDelta = data_max - data_min
             
             headroomY = 5 if dataDelta == 0 else dataDelta * 0.15
@@ -2097,14 +2538,26 @@ class MyWindow(QtWidgets.QMainWindow):
             # blended transformation
             transXaYd = matplotlib.transforms.blended_transform_factory(ax.transAxes, ax.transData)
             # HL/LL lines
-            if self.settingParams.showHL_trend: 
-                if HL != None: 
+            if self.settingParams.showHL_trend and ~np.isnan(HL): 
+                ax.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                if hasDynamicHigh: 
+                    ax.plot(x_arr, dyHLimits, "-", linewidth=3, color='r', zorder = -10, label="Upper Limit")
+                else:
                     ax.axhline(y = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-                    ax.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-            if self.settingParams.showLL_trend:
-                if LL != None: 
+            
+            if self.settingParams.showLL_trend and ~np.isnan(LL):
+                ax.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+                if hasDynamicLow: 
+                    ax.plot(x_arr, dyLLimits, "-", linewidth=3, color='b', zorder = -10, label="Lower Limit")
+                else:
                     ax.axhline(y = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
-                    ax.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
+            # Spec lines
+            if self.settingParams.showHSpec_trend and ~np.isnan(HSpec): 
+                ax.text(x=1, y=HSpec, s="HiSpec = %.3f \n"%HSpec, color='darkred', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                ax.axhline(y = HSpec, linewidth=3, color='darkred', zorder = -10, label="High Spec")
+            if self.settingParams.showLSpec_trend and ~np.isnan(LSpec): 
+                ax.text(x=1, y=LSpec, s="\nLoSpec = %.3f "%LSpec, color='navy', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
+                ax.axhline(y = LSpec, linewidth=3, color='navy', zorder = -10, label="Low Spec")
             # add med and avg text at the right edge of the plot
             m_obj = None
             a_obj = None
@@ -2130,14 +2583,16 @@ class MyWindow(QtWidgets.QMainWindow):
                     ax.set_xlim(right = rightLimit)
                     
         # for cursor binding
-        return ax, trendLine
+        return ax, trendLines
     
     
     def genHistoPlot(self, fig:plt.Figure, head:int, site:int, test_num:int):
         selData = self.getData(test_num, [head], [site])
         ax = fig.add_subplot(111)
+        recGroups = []
         ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
+        dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
         dataInvalid = np.all(np.isnan(selData["dataList"]))
         testInvalid = np.all(selData["flagList"] < 0)
 
@@ -2155,6 +2610,8 @@ class MyWindow(QtWidgets.QMainWindow):
                     # MPR with multiple data
                     HL = selData["HL"]
                     LL = selData["LL"]
+                    HSpec = selData["HSpec"]
+                    LSpec = selData["LSpec"]
                     bin_num = self.settingParams.binCount
                     pinList = selData["PIN_NAME"]
                     pinCount = len(pinList)
@@ -2171,12 +2628,28 @@ class MyWindow(QtWidgets.QMainWindow):
                         sd = selData["SDev"][index]
                         # select not nan value
                         dataList = pinData[~np.isnan(pinData)]
+                        dutListNoNAN = dutListFromSiteHead[~np.isnan(pinData)]
                         tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
-                        filteredDataList = dataList[np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))]
+                        #TODO filter data beyond 9σ
+                        dataFilter = np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))
+                        filteredDataList = dataList[dataFilter]
+                        filteredDutList = dutListNoNAN[dataFilter]
+                        
                         hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
                         bin_width = bin_edges[1]-bin_edges[0]
+                        # get histo bin number of each dut
+                        bin_ind = np.digitize(filteredDataList, bin_edges, right=False)
+                        bin_dut_dict = {}
+                        for ind, dut in zip(bin_ind, filteredDutList):
+                            if ind in bin_dut_dict:
+                                bin_dut_dict[ind].append(dut)
+                            else:
+                                bin_dut_dict[ind] = [dut]
                         # use bar to draw histogram, only for its "align" option 
-                        tmpAx.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label=pinName)
+                        recGroup = tmpAx.bar(bin_edges[:len(hist)], hist, width=bin_width, align='edge', color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label=pinName, picker=True)
+                        # save to histo group for interaction
+                        setattr(recGroup, "bin_dut_dict", bin_dut_dict)
+                        # recGroups.append(recGroup)
                         # add pin name at the right side of plots
                         tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
                         # draw boxplot
@@ -2188,12 +2661,15 @@ class MyWindow(QtWidgets.QMainWindow):
                                         capprops=dict(color='b'),
                                         whiskerprops=dict(color='b'))
                         # draw LL HL
-                        if self.settingParams.showHL_histo:
-                            if HL != None: 
-                                tmpAx.axvline(x = HL, linewidth=3, color='r', zorder = 10, label="Upper Limit")
-                        if self.settingParams.showLL_histo:
-                            if LL != None: 
-                                tmpAx.axvline(x = LL, linewidth=3, color='b', zorder = 10, label="Lower Limit")
+                        if self.settingParams.showHL_histo and ~np.isnan(HL): 
+                            tmpAx.axvline(x = HL, linewidth=3, color='r', zorder = 10, label="Upper Limit")
+                        if self.settingParams.showLL_histo and ~np.isnan(LL): 
+                            tmpAx.axvline(x = LL, linewidth=3, color='b', zorder = 10, label="Lower Limit")
+                        
+                        if self.settingParams.showHSpec_histo and ~np.isnan(HSpec): 
+                            tmpAx.axvline(x = HSpec, linewidth=3, color='darkred', zorder = -10, label="Hi Spec")
+                        if self.settingParams.showLSpec_histo and ~np.isnan(LSpec): 
+                            tmpAx.axvline(x = LSpec, linewidth=3, color='navy', zorder = -10, label="Lo Spec")
 
                         # draw fitting curve only when standard deviation is not 0
                         if sd != 0:
@@ -2226,11 +2702,14 @@ class MyWindow(QtWidgets.QMainWindow):
                     ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma", labelpad=6)
                     ax.set_yticklabels([])
                     ax.yaxis.set_ticks_position('none')
-                    return ax
+                    return ax, recGroups
             
             dataList = y_raw[~np.isnan(y_raw)]
+            dutListNoNAN = dutListFromSiteHead[~np.isnan(y_raw)]
             HL = selData["HL"]
             LL = selData["LL"]
+            HSpec = selData["HSpec"]
+            LSpec = selData["LSpec"]
             med = selData["Median"]
             avg = selData["Mean"]
             sd = selData["SDev"]
@@ -2238,26 +2717,42 @@ class MyWindow(QtWidgets.QMainWindow):
             # note: len(bin_edges) = len(hist) + 1
             # we use a filter to remove the data that's beyond 9 sigma
             # otherwise we cannot to see the detailed distribution of the main data set
-            filteredDataList = dataList[np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))]
+            #TODO filter data beyond 9σ
+            dataFilter = np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))
+            filteredDataList = dataList[dataFilter]
+            filteredDutList = dutListNoNAN[dataFilter]
+            
             hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
             bin_width = bin_edges[1]-bin_edges[0]
+            # get histo bin index (start from 1) of each dut
+            bin_ind = np.digitize(filteredDataList, bin_edges, right=False)
+            bin_dut_dict = {}
+            for ind, dut in zip(bin_ind, filteredDutList):
+                if ind in bin_dut_dict:
+                    bin_dut_dict[ind].append(dut)
+                else:
+                    bin_dut_dict[ind] = [dut]
             # use bar to draw histogram, only for its "align" option 
-            ax.bar(bin_edges[:len(hist)], hist, width=bin_width, color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label="Histo Chart")
+            recGroup = ax.bar(bin_edges[:len(hist)], hist, width=bin_width, align='edge', color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 100, label="Histo Chart", picker=True)
+            # save to histo group for interaction
+            setattr(recGroup, "bin_dut_dict", bin_dut_dict)
+            recGroups.append(recGroup)
             # draw boxplot
             if self.settingParams.showBoxp_histo:
-                ax_box = ax.twinx()
-                ax_box.axis('off')  # hide axis and tick for boxplot
-                ax_box.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.5, patch_artist=True,
+                ax.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.2*max(hist), patch_artist=True, zorder=200, positions=[max(hist)/2], manage_ticks=False,
                             boxprops=dict(color='b', facecolor=(1, 1, 1, 0)),
                             capprops=dict(color='b'),
                             whiskerprops=dict(color='b'))
-            # ax.hist(dataList, bins="auto", facecolor="green", zorder = 0)
-            if self.settingParams.showHL_histo:
-                if HL != None: 
-                    ax.axvline(x = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-            if self.settingParams.showLL_histo:
-                if LL != None: 
-                    ax.axvline(x = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
+            
+            if self.settingParams.showHL_histo and ~np.isnan(HL): 
+                ax.axvline(x = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
+            if self.settingParams.showLL_histo and ~np.isnan(LL): 
+                ax.axvline(x = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
+            
+            if self.settingParams.showHSpec_histo and ~np.isnan(HSpec): 
+                ax.axvline(x = HSpec, linewidth=3, color='darkred', zorder = -10, label="Hi Spec")
+            if self.settingParams.showLSpec_histo and ~np.isnan(LSpec): 
+                ax.axvline(x = LSpec, linewidth=3, color='navy', zorder = -10, label="Lo Spec")
 
             # set xlimit and draw fitting curve only when standard deviation is not 0
             if sd != 0:
@@ -2293,20 +2788,21 @@ class MyWindow(QtWidgets.QMainWindow):
             if self.settingParams.showMean_histo:
                 ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
                 ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
-            ax.ticklabel_format(useOffset=False)    # prevent + sign
+            # ax.ticklabel_format(useOffset=False)    # prevent + sign
             if selData["recHeader"] == REC.FTR:
                 ax.set_xlabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
             else:
                 ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
             ax.set_ylabel("%s"%(self.tr("DUT Counts")), fontsize=12, fontname=self.imageFont)
             
-        return ax
+        return ax, recGroups
     
     
     def genBinPlot(self, fig:plt.Figure, head:int, site:int):
         fig.suptitle("%s - %s - %s"%(self.tr("Bin Summary"), "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         ax_l = fig.add_subplot(121)
         ax_r = fig.add_subplot(122)
+        bin_width = 0.8
         Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
         # HBIN plot
         binStats = self.DatabaseFetcher.getBinStats(head, site, "HBIN")
@@ -2315,14 +2811,18 @@ class MyWindow(QtWidgets.QMainWindow):
         HLable = []
         HColor = []
         for ind, i in enumerate(HList):
-            HLable.append(self.HBIN_dict[i]["BIN_NAME"])
+            HLable.append(self.tr(self.HBIN_dict[i]["BIN_NAME"]))
             HColor.append(self.settingParams.hbinColor[i])
-            ax_l.text(x=ind, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
+            ax_l.text(x=ind + bin_width/2, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
             
-        ax_l.bar(np.arange(len(HCnt)), HCnt, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary")
-        ax_l.set_xticks(np.arange(len(HCnt)))
-        ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)))    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
-        ax_l.set_xlim(-.5, max(3, len(HCnt))-.5)
+        recGroup_l = ax_l.bar(np.arange(len(HCnt)), HCnt, align='edge', width=bin_width, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary", picker=True)
+        setattr(recGroup_l, "head", head)
+        setattr(recGroup_l, "site", site)
+        setattr(recGroup_l, "binType", "HBIN")
+        setattr(recGroup_l, "binList", HList)
+        ax_l.set_xticks(np.arange(len(HCnt)) + bin_width/2)
+        ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)), fontname=self.imageFont)    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
+        ax_l.set_xlim(-.1, max(3, len(HCnt))-.9+bin_width)
         ax_l.set_ylim(top=max(HCnt)*1.2)
         ax_l.set_xlabel(self.tr("Hardware Bin"), fontsize=12, fontname=self.imageFont)
         ax_l.set_ylabel(self.tr("Hardware Bin Counts"), fontsize=12, fontname=self.imageFont)
@@ -2334,19 +2834,23 @@ class MyWindow(QtWidgets.QMainWindow):
         SLable = []
         SColor = []
         for ind, i in enumerate(SList):
-            SLable.append(self.SBIN_dict[i]["BIN_NAME"])
+            SLable.append(self.tr(self.SBIN_dict[i]["BIN_NAME"]))
             SColor.append(self.settingParams.sbinColor[i])
-            ax_r.text(x=ind, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
+            ax_r.text(x=ind + bin_width/2, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
             
-        ax_r.bar(np.arange(len(SCnt)), SCnt, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary")
-        ax_r.set_xticks(np.arange(len(SCnt)))
-        ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)))
-        ax_r.set_xlim(-.5, max(3, len(SCnt))-.5)
+        recGroup_r = ax_r.bar(np.arange(len(SCnt)), SCnt, align='edge', width=bin_width, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary", picker=True)
+        setattr(recGroup_r, "head", head)
+        setattr(recGroup_r, "site", site)
+        setattr(recGroup_r, "binType", "SBIN")
+        setattr(recGroup_r, "binList", SList)
+        ax_r.set_xticks(np.arange(len(SCnt)) + bin_width/2)
+        ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)), fontname=self.imageFont)
+        ax_r.set_xlim(-.1, max(3, len(SCnt))-.9+bin_width)
         ax_r.set_ylim(top=max(SCnt)*1.2)
         ax_r.set_xlabel(self.tr("Software Bin"), fontsize=12, fontname=self.imageFont)
         ax_r.set_ylabel(self.tr("Software Bin Counts"), fontsize=12, fontname=self.imageFont)
         
-        return ax_l, ax_r
+        return [ax_l, ax_r], [recGroup_l, recGroup_r]
     
     
     def genWaferPlot(self, fig:plt.Figure, head:int, site:int, wafer_num:int):
@@ -2383,7 +2887,8 @@ class MyWindow(QtWidgets.QMainWindow):
             # get a colormap segment
             cmap_seg = matplotlib.colors.LinearSegmentedColormap.from_list("seg", plt.get_cmap("nipy_spectral")(np.linspace(0.55, 0.9, 128)))
             # draw color mesh, replace all -1 to NaN to hide rec with no value
-            pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg)
+            pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg, picker=100)     # set picker large enough for QuadMask to fire pick event
+            setattr(pcmesh, "wafer_num", wafer_num)
             # create a new axis for colorbar
             ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
             cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
@@ -2411,7 +2916,11 @@ class MyWindow(QtWidgets.QMainWindow):
                 # skip dut with invalid coords
                 for (x, y) in coordsDict[sbin]:
                     rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
-                pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100)
+                pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100, picker=True)
+                # for interactive plot
+                setattr(pc, "SBIN", sbin)
+                setattr(pc, "BIN_NAME", self.tr(sbinName))
+                setattr(pc, "wafer_num", wafer_num)
                 ax.add_collection(pc)
                 proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
                 legendHandles.append(proxyArtist)
@@ -2454,9 +2963,18 @@ class MyWindow(QtWidgets.QMainWindow):
             # we don't want to clean trend/histo/bin when we are in wafer tab
             [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
             
-        if currentTab != tab.Trend:
-            # clear magic cursor as well, it contains copies of figures
-            self.cursorDict = {}
+            if currentTab == tab.Trend:
+                # clear magic cursor as well, it contains copies of figures
+                matchString = "trend"
+            elif currentTab == tab.Histo:
+                matchString = "histo"
+            else:
+                matchString = "bin"
+
+            for key in list(self.cursorDict.keys()):
+                # keep wafer and current tabs' cursors
+                if not (key.startswith(matchString) or key.startswith("wafer")):
+                    self.cursorDict.pop(key, None)
             
         gc.collect()
     
@@ -2576,6 +3094,8 @@ class MyWindow(QtWidgets.QMainWindow):
             
             self.settingUI.removeColorBtns()               # remove existing color btns
             self.settingUI.initColorBtns()
+            self.exporter.removeSiteCBs()
+            self.exporter.refreshUI()
             self.init_SettingParams()
             self.init_Head_SiteCheckbox()
             self.updateFileHeader()
