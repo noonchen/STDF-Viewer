@@ -2441,9 +2441,10 @@ class MyWindow(QtWidgets.QMainWindow):
                         x_arr = dutListFromSiteHead[~np.isnan(pinData)]
                         y_arr = pinData[~np.isnan(pinData)]
                         tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
-                        trendLine, = tmpAx.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label=pinName)
+                        # trendLine, = 
+                        tmpAx.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label=pinName)
                         #FIXME disable cursor functino for MPR, performance is really laggy.
-                        if False: trendLines.append(trendLine)
+                        # trendLines.append(trendLine)
                         # HL/LL lines
                         transXaYd = matplotlib.transforms.blended_transform_factory(tmpAx.transAxes, tmpAx.transData)
                         if self.settingParams.showHL_trend and ~np.isnan(HL): 
@@ -2647,7 +2648,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         recGroup = tmpAx.bar(bin_edges[:len(hist)], hist, width=bin_width, align='edge', color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label=pinName, picker=True)
                         # save to histo group for interaction
                         setattr(recGroup, "bin_dut_dict", bin_dut_dict)
-                        if False: recGroups.append(recGroup)
+                        # recGroups.append(recGroup)
                         # add pin name at the right side of plots
                         tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
                         # draw boxplot
