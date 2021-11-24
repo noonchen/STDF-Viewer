@@ -27,6 +27,7 @@
 import io, os, sys, gc, traceback, toml, logging, atexit
 import json, urllib.request as rq
 # from memory_profiler import profile
+import platform
 import numpy as np
 from enum import IntEnum
 from random import choice
@@ -66,6 +67,7 @@ import matplotlib
 matplotlib.use('QT5Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib import font_manager
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import RendererAgg
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -77,6 +79,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
 Version = "V3.1.0"
+isMac = platform.system() == 'Darwin'
     
 # save config path to sys
 rootFolder = os.path.dirname(sys.argv[0])
@@ -194,6 +197,7 @@ def test_flag_parser(flag: int) -> str:
 def genQItemList(dutSumList: list[bytes]) -> list:
     '''Convert a bytes list to a QStandardItem list'''
     qitemRow = []
+    fontsize = 13 if isMac else 10
     dutStatus, dutFlagString = dutSumList[-1].split(b"-")
     dutFail = dutStatus.startswith(b"Failed")
     flagInfo = dut_flag_parser(int(dutFlagString, 16))
@@ -202,6 +206,7 @@ def genQItemList(dutSumList: list[bytes]) -> list:
         qitem = QtGui.QStandardItem(item.decode("utf-8"))
         qitem.setTextAlignment(QtCore.Qt.AlignCenter)
         qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+        qitem.setData(QtGui.QFont("Tahoma", fontsize), QtCore.Qt.FontRole)
         # mark red when failed
         if dutFail: 
             qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
@@ -960,14 +965,14 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox = QtWidgets.QMessageBox(self)
                 msgBox.setWindowFlag(Qt.FramelessWindowHint)
                 msgBox.setTextFormat(QtCore.Qt.RichText)
-                msgBox.setInformativeText("You're using the latest version.")
+                msgBox.setText(self.tr("You're using the latest version."))
                 msgBox.exec_()
             
         except Exception as e:
                 # tell user cannot connect to the internet
                 msgBox = QtWidgets.QMessageBox(self)
                 msgBox.setWindowFlag(Qt.FramelessWindowHint)
-                msgBox.setText("Cannot connect to Github")
+                msgBox.setText(self.tr("Cannot connect to Github"))
                 msgBox.exec_()
         
     
@@ -987,8 +992,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.dutDataReader.translator.loadFromData(transDict["dutDataCode_en_US"])
             self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_en_US"])
             
-        elif curLang == "中文简体":
-            self.imageFont = "Microsoft YaHei"
+        elif curLang == "简体中文":
+            self.imageFont = "Microsoft Yahei"
             self.translatorUI.loadFromData(transDict["MainUI_zh_CN"])
             self.translatorCode.loadFromData(transDict["MainCode_zh_CN"])
             self.loader.translator.loadFromData(transDict["loadingUI_zh_CN"])
@@ -999,6 +1004,11 @@ class MyWindow(QtWidgets.QMainWindow):
             self.dutDataReader.translator.loadFromData(transDict["dutDataCode_zh_CN"])
             self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_zh_CN"])
             
+        newfont = QtGui.QFont(self.imageFont)
+        _app.setFont(newfont)
+        [w.setFont(newfont) if not isinstance(w, QtWidgets.QListView) else None for w in QApplication.allWidgets()]
+        # actions is not listed in qapp all widgets, iterate separately
+        [w.setFont(newfont) for w in self.ui.toolBar.actions()]
         # retranslate UIs
         # mainUI
         _app.installTranslator(self.translatorUI)
@@ -1440,19 +1450,19 @@ class MyWindow(QtWidgets.QMainWindow):
             # skip the following steps if no file is loaded
             return
         
+        extraInfoList = []
         # manually add rows of std file info
         absPath = os.path.realpath(self.std_handle.fpath)
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("File Name: "), os.path.basename(absPath)]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("Directory Path: "), os.path.dirname(absPath)]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("File Size: "), "%.2f MB"%(os.stat(self.std_handle.fpath).st_size / 2**20)]])
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("File Name: "), os.path.basename(absPath)]])
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("Directory Path: "), os.path.dirname(absPath)]])
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("File Size: "), "%.2f MB"%(os.stat(self.std_handle.fpath).st_size / 2**20)]])
         if self.containsWafer:
-            self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("Wafers Tested: "), str(len(self.completeWaferList))]])    # WIR #
+            extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("Wafers Tested: "), str(len(self.completeWaferList))]])    # WIR #
         statsDict = self.DatabaseFetcher.getDUTStats()
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Tested: "), str(statsDict["Total"])]])    # PIR #
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Passed: "), str(statsDict["Pass"])]])
-        self.tmodel_info.appendRow([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Failed: "), str(statsDict["Failed"])]])
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Tested: "), str(statsDict["Total"])]])    # PIR #
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Passed: "), str(statsDict["Pass"])]])
+        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Failed: "), str(statsDict["Failed"])]])
 
-        extraInfoList = []
         # append mir info
         self.fileInfoDict = self.DatabaseFetcher.getFileInfo()
         for fn in mirFieldNames:
@@ -1461,8 +1471,6 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.needByteSwap = not (value.lower().startswith(sys.byteorder))
             if value == "" or value == " " : continue
             extraInfoList.append([mirDict[fn] + ": ", value])
-            # tmpRow = [QtGui.QStandardItem(ele) for ele in [mirDict[fn] + ": ", value]]
-            # self.tmodel_info.appendRow(tmpRow)
             
         # append wafer configuration info
         if self.containsWafer:
@@ -1486,6 +1494,10 @@ class MyWindow(QtWidgets.QMainWindow):
             
         for tmpRow in extraInfoList:
             qitemRow = [QtGui.QStandardItem(ele) for ele in tmpRow]
+            if self.settingParams.language != "English":
+                # fix weird font when switch to chinese-s
+                qfont = QtGui.QFont(self.imageFont)
+                [qele.setData(qfont, QtCore.Qt.FontRole) for qele in qitemRow]
             self.tmodel_info.appendRow(qitemRow)
         
         horizontalHeader.resizeSection(0, 250)
@@ -3157,9 +3169,16 @@ def run():
     app.setStyle('Fusion')
     app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))
     # default font for dialogs
-    f = QtGui.QFont()
-    f.setFamily("Tahoma")
-    app.setFont(f)
+    font_names = []
+    # reverse to put courier at the rear
+    for fn in sorted(os.listdir("fonts"), key=lambda x:x.lower(), reverse=True):
+        if not fn.endswith(".ttf"): continue
+        fontPath = "fonts/" + fn
+        QtGui.QFontDatabase.addApplicationFont(fontPath)
+        font_manager.fontManager.addfont(fontPath)
+        font_names.append(font_manager.FontProperties(fname=fontPath).get_name())
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = font_names
     
     window = MyWindow()
     window.show()

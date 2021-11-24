@@ -25,6 +25,7 @@
 
 
 import sys
+import platform
 from random import choice
 from copy import deepcopy
 from .ui.ImgSrc_svg import ImgDict
@@ -45,6 +46,8 @@ from .ui.stdfViewer_settingsUI import Ui_Setting
 # simulate a Enum in python
 class Tab(tuple): __getattr__ = tuple.index
 tab = Tab(["Info", "Trend", "Histo", "Bin"])
+
+isMac = platform.system() == 'Darwin'
 
 indexDic_sigma = {0: "",
                   1: "3", 
@@ -71,14 +74,16 @@ class colorBtn(QtWidgets.QWidget):
         self.setObjectName(self.name)
         self.hLayout = QtWidgets.QHBoxLayout(self)
         self.hLayout.setSpacing(5)
+        fontsize = 12 if isMac else 10
+        squaresize = 25 if isMac else 20
         # label
         self.label = QtWidgets.QLabel(self)
         self.label.setText(self.name)
-        self.label.setStyleSheet("font: 12pt Courier")
+        self.label.setStyleSheet("font: {0}pt Courier".format(fontsize))
         self.hLayout.addWidget(self.label)
         # color square
         self.square = QtWidgets.QWidget(self)
-        self.square.setFixedSize(25, 25)
+        self.square.setFixedSize(squaresize, squaresize)
         self.square.setStyleSheet("border:1px solid #000000;")
         self.hLayout.addWidget(self.square)
         self.square.mouseReleaseEvent = self.showPalette
