@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Nov 22 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -23,7 +23,6 @@
 #
 
 import sqlite3
-from matplotlib.pyplot import hlines
 import numpy as np
 
 

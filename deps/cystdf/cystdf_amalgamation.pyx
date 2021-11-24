@@ -1,12 +1,13 @@
 # distutils: language = c
 # cython: language_level=3
+# cython: annotation_typing = True
 #
 # cystdf_amalgamation.py - STDF Viewer
 # 
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Nov 23 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen

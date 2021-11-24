@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Nov 23 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -938,8 +938,6 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def checkNewVersion(self):
-        latestTag = Version
-
         try:
             res = rq.urlopen("https://api.github.com/repos/noonchen/STDF-Viewer/releases/latest")
             resDict = json.loads(res.read())
@@ -2445,7 +2443,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         tmpAx = fig.add_subplot(pinCount, 1, index+1, sharex=ax)
                         trendLine, = tmpAx.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label=pinName)
                         #FIXME disable cursor functino for MPR, performance is really laggy.
-                        # trendLines.append(trendLine)
+                        if False: trendLines.append(trendLine)
                         # HL/LL lines
                         transXaYd = matplotlib.transforms.blended_transform_factory(tmpAx.transAxes, tmpAx.transData)
                         if self.settingParams.showHL_trend and ~np.isnan(HL): 
@@ -2649,7 +2647,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         recGroup = tmpAx.bar(bin_edges[:len(hist)], hist, width=bin_width, align='edge', color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 0, label=pinName, picker=True)
                         # save to histo group for interaction
                         setattr(recGroup, "bin_dut_dict", bin_dut_dict)
-                        # recGroups.append(recGroup)
+                        if False: recGroups.append(recGroup)
                         # add pin name at the right side of plots
                         tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
                         # draw boxplot
