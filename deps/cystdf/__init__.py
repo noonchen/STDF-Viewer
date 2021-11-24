@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 25th 2021
 # -----
-# Last Modified: Thu Aug 26 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -31,7 +31,7 @@ except ImportError as e:
     e.msg = "cystdf module should be built before running STDF-Viewer"
     raise
 
-__all__ = ["stdfDataRetriever", "stdfRecordAnalyzer", "stdfParser", "setByteSwap"]
+__all__ = ["stdfDataRetriever", "stdfRecordAnalyzer", "stdf_PFTR_Parser", "stdf_MPR_Parser", "setByteSwap"]
 
 class stdfDataRetriever(_cystdf.stdfDataRetriever):
     pass
@@ -39,8 +39,13 @@ class stdfDataRetriever(_cystdf.stdfDataRetriever):
 def stdfRecordAnalyzer(filepath:str) -> str:
     return _cystdf.analyzeSTDF(filepath)
 
-def stdfParser(recHeader:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
-    return _cystdf.parse_rawList(recHeader, offsetArray, lengthArray, file_handle)
+def stdf_PFTR_Parser(recHeader:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
+    '''For PTR & FTR only'''
+    return _cystdf.parsePFTR_rawList(recHeader, offsetArray, lengthArray, file_handle)
+
+def stdf_MPR_Parser(recHeader:int, pinCount:int, rsltCount:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
+    '''For MPR only'''
+    return _cystdf.parseMPR_rawList(recHeader, pinCount, rsltCount, offsetArray, lengthArray, file_handle)
 
 def setByteSwap(swapOn:bool):
     _cystdf.setByteSwap(swapOn)

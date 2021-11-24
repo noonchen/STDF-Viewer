@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Nov 04 2021
+# Last Modified: Mon Nov 22 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -646,6 +646,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.AllTestItems = None
         self.remainTestItems = []
         self.exportTestItems = []
+        self.initTestListBox()
         # init search-related UI
         self.exportUI.SearchBox.textChanged.connect(self.searchInBox)
         self.exportUI.Clear.clicked.connect(lambda: self.exportUI.SearchBox.clear())
@@ -666,6 +667,9 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.DUT_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
+        # bind check/cancel button to function
+        self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
+        self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         
                 
     def showUI(self):
@@ -674,11 +678,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.stackedWidget.setCurrentIndex(0)
         self.exportUI.previousBtn.setDisabled(True)
         self.previousPageIndex = 0
-        # get all test items from mainUI
-        self.remainTestItems = self.parent.completeTestList      # mutable
-        self.AllTestItems = tuple(self.remainTestItems)     # immutable
-        self.initSiteCBs()
-        self.initTestItems()
+        self.changeBtnStyle()
         self.exec_()
         
     
@@ -739,11 +739,11 @@ class stdfExporter(QtWidgets.QDialog):
         
         
     def updateTestLists(self, remainList=None, exportList=None):
-        if remainList != None: self.slm_remain.setStringList(remainList)
-        if exportList != None: self.slm_export.setStringList(exportList)
+        if remainList is not None: self.slm_remain.setStringList(remainList)
+        if exportList is not None: self.slm_export.setStringList(exportList)
 
 
-    def initTestItems(self):
+    def initTestListBox(self):
         self.slm_remain = QtCore.QStringListModel()
         self.exportUI.TestList.setModel(self.slm_remain)
         self.exportUI.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -757,8 +757,19 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.ExportTestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.exportUI.ExportTestList.doubleClicked.connect(self.onRM)
         self.selModel_export = self.exportUI.ExportTestList.selectionModel()
-        
-        self.updateTestLists(remainList = list(self.AllTestItems))
+    
+    
+    def removeSiteCBs(self):
+        for layout in [self.exportUI.gridLayout_head,
+                       self.exportUI.gridLayout_site]:
+            for i in range(layout.count())[::-1]:   # delete in reverse
+                cB = layout.itemAt(i).widget()
+                if cB.objectName() in ["All", "checkAll", "cancelAll"]:
+                    # do not delete default buttons
+                    continue
+                layout.removeWidget(cB)
+                cB.deleteLater()
+                cB.setParent(None)
     
     
     def initSiteCBs(self):
@@ -781,11 +792,17 @@ class stdfExporter(QtWidgets.QDialog):
             row = 1 + siteNum//8
             col = siteNum % 8
             self.exportUI.gridLayout_site.addWidget(self.site_cb_dict[siteNum], row, col)
-        # bind check/cancel button to function
-        self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
-        self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         
         
+    def refreshUI(self):
+        # get all test items from mainUI
+        self.remainTestItems = self.parent.completeTestList      # mutable
+        self.exportTestItems = []
+        self.AllTestItems = tuple(self.remainTestItems)     # immutable, prevent parent list from modifying
+        self.updateTestLists(remainList=list(self.AllTestItems), exportList=self.exportTestItems)
+        self.initSiteCBs()
+    
+    
     def toggleSite(self, on=True):
         self.exportUI.All.setChecked(on)
         for siteNum, cb in self.site_cb_dict.items():

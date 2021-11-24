@@ -1,12 +1,13 @@
 # distutils: language = c
 # cython: language_level=3
+# cython: annotation_typing = True
 #
 # cystdf_amalgamation.py - STDF Viewer
 # 
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Nov 02 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -154,7 +155,8 @@ cdef void get_offset(STDF* std, tsQueue* q, bint* p_needByteSwap, bint* stopFlag
             if (recHeader == REC_MIR or recHeader == REC_WCR or recHeader == REC_WIR or recHeader == REC_WRR or
                 recHeader == REC_PTR or recHeader == REC_FTR or recHeader == REC_MPR or recHeader == REC_TSR or
                 recHeader == REC_PIR or recHeader == REC_PRR or recHeader == REC_HBR or recHeader == REC_SBR or 
-                recHeader == REC_PCR or recHeader == REC_PMR or recHeader == REC_PGR or recHeader == REC_PLR):
+                recHeader == REC_PCR or recHeader == REC_PMR or recHeader == REC_PGR or recHeader == REC_PLR or
+                recHeader == REC_MRR):
                 # get binaryLen and read rawData
                 # alloc memory
                 ele = <dataCluster*>message_queue_message_alloc_blocking(q)
@@ -710,7 +712,9 @@ cdef class stdfSummarizer:
         sqlite3_stmt *insertGRP_NAM_stmt
         sqlite3_stmt *insertPinInfo_stmt
         sqlite3_stmt *insertTestPin_stmt
-        map_t   seenTN          # ele: TEST_NUM
+        sqlite3_stmt *insertDynamicLimit_stmt
+        map_t   defaultLLimit
+        map_t   defaultHLimit
         map_t   TestFailCount
         map_t   head_site_dutIndex
         map_t   head_waferIndex
@@ -735,8 +739,10 @@ cdef class stdfSummarizer:
         self.insertGRP_NAM_stmt     = NULL
         self.insertPinInfo_stmt     = NULL
         self.insertTestPin_stmt     = NULL
+        self.insertDynamicLimit_stmt= NULL
         self.pRec                   = NULL
-        self.seenTN                 = NULL
+        self.defaultLLimit          = NULL
+        self.defaultHLimit          = NULL        
         self.TestFailCount          = NULL
         self.head_site_dutIndex     = NULL
         self.head_waferIndex        = NULL
@@ -755,6 +761,7 @@ cdef class stdfSummarizer:
                                         DROP TABLE IF EXISTS Pin_Map;
                                         DROP TABLE IF EXISTS Pin_Info;
                                         DROP TABLE IF EXISTS TestPin_Map;
+                                        DROP TABLE IF EXISTS Dynamic_Limits;
                                         VACUUM;
                                         
                                         CREATE TABLE IF NOT EXISTS File_Info (
@@ -804,13 +811,15 @@ cdef class stdfSummarizer:
                                                                 recHeader INTEGER,
                                                                 TEST_NAME TEXT,
                                                                 RES_SCAL INTEGER,
-                                                                LLimit INTEGER,
-                                                                HLimit INTEGER,
+                                                                LLimit REAL,
+                                                                HLimit REAL,
                                                                 Unit TEXT,
                                                                 OPT_FLAG INTEGER,
                                                                 FailCount INTEGER,
                                                                 RTN_ICNT INTEGER,
-                                                                RSLT_PGM_CNT INTEGER);
+                                                                RSLT_PGM_CNT INTEGER,
+                                                                LSpec REAL,
+                                                                HSpec REAL);
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
@@ -850,6 +859,13 @@ cdef class stdfSummarizer:
                                                                 TEST_NUM INTEGER, 
                                                                 PMR_INDX INTEGER,
                                                                 PIN_TYPE TEXT);
+                                        
+                                        CREATE TABLE IF NOT EXISTS Dynamic_Limits (
+                                                                DUTIndex INTEGER,
+                                                                TEST_NUM INTEGER, 
+                                                                LLimit REAL,
+                                                                HLimit REAL,
+                                                                PRIMARY KEY (DUTIndex, TEST_NUM));
                                                                 
                                         DROP INDEX IF EXISTS dutKey;
                                         PRAGMA synchronous = OFF;
@@ -869,7 +885,7 @@ cdef class stdfSummarizer:
             # I am not adding IGNORE below, since tracking seen test_nums can skip a huge amount of codes
             const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_NUM, :recHeader, :TEST_NAME, 
                                                                         :RES_SCAL, :LLimit, :HLimit, 
-                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT);'''
+                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec);'''
             const char* insertHBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("H", :HBIN_NUM, :HBIN_NAME, :PF);'''
             # const char* updateHBIN = '''UPDATE Bin_Info SET BIN_NAME=:HBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="H" AND BIN_NUM=:HBIN_NUM'''
             const char* insertSBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("S", :SBIN_NUM, :SBIN_NAME, :PF);'''
@@ -889,6 +905,7 @@ cdef class stdfSummarizer:
                                                                         :GRP_MODE, :GRP_RADX, 
                                                                         :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);'''
             const char* insertTestPin = '''INSERT INTO TestPin_Map VALUES (:TEST_NUM, :PMR_INDX, :PIN_TYPE);'''
+            const char* insertDynamicLimit = '''INSERT OR REPLACE INTO Dynamic_Limits VALUES (:DUTIndex, :TEST_NUM, :LLimit ,:HLimit);'''
 
         # init sqlite3 database api
         try:
@@ -911,6 +928,7 @@ cdef class stdfSummarizer:
             csqlite3_prepare_v2(self.db_ptr, insertGRP_NAM, &self.insertGRP_NAM_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertPinInfo, &self.insertPinInfo_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertTestPin, &self.insertTestPin_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertDynamicLimit, &self.insertDynamicLimit_stmt)
         except Exception:
             csqlite3_close(self.db_ptr)
             raise
@@ -944,13 +962,15 @@ cdef class stdfSummarizer:
         self.isLittleEndian = True
         self.stopFlag = False
         # used for recording TR, TestNum, HBR, SBR that have been seen
-        self.seenTN                 = hashmap_new(1024)
+        self.defaultLLimit          = hashmap_new(1024)   # key: test number, value: Low limit in first PTR
+        self.defaultHLimit          = hashmap_new(1024)   # key: test number, value: high limit in first PTR
         self.TestFailCount          = hashmap_new(1024)   # key: test number, value: fail count
         self.head_site_dutIndex     = hashmap_new(8)      # key: head numb << 8 | site num, value: dutIndex, a tmp dict used to retrieve dut index by head/site info, required by multi head stdf files
         self.head_waferIndex        = hashmap_new(8)      # similar to head_site_dutIndex, but one head per wafer
         
-        if self.seenTN == NULL or self.seenTN == NULL or self.seenTN == NULL:
-            hashmap_free(self.seenTN)
+        if self.defaultLLimit == NULL or self.defaultHLimit == NULL or self.TestFailCount == NULL or self.head_site_dutIndex == NULL or self.head_waferIndex == NULL:
+            hashmap_free(self.defaultLLimit)
+            hashmap_free(self.defaultHLimit)
             hashmap_free(self.TestFailCount)
             hashmap_free(self.head_site_dutIndex)
             hashmap_free(self.head_waferIndex)            
@@ -1106,9 +1126,11 @@ cdef class stdfSummarizer:
         csqlite3_finalize(self.insertGRP_NAM_stmt)
         csqlite3_finalize(self.insertPinInfo_stmt)
         csqlite3_finalize(self.insertTestPin_stmt)
+        csqlite3_finalize(self.insertDynamicLimit_stmt)
         csqlite3_close(self.db_ptr)
         # clean hashmap
-        hashmap_free(self.seenTN)
+        hashmap_free(self.defaultLLimit)
+        hashmap_free(self.defaultHLimit)
         hashmap_free(self.TestFailCount)
         hashmap_free(self.head_site_dutIndex)
         hashmap_free(self.head_waferIndex)            
@@ -1151,11 +1173,12 @@ cdef class stdfSummarizer:
             err = self.onWCR(recHeader, binaryLen, rawData)
         elif recHeader == 286: # PCR 286
             err = self.onPCR(recHeader, binaryLen, rawData)
+        elif recHeader == 276: # MRR 276
+            err = self.onMRR(recHeader, binaryLen, rawData)
         return err
             
         # FAR 10
         # ATR 20
-        # MRR 276
         # RDR 326
         # SDR 336
         # BPS 5130
@@ -1528,12 +1551,13 @@ cdef class stdfSummarizer:
     
     cdef int onTR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
         cdef:
-            uint32_t TEST_NUM, currentDutIndex
+            uint32_t TEST_NUM, currentDutIndex, _1stLLimit, _1stHLimit
             uint8_t HEAD_NUM, SITE_NUM, OPT_FLAG
             uint16_t RTN_ICNT = 0, RSLT_PGM_CNT = 0     # For FTR & MPR
             int i, RES_SCAL, err = 0
-            double LLimit, HLimit
-            bint No_RES_SCAL = False, No_LLimit = False, No_HLimit = False
+            float LLimit = 0, HLimit = 0, LSpec = 0, HSpec = 0
+            bint No_RES_SCAL = False, No_LLimit = False, No_HLimit = False, No_HSpec = False, No_LSpec = False
+            bint LLimitChanged = False, HLimitChanged = False
             char* TEST_TXT
             char* Unit
             uint16_t*   pRTN_INDX = NULL   # For FTR & MPR
@@ -1569,12 +1593,9 @@ cdef class stdfSummarizer:
         # MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
         # as it may be omitted in the later record, causing typeError when user directly selects sites where 
         # no such field value is available in the data preparation.
-        if (not err) and (not hashmap_contains(self.seenTN, TEST_NUM)):
-            if (MAP_OK != hashmap_put(self.seenTN, TEST_NUM, 0)):
-                err = MAP_OMEM
-
+        if (not err) and (not hashmap_contains(self.defaultLLimit, TEST_NUM)):
             if recHeader == REC_FTR: # FTR
-                No_RES_SCAL = No_LLimit = No_HLimit = True
+                No_RES_SCAL = No_LLimit = No_HLimit = No_LSpec = No_HSpec = True
                 TEST_TXT    = (<FTR*>self.pRec).TEST_TXT
                 OPT_FLAG    = (<FTR*>self.pRec).OPT_FLAG
                 Unit        = ""
@@ -1584,25 +1605,43 @@ cdef class stdfSummarizer:
                 pPGM_INDX   = (<FTR*>self.pRec).PGM_INDX
 
             elif recHeader == REC_PTR:
-                No_RES_SCAL = No_LLimit = No_HLimit = False
                 TEST_TXT    = (<PTR*>self.pRec).TEST_TXT
                 RES_SCAL    = (<PTR*>self.pRec).RES_SCAL
                 LLimit      = (<PTR*>self.pRec).LO_LIMIT
                 HLimit      = (<PTR*>self.pRec).HI_LIMIT
+                LSpec       = (<PTR*>self.pRec).LO_SPEC
+                HSpec       = (<PTR*>self.pRec).HI_SPEC
                 Unit        = (<PTR*>self.pRec).UNITS
                 OPT_FLAG    = (<PTR*>self.pRec).OPT_FLAG
+                No_RES_SCAL = (OPT_FLAG & 0x01 == 0x01)
+                No_LLimit   = (OPT_FLAG & 0x10 == 0x10) or (OPT_FLAG & 0x40 == 0x40)
+                No_HLimit   = (OPT_FLAG & 0x20 == 0x20) or (OPT_FLAG & 0x80 == 0x80)
+                No_LSpec    = (OPT_FLAG & 0x04 == 0x04)
+                No_HSpec    = (OPT_FLAG & 0x08 == 0x08)
 
             else:
-                No_RES_SCAL = No_LLimit = No_HLimit = False
                 TEST_TXT    = (<MPR*>self.pRec).TEST_TXT
                 RES_SCAL    = (<MPR*>self.pRec).RES_SCAL
                 LLimit      = (<MPR*>self.pRec).LO_LIMIT
                 HLimit      = (<MPR*>self.pRec).HI_LIMIT
+                LSpec       = (<MPR*>self.pRec).LO_SPEC
+                HSpec       = (<MPR*>self.pRec).HI_SPEC
                 Unit        = (<MPR*>self.pRec).UNITS
                 OPT_FLAG    = (<MPR*>self.pRec).OPT_FLAG
                 RTN_ICNT    = (<MPR*>self.pRec).RTN_ICNT
                 RSLT_PGM_CNT= (<MPR*>self.pRec).RSLT_CNT
                 pRTN_INDX   = (<MPR*>self.pRec).RTN_INDX
+                No_RES_SCAL = (OPT_FLAG & 0x01 == 0x01)
+                No_LLimit   = (OPT_FLAG & 0x10 == 0x10) or (OPT_FLAG & 0x40 == 0x40)
+                No_HLimit   = (OPT_FLAG & 0x20 == 0x20) or (OPT_FLAG & 0x80 == 0x80)
+                No_LSpec    = (OPT_FLAG & 0x04 == 0x04)
+                No_HSpec    = (OPT_FLAG & 0x08 == 0x08)
+
+            # put the first Low Limit and High Limit in the dictionary, 
+            # also used to check if the test_num has been seen
+            if (MAP_OK != hashmap_put(self.defaultLLimit, TEST_NUM, (<uint32_t*>&LLimit)[0]) or 
+                MAP_OK != hashmap_put(self.defaultHLimit, TEST_NUM, (<uint32_t*>&HLimit)[0])):  # convert float bits to uint bits
+                err = MAP_OMEM
 
             if TEST_TXT == NULL: TEST_TXT = ""
             if Unit == NULL: Unit = ""
@@ -1623,6 +1662,11 @@ cdef class stdfSummarizer:
                     sqlite3_bind_int(self.insertTestInfo_stmt, 10, RTN_ICNT)            # RTN_ICNT for FTR & MPR
                 if RSLT_PGM_CNT > 0:
                     sqlite3_bind_int(self.insertTestInfo_stmt, 11, RSLT_PGM_CNT)        # RSLT or PGM for MPR or FTR
+                if not No_LSpec:
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 12, LSpec)            # LSpec
+                if not No_HSpec:
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 13, HSpec)            # LSpec
+                    
                 err = csqlite3_step(self.insertTestInfo_stmt)
 
             # store PMR indexes of each FTR & MPR
@@ -1640,6 +1684,41 @@ cdef class stdfSummarizer:
                         sqlite3_bind_int(self.insertTestPin_stmt, 2, pPGM_INDX[i])
                         sqlite3_bind_text(self.insertTestPin_stmt, 3, "PGM", -1, NULL)
                         err = csqlite3_step(self.insertTestPin_stmt)
+
+        else:
+            # This case is for handling dynamic limits in PTR only, FTR is not allowed, MPR must use the same limits
+            if (not err) and (recHeader == REC_PTR):
+                # test_num has been seen, defaultLLimit contains test_num
+                # we need to check if the limits are differ from the default one in the dictionary
+                LLimit      = (<PTR*>self.pRec).LO_LIMIT
+                HLimit      = (<PTR*>self.pRec).HI_LIMIT
+                OPT_FLAG    = (<PTR*>self.pRec).OPT_FLAG
+                # OPT_FLAG in PTR can't be 0 (bit 1 must be 1), otherwise it is omitted
+                # omitted limits is the same as default
+                if OPT_FLAG:
+                    No_LLimit = (OPT_FLAG & 0x10 == 0x10) or (OPT_FLAG & 0x40 == 0x40)
+                    No_HLimit = (OPT_FLAG & 0x20 == 0x20) or (OPT_FLAG & 0x80 == 0x80)
+                    if not No_LLimit:
+                        # low limit is available
+                        # get default low limit from dictionary
+                        if (MAP_OK != hashmap_get(self.defaultLLimit, TEST_NUM, &_1stLLimit)): err = MAP_MISSING
+                        # check if it's changed
+                        if (_1stLLimit != (<uint32_t*>&LLimit)[0]): LLimitChanged = True
+                        
+                    if not No_HLimit:
+                        # high limit is available
+                        if (MAP_OK != hashmap_get(self.defaultHLimit, TEST_NUM, &_1stHLimit)): err = MAP_MISSING
+                        if (_1stHLimit != (<uint32_t*>&HLimit)[0]): HLimitChanged = True
+
+                    if (not err) and (LLimitChanged or HLimitChanged):
+                        # any limit changed, write into db
+                        sqlite3_bind_int(self.insertDynamicLimit_stmt, 1, currentDutIndex)         # dutIndex 
+                        sqlite3_bind_int(self.insertDynamicLimit_stmt, 2, TEST_NUM)                # TEST_NUM
+                        if LLimitChanged:
+                            sqlite3_bind_double(self.insertDynamicLimit_stmt, 3, LLimit)            # LLimit
+                        if HLimitChanged:
+                            sqlite3_bind_double(self.insertDynamicLimit_stmt, 4, HLimit)            # HLimit
+                        err = csqlite3_step(self.insertDynamicLimit_stmt)
 
         free_record(recHeader, self.pRec)
         return err
@@ -2038,6 +2117,45 @@ cdef class stdfSummarizer:
             sqlite3_bind_int(self.insertDutCount_stmt, 7, -1)
 
         err = csqlite3_step(self.insertDutCount_stmt)
+        return err    
+
+
+    cdef int onMRR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0
+            time_t timeStamp
+            tm*    tmPtr
+            char   stringBuffer[256]
+            char   DISP_COD
+            char*  USR_DESC
+            char*  EXC_DESC
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        # U4  FINISH_T
+        timeStamp = <time_t>((<MRR*>self.pRec).FINISH_T)
+        tmPtr = localtime(&timeStamp)
+        strftime(stringBuffer, 26, "%Y-%m-%d %H:%M:%S (UTC)", tmPtr)
+        sqlite3_bind_text(self.insertFileInfo_stmt, 1, "FINISH_T", -1, NULL)
+        sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+        err = csqlite3_step(self.insertFileInfo_stmt)
+        # C1  DISP_COD
+        if not err and (<MRR*>self.pRec).DISP_COD != 0x20:    # hex of SPACE
+            sprintf(stringBuffer, "%c", (<MRR*>self.pRec).DISP_COD)
+            stringBuffer[1] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "DISP_COD", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, stringBuffer, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+        # Cn  USR_DESC
+        if not err and (<MRR*>self.pRec).USR_DESC != NULL:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "USR_DESC", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MRR*>self.pRec).USR_DESC, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+        # Cn  EXC_DESC
+        if not err and (<MRR*>self.pRec).EXC_DESC != NULL:
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, "EXC_DESC", -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MRR*>self.pRec).EXC_DESC, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+        
         return err    
 
     
