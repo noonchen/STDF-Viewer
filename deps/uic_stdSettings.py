@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue Nov 23 2021
+# Last Modified: Wed Nov 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -58,7 +58,7 @@ indexDic_notation = {0: "G",
 indexDic_notation_reverse = {v:k for k, v in indexDic_notation.items()}
 
 indexDic_lang = {0: "English",
-                 1: "中文简体"}
+                 1: "简体中文"}
 indexDic_lang_reverse = {v:k for k, v in indexDic_lang.items()}
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
@@ -153,7 +153,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_binCount.setText(str(self.originalParams.binCount))
         self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
         # general
-        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(self.originalParams.language, "English"))
+        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(self.originalParams.language, 0))
         self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
         self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if self.originalParams.checkCpk else 1)
