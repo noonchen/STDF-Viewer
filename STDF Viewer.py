@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Nov 24 2021
+# Last Modified: Fri Nov 26 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -67,7 +67,7 @@ import matplotlib
 matplotlib.use('QT5Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from matplotlib import font_manager
+import matplotlib.font_manager as fm
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import RendererAgg
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -3175,8 +3175,8 @@ def run():
         if not fn.endswith(".ttf"): continue
         fontPath = "fonts/" + fn
         QtGui.QFontDatabase.addApplicationFont(fontPath)
-        font_manager.fontManager.addfont(fontPath)
-        font_names.append(font_manager.FontProperties(fname=fontPath).get_name())
+        fm.fontManager.addfont(fontPath)
+        font_names.append(fm.FontProperties(fname=fontPath).get_name())
     matplotlib.rcParams["font.family"] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = font_names
     
