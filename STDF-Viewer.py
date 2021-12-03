@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Nov 26 2021
+# Last Modified: Fri Dec 03 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -94,7 +94,7 @@ settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend"
 setattr(sys, "CONFIG_NAME", settingNamePair)
 
 #-------------------------
-logger = logging.getLogger("STDF Viewer")
+logger = logging.getLogger("STDF-Viewer")
 logger.setLevel(logging.WARNING)
 logPath = os.path.join(rootFolder, "logs", f"{base}.log")
 os.makedirs(os.path.dirname(logPath), exist_ok=True)
@@ -270,6 +270,12 @@ def isHexColor(color: str) -> bool:
         return True
     else:
         return False
+
+
+class FontNames:
+    def __init__(self):
+        self.Chinese = "Microsoft Yahei"
+        self.English = "Tahoma"
 
 
 class NavigationToolbar(NavigationToolbar2QT):
@@ -836,7 +842,7 @@ class signals4MainUI(QtCore.QObject):
 
 
 class MyWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, defaultFontNames: FontNames):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
@@ -855,7 +861,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.init_SettingParams()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        self.imageFont = "Tahoma"
+        self.defaultFontNames = defaultFontNames
+        self.imageFont = self.defaultFontNames.English
         # std handler
         self.stdHandleList = [None]
         self.std_handle = None
@@ -973,6 +980,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox = QtWidgets.QMessageBox(self)
                 msgBox.setWindowFlag(Qt.FramelessWindowHint)
                 msgBox.setText(self.tr("Cannot connect to Github"))
+                msgBox.setInformativeText(repr(e))
                 msgBox.exec_()
         
     
@@ -981,7 +989,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # load language files based on the setting
         curLang = self.settingParams.language
         if curLang == "English":
-            self.imageFont = "Tahoma"
+            self.imageFont = self.defaultFontNames.English
             self.translatorUI.loadFromData(transDict["MainUI_en_US"])
             self.translatorCode.loadFromData(transDict["MainCode_en_US"])
             self.loader.translator.loadFromData(transDict["loadingUI_en_US"])
@@ -993,7 +1001,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_en_US"])
             
         elif curLang == "简体中文":
-            self.imageFont = "Microsoft Yahei"
+            self.imageFont = self.defaultFontNames.Chinese
             self.translatorUI.loadFromData(transDict["MainUI_zh_CN"])
             self.translatorCode.loadFromData(transDict["MainCode_zh_CN"])
             self.loader.translator.loadFromData(transDict["loadingUI_zh_CN"])
@@ -1446,8 +1454,9 @@ class MyWindow(QtWidgets.QMainWindow):
         horizontalHeader.setVisible(False)
         verticalHeader.setVisible(False)
         
-        if self.std_handle is None:
+        if (self.std_handle is None) or (not self.dbConnected):
             # skip the following steps if no file is loaded
+            # std_handle is valid if file path is get thru sys.argv, must check if database is available
             return
         
         extraInfoList = []
@@ -3170,17 +3179,25 @@ def run():
     app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))
     # default font for dialogs
     font_names = []
+    defaultFontNames = FontNames()
     # reverse to put courier at the rear
-    for fn in sorted(os.listdir("fonts"), key=lambda x:x.lower(), reverse=True):
+    for fn in sorted(os.listdir(os.path.join(sys.rootFolder, "fonts")), key=lambda x:x.lower(), reverse=True):
         if not fn.endswith(".ttf"): continue
-        fontPath = "fonts/" + fn
+        fontPath = os.path.join(sys.rootFolder, "fonts", fn)
         QtGui.QFontDatabase.addApplicationFont(fontPath)
         fm.fontManager.addfont(fontPath)
-        font_names.append(fm.FontProperties(fname=fontPath).get_name())
+        font_name = fm.FontProperties(fname=fontPath).get_name()
+        font_names.append(font_name)
+        # update default fonts if special prefix is found
+        if fn.startswith("cn_"):
+            defaultFontNames.Chinese = font_name
+        elif fn.startswith("en_"):
+            defaultFontNames.English = font_name
+
     matplotlib.rcParams["font.family"] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = font_names
     
-    window = MyWindow()
+    window = MyWindow(defaultFontNames)
     window.show()
     window.callFileLoader(window.std_handle)
     sys.exit(app.exec_())

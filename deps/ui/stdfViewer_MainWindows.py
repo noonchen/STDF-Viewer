@@ -491,7 +491,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.groupBox_stats)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.dataTable = QtWidgets.QTableView(self.groupBox_stats)
-        self.dataTable.setStyleSheet("font: 9pt \"Tahoma\";")
+        self.dataTable.setStyleSheet("font: 9pt;")
         self.dataTable.setObjectName("dataTable")
         self.dataTable.verticalHeader().setVisible(True)
         self.verticalLayout_2.addWidget(self.dataTable)
