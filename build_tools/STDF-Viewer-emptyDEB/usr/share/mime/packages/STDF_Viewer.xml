@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/std">
+     <comment>Semiconductor Standard Test Data Format</comment>
+     <glob pattern="*.std"/>
+     <glob pattern="*.stdf"/>
+     <glob pattern="*.std*"/>
+     <icon name="STDF-Viewer"/>
+  </mime-type>
+</mime-info>

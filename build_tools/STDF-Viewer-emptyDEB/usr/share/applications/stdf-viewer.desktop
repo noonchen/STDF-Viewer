@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=STDF Viewer
+Comment=Read STDF Files
+MimeType=application/std
+TryExec=/usr/local/bin/STDF-Viewer/STDF-Viewer
+Exec=/usr/local/bin/STDF-Viewer/STDF-Viewer %f
+Icon=/usr/share/icons/hicolor/512x512/apps/STDF-Viewer.png
+Terminal=false
+Categories=Office;Viewer
+StartupNotify=true

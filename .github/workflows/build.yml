@@ -187,11 +187,17 @@ jobs:
         run: |
           python build_tools/clean.py
 
+      - name: Build deb package
+        run: |
+          rm build_tools/STDF-Viewer-emptyDEB/usr/local/bin/placeholder
+          cp -avr dist/STDF-Viewer build_tools/STDF-Viewer-emptyDEB/usr/local/bin
+          dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
+      
       - uses: actions/upload-artifact@v2
         name: Upload Artifact
         with:
           name: STDF_Viewer_linux
-          path: dist/
+          path: build_tools/STDF-Viewer-emptyDEB.deb
 
 
   windows-cp39:
