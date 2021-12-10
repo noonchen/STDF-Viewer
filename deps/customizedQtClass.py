@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Wed Aug 25 2021
+# Last Modified: Thu Dec 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -88,8 +88,14 @@ def getHS(text: str):
     head, site = [int(ele) for ele in l if ele.isdigit()]
     return head << 8 | site
 
+def tryInt(text: str) -> int:
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+
 def getNum(text: str):
-    return int(text.split(" ")[-1])
+    return tryInt(text.split(" ")[-1])    
 
 class DutSortFilter(QSortFilterProxyModel):
     def __init__(self, parent=None):
@@ -117,11 +123,11 @@ class DutSortFilter(QSortFilterProxyModel):
             
             elif left.column() == 2:
                 # sort test count
-                return int(textLeft) < int(textRight)
+                return tryInt(textLeft) < tryInt(textRight)
             
             elif left.column() == 3:
                 # sort test time
-                return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
+                return tryInt(textLeft.strip("ms")) < tryInt(textRight.strip("ms"))
             
             elif left.column() == 4 or left.column() == 5:
                 # sort hbin / sbin

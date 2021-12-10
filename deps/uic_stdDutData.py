@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Thu Nov 04 2021
+# Last Modified: Fri Dec 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -78,25 +78,29 @@ class DutDataReader(QtWidgets.QWidget):
         self.stopFlag = False
         self.show()
         
-        self.test_number_List = sorted([int(ele.split("\t")[0]) for ele in self.parent.completeTestList])
+        self.test_number_List = [int(ele.split("\t")[0]) for ele in self.parent.completeTestList]
         self.total = len(self.test_number_List)
         dutInfo = [self.parent.dutSummaryDict[i] for i in self.selectedDutIndex]
+        # get dut flag info for showing tips
+        dutFlagAsString = [dutSumList[-1].split(b"-")[-1] for dutSumList in dutInfo]
+        dutFlagInfo = [self.parent.dut_flag_parser(ele) for ele in dutFlagAsString]
+        # test data section
         dutData = []
         dutStat = []
-        dutFlagInfo = []
+        testFlagInfo = []
         for i, test_num in enumerate(self.test_number_List):
             if self.stopFlag: return
 
             dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, test_num)
             dutData.append(dutData_perTest)
             dutStat.append(stat_perTest)
-            dutFlagInfo.append(flagInfo_perTest)
+            testFlagInfo.append(flagInfo_perTest)
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
             QApplication.processEvents()    # force refresh UI to update progress bar
         self.UI.progressBar.setFormat(self.tr("Filling table with data..."))
         QApplication.processEvents()
-        self.tableUI.setContent((dutInfo, dutData, dutStat, dutFlagInfo))
+        self.tableUI.setContent((dutInfo, dutFlagInfo, dutData, dutStat, testFlagInfo))
         self.tableUI.showUI()
         self.close()
             
@@ -120,7 +124,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.parent = parent
         self.translator = QTranslator(self)
         self.sd = StyleDelegateForTable_List()
-        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = ([], [], [], [])
+        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = ([], [], [], [], [])
         self.hideSignal = hideSignal
         
         self.UI.save.clicked.connect(self.onSave_csv)
@@ -130,7 +134,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         
         
     def setContent(self, content):
-        self.dutInfo, self.dutData, self.dutStat, self.dutFlagInfo = content
+        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = content
         
     
     def showUI(self):
@@ -163,22 +167,31 @@ class dutDataDisplayer(QtWidgets.QDialog):
         # append value
         # get dut pass/fail list
         statIndex = self.hh.index(self.tr("DUT Flag"))
-        dutStatus = [True] * vh_len + [not dutInfo_perDUT[statIndex].startswith(b"F") for dutInfo_perDUT in self.dutInfo]        # not startswith F == Passed / None
+        self.dutFlagInfo = [""] * vh_len + self.dutFlagInfo     # prepend empty tips for non-data cell
+        dutStatus = [b"P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
         for col_tuple in zip(*self.dutInfo):
             tmpCol = [b""] * vh_len + list(col_tuple)
             qitemCol = []
-            for i, (item, flag) in enumerate(zip(tmpCol, dutStatus)):
+            for i, (item, flagCap, dutTip) in enumerate(zip(tmpCol, dutStatus, self.dutFlagInfo)):
                 qitem = QtGui.QStandardItem(item.decode("utf-8"))
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
-                if not flag: 
+                # use first letter to check dut status
+                if flagCap == b"P":
+                    pass
+                elif flagCap == b"F": 
                     qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                     qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+                else:
+                    qitem.setData(QtGui.QColor("#000000"), QtCore.Qt.ForegroundRole)
+                    qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                if dutTip != "":
+                    qitem.setToolTip(dutTip)
                 qitemCol.append(qitem)                        
             self.tmodel.appendColumn(qitemCol)
         
-        for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.dutFlagInfo):
+        for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.testFlagInfo):
             qitemCol = []
             for i, (item, stat, flagInfo) in enumerate(zip(dataCol, statCol, flagInfoCol)):    # remove 1st element: test name
                 if i == 0: continue     # skip test name
@@ -206,11 +219,14 @@ class dutDataDisplayer(QtWidgets.QDialog):
         
     def onSave_csv(self):
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("CSV file (*.csv)"))
+        checkComma = lambda text: '"' + text + '"' if "," in text else text
         if outPath:
             with open(outPath, "w") as f:
+                # if comma is in the string, needs to close with ""
+                self.hh = [checkComma(ele) for ele in self.hh]
                 f.write(",".join([""] + self.hh)+"\n")
                 for row in range(self.tmodel.rowCount()):
-                    rowDataList = [self.tmodel.data(self.tmodel.index(row, col)) for col in range(self.tmodel.columnCount())]
+                    rowDataList = [checkComma(self.tmodel.data(self.tmodel.index(row, col))) for col in range(self.tmodel.columnCount())]
                     f.write(",".join([self.vh[row]] + rowDataList)+"\n")
             msgbox = QtWidgets.QMessageBox(None)
             msgbox.setText(self.tr("Completed"))

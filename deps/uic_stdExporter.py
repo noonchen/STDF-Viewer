@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Nov 22 2021
+# Last Modified: Fri Dec 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -249,6 +249,7 @@ class reportGenerator(QtCore.QObject):
         with Workbook(self.path) as wb:
             centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#CC0000", "bold": True})
+            unknownStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#FE7B00", "bold": True})
             # style with newline
             txWrapStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             txWrapStyle.set_text_wrap()
@@ -318,7 +319,7 @@ class reportGenerator(QtCore.QObject):
                 DutInfoList = self.waitForDutSummary(self.headL, self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
                 for count, infoRow in enumerate(DutInfoList):
                     L = ["#%d" % (count+1)] + infoRow
-                    cellStyle = failedStyle if infoRow[-1].startswith("F") else centerStyle     # the last element is dut status: "Failed / 0x08" or "Passed / 0x00"
+                    cellStyle =  centerStyle if infoRow[-1].startswith("P") else (failedStyle if infoRow[-1].startswith("F") else unknownStyle)     # the last element is dut status: "Failed / 0x08" or "Passed / 0x00"
                     write_row_col(DutSheet, sv.dutRow, sv.dutCol, L, cellStyle, writeRow=True)
                     col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(L)]
                     sv.dutRow += 1

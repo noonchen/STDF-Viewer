@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Dec 03 2021
+# Last Modified: Fri Dec 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,6 +27,7 @@
 import io, os, sys, gc, traceback, toml, logging, atexit
 import json, urllib.request as rq
 # from memory_profiler import profile
+import datetime
 import platform
 import numpy as np
 from enum import IntEnum
@@ -45,6 +46,7 @@ from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataReader
+from deps.uic_stdDebug import stdDebugPanel
 
 from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter
 # pyqt5
@@ -78,7 +80,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 # QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
-Version = "V3.1.0"
+Version = "V3.2.0"
 isMac = platform.system() == 'Darwin'
     
 # save config path to sys
@@ -89,18 +91,25 @@ setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, base + ".config"))
 # setting attr to human string
 settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
                    ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"),
+                   ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
 
 #-------------------------
 logger = logging.getLogger("STDF-Viewer")
 logger.setLevel(logging.WARNING)
-logPath = os.path.join(rootFolder, "logs", f"{base}.log")
+logFolder = os.path.join(rootFolder, "logs")
+logPath = os.path.join(logFolder, f"{base}-{datetime.date.today()}.log")
+setattr(sys, "LOG_PATH", logPath)   # save the log location globally
 os.makedirs(os.path.dirname(logPath), exist_ok=True)
 logFD = logging.FileHandler(logPath, mode="a+")
 logFD.setFormatter(logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s'))
 logger.addHandler(logFD)
+# keep 5 logs only, delete old logs
+allLogFiles = sorted([os.path.join(logFolder, f) 
+                      for f in os.listdir(logFolder) 
+                      if f.endswith('.log') and os.path.isfile(os.path.join(logFolder, f))])
+[os.remove(allLogFiles[i]) for i in range(len(allLogFiles)-5)] if len(allLogFiles) > 5 else []
 
 
 def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
@@ -154,67 +163,6 @@ def calculateCanvasIndex(_test_num: int, _head: int, _site: int, canvasIndexDict
 toDCoord = lambda ax, point: ax.transData.inverted().transform(point)
 # check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass; treat negative flag (indicate not tested) as pass
 isPass = lambda flag: True if flag < 0 or flag & 0b11000000 == 0 else (False if flag & 0b01000000 == 0 else True)
-
-# dut flag parser
-def dut_flag_parser(flag: int) -> str:
-    '''return detailed description of a DUT flag'''
-    flagString = f"{flag:>08b}"
-    bitInfo = {7: "Bit7: Bit reserved",
-               6: "Bit6: Bit reserved",
-               5: "Bit5: Bit reserved",
-               4: "Bit4: No pass/fail indication, ignore Bit3",
-               3: "Bit3: DUT failed",
-               2: "Bit2: Abnormal end of testing",
-               1: "Bit1: Wafer die is retested",
-               0: "Bit0: DUT is retested"}
-    infoList = []
-    for pos, bit in enumerate(reversed(flagString)):
-        if bit == "1":
-            infoList.append(bitInfo[pos])
-    return "\n".join(reversed(infoList))
-
-# test flag parser
-def test_flag_parser(flag: int) -> str:
-    '''return detailed description of a test flag'''
-    # treat negative flag (indicate not tested) as pass
-    flag = 0 if flag < 0 else flag
-    
-    flagString = f"{flag:>08b}"
-    bitInfo = {7: "Bit7: Test failed",
-               6: "Bit6: Test completed with no pass/fail indication",
-               5: "Bit5: Test aborted",
-               4: "Bit4: Test not executed",
-               3: "Bit3: Timeout occurred",
-               2: "Bit2: Test result is unreliable",
-               1: "Bit1: The test was executed, but no dataloagged value was taken",
-               0: "Bit0: Alarm detected during testing"}
-    infoList = []
-    for pos, bit in enumerate(reversed(flagString)):
-        if bit == "1":
-            infoList.append(bitInfo[pos])
-    return "\n".join(reversed(infoList))
-
-def genQItemList(dutSumList: list[bytes]) -> list:
-    '''Convert a bytes list to a QStandardItem list'''
-    qitemRow = []
-    fontsize = 13 if isMac else 10
-    dutStatus, dutFlagString = dutSumList[-1].split(b"-")
-    dutFail = dutStatus.startswith(b"Failed")
-    flagInfo = dut_flag_parser(int(dutFlagString, 16))
-    
-    for item in dutSumList:
-        qitem = QtGui.QStandardItem(item.decode("utf-8"))
-        qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-        qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-        qitem.setData(QtGui.QFont("Tahoma", fontsize), QtCore.Qt.FontRole)
-        # mark red when failed
-        if dutFail: 
-            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-            qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-        if flagInfo != "":
-            qitem.setToolTip(flagInfo)
-        qitemRow.append(qitem)
-    return qitemRow
 
 # simulate a Enum in python
 # class Tab(tuple): __getattr__ = tuple.index
@@ -829,6 +777,7 @@ class SettingParams:
         self.dataPrecision = 3
         self.checkCpk = False
         self.cpkThreshold = 1.33
+        self.sortTestList = "Original"
         # colors
         self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
                           3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
@@ -892,6 +841,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.exporter = stdfExporter(self)
         self.settingUI = stdfSettings(self)
         self.dutDataReader = DutDataReader(self)
+        self.debugPanel = stdDebugPanel(self)
         # update icons for actions and widgets
         self.updateIcons()
         self.init_TestList()
@@ -984,6 +934,10 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox.exec_()
         
     
+    def showDebugPanel(self):
+        self.debugPanel.showUI()
+    
+    
     def changeLanguage(self):
         _app = QApplication.instance()
         # load language files based on the setting
@@ -999,6 +953,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.settingUI.translator.loadFromData(transDict["settingUI_en_US"])
             self.dutDataReader.translator.loadFromData(transDict["dutDataCode_en_US"])
             self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_en_US"])
+            self.debugPanel.translator.loadFromData(transDict["debugUI_en_US"])
+            self.debugPanel.translator_code.loadFromData(transDict["debugCode_en_US"])
             
         elif curLang == "简体中文":
             self.imageFont = self.defaultFontNames.Chinese
@@ -1011,6 +967,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.settingUI.translator.loadFromData(transDict["settingUI_zh_CN"])
             self.dutDataReader.translator.loadFromData(transDict["dutDataCode_zh_CN"])
             self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_zh_CN"])
+            self.debugPanel.translator.loadFromData(transDict["debugUI_zh_CN"])
+            self.debugPanel.translator_code.loadFromData(transDict["debugCode_zh_CN"])
             
         newfont = QtGui.QFont(self.imageFont)
         _app.setFont(newfont)
@@ -1033,6 +991,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # dutTableUI
         _app.installTranslator(self.dutDataReader.tableUI.translator)
         self.dutDataReader.tableUI.UI.retranslateUi(self.dutDataReader.tableUI)
+        # debugUI
+        _app.installTranslator(self.debugPanel.translator)
+        self.debugPanel.dbgUI.retranslateUi(self.debugPanel)
         # failmarker
         _app.installTranslator(self.failmarker.translator)
         # dutData
@@ -1041,6 +1002,8 @@ class MyWindow(QtWidgets.QMainWindow):
         _app.installTranslator(self.exporter.translatorCode)
         # mainCode
         _app.installTranslator(self.translatorCode)
+        # debugCode
+        _app.installTranslator(self.debugPanel.translator_code)
         # need to rewrite file info table after changing language
         self.updateFileHeader()
     
@@ -1053,7 +1016,7 @@ class MyWindow(QtWidgets.QMainWindow):
                       "Color Setting": {}}
         configName = dict(sys.CONFIG_NAME)
         for k, v in self.settingParams.__dict__.items():
-            if k in ["language", "recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]:
+            if k in ["language", "recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold", "sortTestList"]:
                 # General
                 configData["General"][configName[k]] = v
             elif k in ["showHL_trend", "showLL_trend", "showHSpec_trend", "showLSpec_trend", "showMed_trend", "showMean_trend"]:
@@ -1146,14 +1109,89 @@ class MyWindow(QtWidgets.QMainWindow):
         appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
-        ckupdateBtn = msgBox.addButton(self.tr("Check For Updates"), QtWidgets.QMessageBox.ActionRole)
-        msgBox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+        dbgBtn = msgBox.addButton(self.tr("Debug"), QtWidgets.QMessageBox.ResetRole)   # leftmost
+        ckupdateBtn = msgBox.addButton(self.tr("Check For Updates"), QtWidgets.QMessageBox.ApplyRole)   # middle
+        msgBox.addButton(self.tr("OK"), QtWidgets.QMessageBox.NoRole)   # rightmost
         msgBox.exec_()
-        if msgBox.clickedButton() == ckupdateBtn:
+        if msgBox.clickedButton() == dbgBtn:
+            self.showDebugPanel()
+        elif msgBox.clickedButton() == ckupdateBtn:
             self.checkNewVersion()
         else:
             msgBox.close()
         
+    
+    def dut_flag_parser(self, flagHexString: str) -> str:
+        '''return detailed description of a DUT flag'''
+        try:
+            flag = int(flagHexString, 16)
+            flagString = f"{flag:>08b}"
+            bitInfo = {7: self.tr("Bit7: Bit reserved"),
+                    6: self.tr("Bit6: Bit reserved"),
+                    5: self.tr("Bit5: Bit reserved"),
+                    4: self.tr("Bit4: No pass/fail indication, ignore Bit3"),
+                    3: self.tr("Bit3: DUT failed"),
+                    2: self.tr("Bit2: Abnormal end of testing"),
+                    1: self.tr("Bit1: Wafer die is retested"),
+                    0: self.tr("Bit0: DUT is retested")}
+            infoList = []
+            for pos, bit in enumerate(reversed(flagString)):
+                if bit == "1":
+                    infoList.append(bitInfo[pos])
+            return "\n".join(reversed(infoList))
+        
+        except ValueError:
+            return self.tr("Unknown")
+
+    
+    def test_flag_parser(self, flag: int) -> str:
+        '''return detailed description of a test flag'''
+        # treat negative flag (indicate not tested) as pass
+        flag = 0 if flag < 0 else flag
+        
+        flagString = f"{flag:>08b}"
+        bitInfo = {7: self.tr("Bit7: Test failed"),
+                   6: self.tr("Bit6: Test completed with no pass/fail indication"),
+                   5: self.tr("Bit5: Test aborted"),
+                   4: self.tr("Bit4: Test not executed"),
+                   3: self.tr("Bit3: Timeout occurred"),
+                   2: self.tr("Bit2: Test result is unreliable"),
+                   1: self.tr("Bit1: The test was executed, but no dataloagged value was taken"),
+                   0: self.tr("Bit0: Alarm detected during testing")}
+        infoList = []
+        for pos, bit in enumerate(reversed(flagString)):
+            if bit == "1":
+                infoList.append(bitInfo[pos])
+        return "\n".join(reversed(infoList))
+
+    
+    def genQItemList(self, dutSumList: list[bytes]) -> list:
+        '''Convert a bytes list to a QStandardItem list'''
+        qitemRow = []
+        fontsize = 13 if isMac else 10
+        dutStatus, dutFlagString = dutSumList[-1].split(b"-")
+        dutFail = dutStatus.startswith(b"Failed")
+        dutUnknown = (dutStatus == b"" or dutStatus.startswith(b"Unknown"))
+        flagInfo = self.dut_flag_parser(dutFlagString)
+        
+        for item in dutSumList:
+            qitem = QtGui.QStandardItem(item.decode("utf-8"))
+            qitem.setTextAlignment(QtCore.Qt.AlignCenter)
+            qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+            qitem.setData(QtGui.QFont("Tahoma", fontsize), QtCore.Qt.FontRole)
+            # mark red when failed
+            if dutFail: 
+                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+            # mark orange when unknown
+            if dutUnknown: 
+                qitem.setData(QtGui.QColor("#000000"), QtCore.Qt.ForegroundRole)
+                qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+            if flagInfo != "":
+                qitem.setToolTip(flagInfo)
+            qitemRow.append(qitem)
+        return qitemRow
+
     
     def showDutDataTable(self, dutIndexes:list):
         self.dutDataReader.setDutIndexes(dutIndexes)
@@ -1254,7 +1292,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # Append Part ID head & site to the table
             selectedDUTs = self.dutArray[currentMask]
             for dutIndex in selectedDUTs:
-                qitemRow = genQItemList(self.dutSummaryDict[dutIndex])
+                qitemRow = self.genQItemList(self.dutSummaryDict[dutIndex])
                 id_head_site = [qitemRow[i] for i in range(len(hheaderLabels))]     # index0: ID; index1: Head/Site
                 self.tmodel_raw.appendRow(id_head_site)
             # row header
@@ -1268,7 +1306,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
                 test_data_list.pop(0)   # remove test name
                 test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
-                test_flagInfo_list = [""] * vh_len + list(map(self.tr, map(test_flag_parser, testDict["flagList"])))
+                test_flagInfo_list = [""] * vh_len + list(map(self.test_flag_parser, testDict["flagList"]))
                 
                 hheaderLabels.append(testDict["TEST_NAME"])  # add test name to header list
                 
@@ -1471,6 +1509,8 @@ class MyWindow(QtWidgets.QMainWindow):
         extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Tested: "), str(statsDict["Total"])]])    # PIR #
         extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Passed: "), str(statsDict["Pass"])]])
         extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Failed: "), str(statsDict["Failed"])]])
+        if statsDict["Unknown"] > 0:
+            extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Unknown: "), str(statsDict["Unknown"])]])
 
         # append mir info
         self.fileInfoDict = self.DatabaseFetcher.getFileInfo()
@@ -1542,7 +1582,7 @@ class MyWindow(QtWidgets.QMainWindow):
         for dutIndex in self.dutArray:
             itemRow = self.dutSummaryDict[dutIndex] if self.containsWafer else \
                 self.dutSummaryDict[dutIndex][0:-3]+[self.dutSummaryDict[dutIndex][-1]]
-            self.tmodel_dut.appendRow(genQItemList(itemRow))
+            self.tmodel_dut.appendRow(self.genQItemList(itemRow))
             
             progress = 100 * dutIndex / totalDutCnt
             if progress >= keyPoints[0]:
@@ -1812,6 +1852,15 @@ class MyWindow(QtWidgets.QMainWindow):
             qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.BackgroundRole)
                         
                        
+    def refreshTestList(self):
+        if self.settingParams.sortTestList == "Number":
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: int(x.split("\t")[0])))
+        elif self.settingParams.sortTestList == "Name":
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: x.split("\t")[-1]))
+        else:
+            self.updateModelContent(self.sim_list, self.completeTestList)
+    
+    
     def getDataFromOffsets(self, testInfo:dict) -> dict:
         sel_offset = testInfo.pop("Offset")
         sel_length = testInfo.pop("BinaryLen")
@@ -1858,7 +1907,7 @@ class MyWindow(QtWidgets.QMainWindow):
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
         test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))
-        test_flagInfo_list = [""] * 5 + list(map(self.tr, map(test_flag_parser, testDict["flagList"])))
+        test_flagInfo_list = [""] * 5 + list(map(self.test_flag_parser, testDict["flagList"]))
         
         return (test_data_list, test_stat_list, test_flagInfo_list)
     
@@ -1902,6 +1951,7 @@ class MyWindow(QtWidgets.QMainWindow):
             outData["PIN_NAME"] = self.selData[test_num]["PIN_NAME"]
             outData["dataList"] = ((self.selData[test_num]["dataList"].T)[selMask]).T
             # get statistics of each pin
+            # if rslt count == 0, shape of outData["dataList"] = (0, x), the following functions return empty array
             outData["Min"] = np.nanmin(outData["dataList"], axis=1)
             outData["Max"] = np.nanmax(outData["dataList"], axis=1)
             outData["Median"] = np.nanmedian(outData["dataList"], axis=1)
@@ -1909,12 +1959,22 @@ class MyWindow(QtWidgets.QMainWindow):
             tmpContainer = []
             for pinDataList in outData["dataList"]:
                 tmpContainer.append(calc_cpk(outData["LL"], outData["HL"], pinDataList))
+            if outData["dataList"].shape[0] == 0:
+                # if dataList contains nothing, we have to init array wit shape (0,3) or next line will throws error
+                tmpContainer = np.full(shape=(0, 3), fill_value=0.0)
             outData["Mean"], outData["SDev"], outData["Cpk"] = np.array(tmpContainer).T
         else:
             outData["dataList"] = self.selData[test_num]["dataList"][selMask]
-            outData["Min"] = np.nanmin(outData["dataList"])
-            outData["Max"] = np.nanmax(outData["dataList"])
-            outData["Median"] = np.nanmedian(outData["dataList"])
+            if outData["dataList"].size > 0:
+                outData["Min"] = np.nanmin(outData["dataList"])
+                outData["Max"] = np.nanmax(outData["dataList"])
+                outData["Median"] = np.nanmedian(outData["dataList"])
+            else:
+                # these functions throw error on empty array
+                outData["Min"] = np.nan
+                outData["Max"] = np.nan
+                outData["Median"] = np.nan
+                
             outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LL"], outData["HL"], outData["dataList"])
         return outData
                 
@@ -2406,14 +2466,17 @@ class MyWindow(QtWidgets.QMainWindow):
                                                            mainGUI=self)
                     connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
                     
-            elif tabType == tab.Bin and len(axs) > 0 and len(recGroups) > 0:
+            elif tabType == tab.Bin:
                 for i, (ax_bin, recGroup) in enumerate(zip(axs, recGroups)):
+                    if len(recGroup) == 0:
+                        # skip if no bins in the plot
+                        continue
                     cursorKey = "bin_%d_%d_%d_%d"%(head, test_num, site, i)
                     self.cursorDict[cursorKey] = MagCursor(binchart=recGroup,
                                                            mainGUI=self)
                     connectMagCursor(canvas, self.cursorDict[cursorKey], ax_bin)
             
-            elif tabType == tab.Wafer:
+            elif tabType == tab.Wafer and len(ax.collections) > 0:
                 cursorKey = "wafer_%d_%d_%d"%(head, test_num, site)
                 self.cursorDict[cursorKey] = MagCursor(wafer=ax.collections,
                                                        mainGUI=self,
@@ -2432,9 +2495,11 @@ class MyWindow(QtWidgets.QMainWindow):
         dataInvalid = np.all(np.isnan(y_raw))
         testInvalid = np.all(selData["flagList"] < 0)
 
-        if dataInvalid and testInvalid:
+        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or dataInvalid or testInvalid:
             # show a warning text in figure
-            ax.text(x=0.5, y=0.5, s=self.tr('No test data for "%s" \nfound in head %d - site %d') % (selData["TEST_NAME"], head, site), color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            # For PTR and FTR, any invalid would trigger this case
+            # For MPR, dataInvalid and testInvalid both meet can it enter this case
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (selData["TEST_NAME"], head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:
             if selData["recHeader"] == REC.MPR:
                 if dataInvalid:
@@ -2489,10 +2554,10 @@ class MyWindow(QtWidgets.QMainWindow):
                         tmpAx.set_ylim((data_min-headroomY, data_max+headroomY))
                         
                         # add pin name at the right side of plots
-                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
+                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname=self.imageFont, ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
                         if index == int(pinCount/2):
                             # middle plot, use ax will cause overlapping
-                            tmpAx.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
+                            tmpAx.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname=self.imageFont)
                         if index != pinCount-1:
                             tmpAx.xaxis.set_visible(False)                            
                             
@@ -2531,10 +2596,10 @@ class MyWindow(QtWidgets.QMainWindow):
             ax.ticklabel_format(useOffset=False)    # prevent + sign
             ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
             ax.set_xlabel("%s"%(self.tr("DUT Index")), fontsize=12, fontname=self.imageFont)
-            if selData["recHeader"] == REC.FTR:
+            if selData["recHeader"] == REC.FTR or (selData["recHeader"] == REC.MPR and dataInvalid):
                 ax.set_ylabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
             else:
-                ax.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
+                ax.set_ylabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname=self.imageFont)
             # limits
             if len(x_arr) == 1:
                 ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
@@ -2616,9 +2681,9 @@ class MyWindow(QtWidgets.QMainWindow):
         dataInvalid = np.all(np.isnan(selData["dataList"]))
         testInvalid = np.all(selData["flagList"] < 0)
 
-        if dataInvalid and testInvalid:
+        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or dataInvalid or testInvalid:
             # show a warning text in figure
-            ax.text(x=0.5, y=0.5, s=self.tr('No test data for "%s" \nfound in head %d - site %d') % (selData["TEST_NAME"], head, site), color='red', fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (selData["TEST_NAME"], head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:
             if selData["recHeader"] == REC.MPR:
                 if dataInvalid:
@@ -2671,7 +2736,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         setattr(recGroup, "bin_dut_dict", bin_dut_dict)
                         # recGroups.append(recGroup)
                         # add pin name at the right side of plots
-                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname="Tahoma", ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
+                        tmpAx.text(x=1, y=0.5, s=pinName, fontsize=10, fontname=self.imageFont, ha="left", va="center", rotation=270, transform=tmpAx.transAxes)
                         # draw boxplot
                         if self.settingParams.showBoxp_histo:
                             ax_box = tmpAx.twinx()
@@ -2719,7 +2784,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         else:
                             ax.set_xlim(avg*0.5, avg*1.5)
                         
-                    ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma", labelpad=6)
+                    ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname=self.imageFont, labelpad=6)
                     ax.set_yticklabels([])
                     ax.yaxis.set_ticks_position('none')
                     return ax, recGroups
@@ -2809,7 +2874,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
                 ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
             # ax.ticklabel_format(useOffset=False)    # prevent + sign
-            if selData["recHeader"] == REC.FTR:
+            if selData["recHeader"] == REC.FTR or (selData["recHeader"] == REC.MPR and dataInvalid):
                 ax.set_xlabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
             else:
                 ax.set_xlabel("%s%s"%(selData["TEST_NAME"], " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
@@ -2822,6 +2887,8 @@ class MyWindow(QtWidgets.QMainWindow):
         fig.suptitle("%s - %s - %s"%(self.tr("Bin Summary"), "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         ax_l = fig.add_subplot(121)
         ax_r = fig.add_subplot(122)
+        recGroup_l = []
+        recGroup_r = []
         bin_width = 0.8
         Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
         # HBIN plot
@@ -2835,15 +2902,18 @@ class MyWindow(QtWidgets.QMainWindow):
             HColor.append(self.settingParams.hbinColor[i])
             ax_l.text(x=ind + bin_width/2, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
             
-        recGroup_l = ax_l.bar(np.arange(len(HCnt)), HCnt, align='edge', width=bin_width, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary", picker=True)
-        setattr(recGroup_l, "head", head)
-        setattr(recGroup_l, "site", site)
-        setattr(recGroup_l, "binType", "HBIN")
-        setattr(recGroup_l, "binList", HList)
-        ax_l.set_xticks(np.arange(len(HCnt)) + bin_width/2)
-        ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)), fontname=self.imageFont)    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
-        ax_l.set_xlim(-.1, max(3, len(HCnt))-.9+bin_width)
-        ax_l.set_ylim(top=max(HCnt)*1.2)
+        if len(HList) > 0:
+            recGroup_l = ax_l.bar(np.arange(len(HCnt)), HCnt, align='edge', width=bin_width, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary", picker=True)
+            setattr(recGroup_l, "head", head)
+            setattr(recGroup_l, "site", site)
+            setattr(recGroup_l, "binType", "HBIN")
+            setattr(recGroup_l, "binList", HList)
+            ax_l.set_xticks(np.arange(len(HCnt)) + bin_width/2)
+            ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)), fontname=self.imageFont)    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
+            ax_l.set_xlim(-.1, max(3, len(HCnt))-.9+bin_width)
+            ax_l.set_ylim(top=max(HCnt)*1.2)
+        else:
+            ax_l.text(x=0.5, y=0.5, s=self.tr('No HBIN data is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=15, weight="bold", linespacing=2, ha="center", va="center", transform=ax_l.transAxes)
         ax_l.set_xlabel(self.tr("Hardware Bin"), fontsize=12, fontname=self.imageFont)
         ax_l.set_ylabel(self.tr("Hardware Bin Counts"), fontsize=12, fontname=self.imageFont)
 
@@ -2858,15 +2928,18 @@ class MyWindow(QtWidgets.QMainWindow):
             SColor.append(self.settingParams.sbinColor[i])
             ax_r.text(x=ind + bin_width/2, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
             
-        recGroup_r = ax_r.bar(np.arange(len(SCnt)), SCnt, align='edge', width=bin_width, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary", picker=True)
-        setattr(recGroup_r, "head", head)
-        setattr(recGroup_r, "site", site)
-        setattr(recGroup_r, "binType", "SBIN")
-        setattr(recGroup_r, "binList", SList)
-        ax_r.set_xticks(np.arange(len(SCnt)) + bin_width/2)
-        ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)), fontname=self.imageFont)
-        ax_r.set_xlim(-.1, max(3, len(SCnt))-.9+bin_width)
-        ax_r.set_ylim(top=max(SCnt)*1.2)
+        if len(SList) > 0:
+            recGroup_r = ax_r.bar(np.arange(len(SCnt)), SCnt, align='edge', width=bin_width, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary", picker=True)
+            setattr(recGroup_r, "head", head)
+            setattr(recGroup_r, "site", site)
+            setattr(recGroup_r, "binType", "SBIN")
+            setattr(recGroup_r, "binList", SList)
+            ax_r.set_xticks(np.arange(len(SCnt)) + bin_width/2)
+            ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)), fontname=self.imageFont)
+            ax_r.set_xlim(-.1, max(3, len(SCnt))-.9+bin_width)
+            ax_r.set_ylim(top=max(SCnt)*1.2)
+        else:
+            ax_r.text(x=0.5, y=0.5, s=self.tr('No SBIN data is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=15, weight="bold", linespacing=2, ha="center", va="center", transform=ax_r.transAxes)
         ax_r.set_xlabel(self.tr("Software Bin"), fontsize=12, fontname=self.imageFont)
         ax_r.set_ylabel(self.tr("Software Bin Counts"), fontsize=12, fontname=self.imageFont)
         
@@ -2944,6 +3017,9 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.add_collection(pc)
                 proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
                 legendHandles.append(proxyArtist)
+            # if coordsDict contains nothing, show warning text
+            if len(ax.collections) == 0:
+                ax.text(x=0.5, y=0.5, s=self.tr('No DUT with valid (X,Y) is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
             # legend
             ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
         
@@ -3046,7 +3122,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
             # update listView
             self.completeTestList = self.DatabaseFetcher.getTestItemsList()
-            self.updateModelContent(self.sim_list, self.completeTestList)
+            self.refreshTestList()
             self.completeWaferList = self.DatabaseFetcher.getWaferList()
             self.updateModelContent(self.sim_list_wafer, self.completeWaferList)
             

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 25th 2021
 # -----
-# Last Modified: Wed Nov 24 2021
+# Last Modified: Fri Dec 10 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -36,8 +36,8 @@ __all__ = ["stdfDataRetriever", "stdfRecordAnalyzer", "stdf_PFTR_Parser", "stdf_
 class stdfDataRetriever(_cystdf.stdfDataRetriever):
     pass
 
-def stdfRecordAnalyzer(filepath:str) -> str:
-    return _cystdf.analyzeSTDF(filepath)
+def stdfRecordAnalyzer(filepath:str, QSignal:object=None, stopFlag:object=None) -> str:
+    return _cystdf.analyzeSTDF(filepath, QSignal, stopFlag)
 
 def stdf_PFTR_Parser(recHeader:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
     '''For PTR & FTR only'''
