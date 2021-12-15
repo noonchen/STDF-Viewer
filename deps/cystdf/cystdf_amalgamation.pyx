@@ -48,7 +48,7 @@ from libc.stdint cimport *
 from libc.stddef cimport wchar_t
 from libc.math cimport NAN, isinf
 from libc.float cimport FLT_MAX, FLT_MIN
-from libc.string cimport memcpy, strcpy, strrchr, strcmp
+from libc.string cimport memcpy, memset, strcpy, strrchr, strcmp
 from posix.stdio cimport fseeko, ftello
 from posix.unistd cimport usleep
 from libc.stdio cimport sprintf, printf
@@ -794,6 +794,7 @@ cdef class stdfSummarizer:
         void* pRec
         char* endian
         char* TEST_TXT
+        char detailErrorMsg[512]
         const char* filepath_c
         const wchar_t*  filepath_wc
         sqlite3 *db_ptr
@@ -1051,6 +1052,8 @@ cdef class stdfSummarizer:
         self.fileSize = getFileSize(filepath)
         if self.fileSize == 0:
             raise OSError("File cannot be opened")
+        # init error msg to empty
+        memset(self.detailErrorMsg, 0, 512)
         # python signal
         self.flag = flag
         self.QSignal = QSignal
@@ -1176,13 +1179,15 @@ cdef class stdfSummarizer:
             elif errorCode == OS_FAIL:
                 raise OSError("Cannot open the file")
             elif errorCode == NO_MEMORY or errorCode == MAP_OMEM:
-                raise MemoryError("Not enough memory to proceed")
+                raise MemoryError("Not enough memory to proceed" 
+                                    + ": %s" % self.detailErrorMsg.decode() if self.detailErrorMsg[0] else "")
             elif errorCode == STD_EOF:
                 pass    # ignore EOF
             elif errorCode == TERMINATE:
                 raise InterruptedError("Parsing is terminated by user")
             elif errorCode == MAP_MISSING:
-                raise KeyError("Unable to get DUT id correctly, possibly a mal-formated file")
+                raise KeyError("Wrong key to get data from C dictionary" 
+                                + ": %s" % self.detailErrorMsg.decode() if self.detailErrorMsg[0] else "")
             else:
                 # sqlite3 error
                 raise Exception(f"SQlite3 Error: {sqlite3_errstr(errorCode)}")
@@ -1653,6 +1658,7 @@ cdef class stdfSummarizer:
         
         if (MAP_OK != hashmap_put(self.head_site_dutIndex, HEAD_NUM<<8 | SITE_NUM, self.dutIndex)):
             err = MAP_OMEM
+            sprintf(self.detailErrorMsg, "Error in [%d]PIR, Head:%d Site:%d", self.dutIndex, HEAD_NUM, SITE_NUM)
         
         if not err:
             sqlite3_bind_int(self.insertDut_stmt, 1, HEAD_NUM)
@@ -1695,6 +1701,7 @@ cdef class stdfSummarizer:
 
         if (MAP_OK != hashmap_get(self.head_site_dutIndex, HEAD_NUM<<8 | SITE_NUM, &currentDutIndex)):
             err = MAP_MISSING
+            sprintf(self.detailErrorMsg, "Error key in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
 
         if not err:
             # insert or replace Test_Offsets
@@ -1757,6 +1764,7 @@ cdef class stdfSummarizer:
             if (MAP_OK != hashmap_put(self.defaultLLimit, TEST_NUM, (<uint32_t*>&LLimit)[0]) or 
                 MAP_OK != hashmap_put(self.defaultHLimit, TEST_NUM, (<uint32_t*>&HLimit)[0])):  # convert float bits to uint bits
                 err = MAP_OMEM
+                sprintf(self.detailErrorMsg, "Error when storing limits in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
 
             if TEST_TXT == NULL: TEST_TXT = ""
             if Unit == NULL: Unit = ""
@@ -1816,13 +1824,17 @@ cdef class stdfSummarizer:
                     if not No_LLimit:
                         # low limit is available
                         # get default low limit from dictionary
-                        if (MAP_OK != hashmap_get(self.defaultLLimit, TEST_NUM, &_1stLLimit)): err = MAP_MISSING
+                        if (MAP_OK != hashmap_get(self.defaultLLimit, TEST_NUM, &_1stLLimit)): 
+                            err = MAP_MISSING
+                            sprintf(self.detailErrorMsg, "Error getting default low limit in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
                         # check if it's changed
                         if (_1stLLimit != (<uint32_t*>&LLimit)[0]): LLimitChanged = True
                         
                     if not No_HLimit:
                         # high limit is available
-                        if (MAP_OK != hashmap_get(self.defaultHLimit, TEST_NUM, &_1stHLimit)): err = MAP_MISSING
+                        if (MAP_OK != hashmap_get(self.defaultHLimit, TEST_NUM, &_1stHLimit)): 
+                            err = MAP_MISSING
+                            sprintf(self.detailErrorMsg, "Error getting default high limit in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
                         if (_1stHLimit != (<uint32_t*>&HLimit)[0]): HLimitChanged = True
 
                     if (not err) and (LLimitChanged or HLimitChanged):
@@ -1860,11 +1872,13 @@ cdef class stdfSummarizer:
 
         if (MAP_OK != hashmap_get(self.head_site_dutIndex, HEAD_NUM<<8 | SITE_NUM, &currentDutIndex)):
             err = MAP_MISSING
+            sprintf(self.detailErrorMsg, "Error dutIndex key in PRR, Head:%d Site:%d", HEAD_NUM, SITE_NUM)
         
         if hashmap_contains(self.head_waferIndex, HEAD_NUM):
             No_Wafer = False
             if (MAP_OK != hashmap_get(self.head_waferIndex, HEAD_NUM, &currentWaferIndex)):
                 err = MAP_MISSING
+                sprintf(self.detailErrorMsg, "Error waferIndex key in PRR, Head:%d", HEAD_NUM)
         else:
             No_Wafer = True
 
@@ -2089,6 +2103,7 @@ cdef class stdfSummarizer:
         self.waferIndex += 1
         if (MAP_OK != hashmap_put(self.head_waferIndex, HEAD_NUM, self.waferIndex)):
             err = MAP_MISSING
+            sprintf(self.detailErrorMsg, "Error in [%d]WIR, Head:%d", self.waferIndex, HEAD_NUM)
         
         # the following info is also available in WRR, but it still should be updated
         # in WIR in case the stdf is incomplete (no WRR).
@@ -2129,6 +2144,7 @@ cdef class stdfSummarizer:
 
         if (MAP_OK != hashmap_get(self.head_waferIndex, HEAD_NUM, &currentWaferIndex)):
             err = MAP_MISSING
+            sprintf(self.detailErrorMsg, "Error waferIndex key in WRR, Head:%d", HEAD_NUM)
 
         if not err:
             sqlite3_bind_int(self.insertWafer_stmt, 1, HEAD_NUM)                # HEAD_NUM
@@ -2181,15 +2197,18 @@ cdef class stdfSummarizer:
                 # get previous count and add up
                 if (MAP_OK != hashmap_get(self.TestFailCount, TEST_NUM, &tmpCount)):
                     err = MAP_MISSING
+                    sprintf(self.detailErrorMsg, "Error TEST_NUM %d key in TSR", TEST_NUM)
                     return err
 
                 tmpCount += FAIL_CNT
                 if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, tmpCount)):
                     err = MAP_OMEM
+                    sprintf(self.detailErrorMsg, "Error in TSR when storing count for TEST_NUM %d", TEST_NUM)
             else:
                 # save current count
                 if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, FAIL_CNT)):
                     err = MAP_OMEM
+                    sprintf(self.detailErrorMsg, "Error in TSR when storing count for TEST_NUM %d", TEST_NUM)
         return err
 
 

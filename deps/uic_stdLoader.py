@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Nov 03 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -181,8 +181,8 @@ class stdReader(QtCore.QObject):
         except Exception as e:
             self.parseStatus = False
             self.parseStatusSignal.emit(self.parseStatus)
-            logger.exception("Error occurred when parsing the file")
-            if self.msgSignal: self.msgSignal.emit(str(e), True, False, False)
+            logger.exception("\nError occurred when parsing the file")
+            if self.msgSignal: self.msgSignal.emit(str(e), False, True, False)
             
         finally:
             # parse signal cannot be emitted in finally block
