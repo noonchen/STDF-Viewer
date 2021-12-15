@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Fri Dec 10 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -48,6 +48,7 @@ class flags:
 class signal4Analyzer(QtCore.QObject):
     # get text from analyzer
     resultSignal = Signal(str)
+    progressSignal = Signal(int)
     # get finish signal from analyzer
     finishSignal = Signal(bool)
 
@@ -64,6 +65,7 @@ class stdDebugPanel(QtWidgets.QDialog):
         # connect signals
         self.signals = signal4Analyzer()
         self.signals.resultSignal.connect(self.updateResult)
+        self.signals.progressSignal.connect(self.updateProgress)
         self.signals.finishSignal.connect(self.finishAnalyze)
         # connect btns
         self.dbgUI.readerBtn.clicked.connect(self.onRecordAnalyzer)
@@ -86,10 +88,10 @@ class stdDebugPanel(QtWidgets.QDialog):
         if os.path.isfile(f):
             # store folder path
             self.parent.updateRecentFolder(f)
-            self.dbgUI.textBrowser.append(self.tr("{0}Selected STD File Path: {1}").format(prefixBlue, suffix))
-            self.dbgUI.textBrowser.append("{0}{1}{2}".format(prefixGreen, f, suffix))
-            self.dbgUI.textBrowser.append(self.tr("{0}Reading...{1}").format(prefixBlue, suffix_LF))
-            self.dbgUI.textBrowser.append(self.tr("{0}##### Report Start #####{1}").format(prefixBlue, suffix))
+            self.updateResult(self.tr("{0}Selected STD File Path: {1}").format(prefixBlue, suffix))
+            self.updateResult("{0}{1}{2}".format(prefixGreen, f, suffix))
+            self.updateResult(self.tr("{0}Reading...{1}").format(prefixBlue, suffix))
+            self.updateResult(self.tr("{0}##### Report Start #####{1}").format(prefixBlue, suffix))
             
             self.readThread = QtCore.QThread(parent=self)
             self.analyzer = RecordAnalyzerWrapper(f, self.signals)
@@ -107,23 +109,35 @@ class stdDebugPanel(QtWidgets.QDialog):
         sbar.setValue(sbar.maximum())
     
     
+    @Slot(int)
+    def updateProgress(self, progress):
+        self.dbgUI.progressBar.setValue(progress)
+    
+    
     @Slot(bool)
     def finishAnalyze(self, finished):
         self.readingInProgress = not finished
-        self.dbgUI.textBrowser.append(self.tr("{0}##### Report End #####{1}").format(prefixBlue, suffix_LF))
+        self.updateResult(self.tr("{0}##### Report End #####{1}").format(prefixBlue, suffix_LF))
         self.readThread.quit()
         self.readThread.wait()
     
     
     def onLogDisplay(self):
-        self.dbgUI.textBrowser.append(self.tr("{0}##### Log Content Start #####{1}").format(prefixBlue, suffix))
-        with open(sys.LOG_PATH, "r") as logf:
-            for line in logf.readlines():
-                if "ERROR" in line or "Error" in line:
-                    self.dbgUI.textBrowser.append("{0}{1}{2}".format(prefixRed, line, suffix))
-                else:
-                    self.dbgUI.textBrowser.append(line)
-        self.dbgUI.textBrowser.append(self.tr("{0}##### Log Content End #####{1}").format(prefixBlue, suffix_LF))
+        logFolder = sys.LOG_PATH
+        allLogFiles = sorted([os.path.join(logFolder, f)
+                              for f in os.listdir(logFolder)
+                              if f.endswith('.log') and os.path.isfile(os.path.join(logFolder, f))])
+        # loop thru log files and display their contents
+        for i, logPath in enumerate(allLogFiles):
+            logName = os.path.basename(logPath)
+            self.updateResult(self.tr("{0}##### Log Content of [{1}] {2} Start #####{3}").format(prefixBlue, i+1, logName, suffix))
+            with open(logPath, "r") as logf:
+                for line in logf.readlines():
+                    if "ERROR" in line or "Error" in line:
+                        self.updateResult("{0}{1}{2}".format(prefixRed, line, suffix))
+                    else:
+                        self.updateResult(line)
+            self.updateResult(self.tr("{0}##### Log Content of [{1}] {2} End #####{3}").format(prefixBlue, i+1, logName, suffix_LF))
         
         
     def onSave(self):
@@ -176,6 +190,7 @@ class stdDebugPanel(QtWidgets.QDialog):
             
         else:
             self.dbgUI.textBrowser.clear()
+            self.dbgUI.progressBar.setValue(0)
             event.accept()
         
         
@@ -186,12 +201,14 @@ class RecordAnalyzerWrapper(QtCore.QObject):
         self.parseStatus = True     # default success
         if (QSignal is None or
             QSignal.resultSignal is None or
+            QSignal.progressSignal is None or
             QSignal.finishSignal is None):
             raise ValueError("Qsignal is invalid, parse is terminated")
         
         self.stdPath = stdPath
         self.QSignals = QSignal
         self.resultSignal = self.QSignals.resultSignal
+        self.progressSignal = self.QSignals.progressSignal
         self.finishSignal = self.QSignals.finishSignal
         self.flag = flags()     # used for stopping parser
         
@@ -199,7 +216,7 @@ class RecordAnalyzerWrapper(QtCore.QObject):
     @Slot()
     def analyzeBegin(self):
         try:
-            stdfRecordAnalyzer(self.stdPath, self.resultSignal, self.flag)
+            stdfRecordAnalyzer(self.stdPath, self.resultSignal, self.progressSignal, self.flag)
             if self.flag.stop:
                 # user terminated
                 if self.resultSignal: self.resultSignal.emit(self.tr("### User terminated ###\n"))

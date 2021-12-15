@@ -20,6 +20,28 @@ class Ui_debugPanel(object):
         self.textBrowser = QtWidgets.QTextBrowser(debugPanel)
         self.textBrowser.setObjectName("textBrowser")
         self.verticalLayout_3.addWidget(self.textBrowser)
+        self.progressBar = QtWidgets.QProgressBar(debugPanel)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())
+        self.progressBar.setSizePolicy(sizePolicy)
+        self.progressBar.setStyleSheet("QProgressBar {\n"
+"    border: 1px solid grey;\n"
+"    border-radius: 2px;\n"
+"    height: 10px;\n"
+"}\n"
+"\n"
+"QProgressBar::chunk {\n"
+"    background-color: #05B8CC;\n"
+"    width: 20px;\n"
+"}")
+        self.progressBar.setProperty("value", 0)
+        self.progressBar.setAlignment(QtCore.Qt.AlignCenter)
+        self.progressBar.setTextVisible(False)
+        self.progressBar.setFormat("%p%")
+        self.progressBar.setObjectName("progressBar")
+        self.verticalLayout_3.addWidget(self.progressBar)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.verticalLayout = QtWidgets.QVBoxLayout()
@@ -48,7 +70,7 @@ class Ui_debugPanel(object):
     def retranslateUi(self, debugPanel):
         _translate = QtCore.QCoreApplication.translate
         debugPanel.setWindowTitle(_translate("debugPanel", "STDF Debug Panel"))
-        self.readerBtn.setText(_translate("debugPanel", "STDF Record Reader"))
+        self.readerBtn.setText(_translate("debugPanel", "STDF Record Type Reader"))
         self.logBtn.setText(_translate("debugPanel", "Display Log File"))
         self.saveBtn.setText(_translate("debugPanel", "Save Result"))
         self.ExitBtn.setText(_translate("debugPanel", "Exit"))

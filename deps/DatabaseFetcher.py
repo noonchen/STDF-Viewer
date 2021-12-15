@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Fri Dec 10 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -385,10 +385,9 @@ class DatabaseFetcher:
         for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
             if isinstance(XCOORD, int) and isinstance(YCOORD, int) and isinstance(Flag, int):
                 # skip invalid dut (e.g. dut without PRR)
-                continue
-            previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
-            if getStatus(Flag) == "Failed":
-                failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
+                previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
+                if getStatus(Flag) == "Failed":
+                    failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
         
         return failDieDistribution
     

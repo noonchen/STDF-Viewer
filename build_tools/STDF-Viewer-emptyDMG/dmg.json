@@ -1,0 +1,12 @@
+{
+  "title": "STDF Viewer",
+  "icon": "stdfViewer_installer.icns",
+  "background": "dmg_background.png",
+  "window": {
+    "size": {"width": 400, "height": 350}
+  },
+  "contents": [
+    { "x": 300, "y": 200, "type": "link", "path": "/Applications" },
+    { "x": 100, "y": 200, "type": "file", "path": "STDF Viewer.app" }
+  ]
+}

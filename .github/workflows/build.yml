@@ -102,11 +102,19 @@ jobs:
           rm -rf "./dist/STDF-Viewer"
           python build_tools/clean.py
 
+      - name: Get appdmg for dmg build
+        run: npm install -g appdmg
+
+      - name: Build dmg package
+        run: |
+          mv "dist/STDF Viewer.app" build_tools/STDF-Viewer-emptyDMG
+          appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
+
       - uses: actions/upload-artifact@v2
         name: Upload Artifact
         with:
           name: STDF_Viewer_macos
-          path: dist/
+          path: build_tools/STDF-Viewer-macos.dmg
 
 
   ubuntu-cp39:

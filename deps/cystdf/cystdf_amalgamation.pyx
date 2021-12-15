@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Fri Dec 10 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -250,16 +250,39 @@ cdef void* parse(void* input_args) nogil:
 # *** end of funcs for stdIO *** #
 
 
+cdef uint64_t getFileSize(str filepath) except *:
+    cdef uint64_t fsize
+
+    pyfh = open(filepath, "rb")
+
+    if filepath.endswith(".gz"):
+        # for gzip, read last 4 bytes as filesize
+        pyfh.seek(-4, 2)
+        fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
+    else:
+        # bzip file size is not known before uncompressing, return compressed file size instead
+        fsize = <uint64_t>(pyfh.seek(0, 2))
+    pyfh.close()
+    return fsize
+
+
 #########################
 # *** STDF Analyzer *** #
 #########################
-def analyzeSTDF(str filepath, QSignal=None, flag=None):
+def analyzeSTDF(str filepath, QSignal=None, QSignalPgs=None, flag=None):
     cdef wchar_t* filepath_wc
     cdef bytes filepath_byte
     cdef char* filepath_c
     cdef void* _filepath
+    cdef uint64_t fileSize
     cdef bint isWin = platform.system() == "Windows"
     cdef bint isValidSignal = (QSignal is not None)
+    cdef bint isValidProgressSignal = (QSignalPgs is not None)
+    cdef int previousProgress = 0, currentProgress
+
+    fileSize = getFileSize(filepath)
+    if fileSize == 0:
+        raise OSError("Zero byte file detected")
 
     if isWin:
         filepath_wc = PyUnicode_AsWideCharString(filepath, NULL)
@@ -351,25 +374,21 @@ def analyzeSTDF(str filepath, QSignal=None, flag=None):
                             else:
                                 resultLog += tmpRes + "\n"
                             
-                        # add a line feed before PIR or WIR
-                        if (item.pData.recHeader == REC_PIR or item.pData.recHeader == REC_WIR):
-                            tmpRes = ""
-                            if isValidSignal:
-                                QSignal.emit(tmpRes)
-                            else:
-                                resultLog += tmpRes + "\n"
-
                         # write PXR and WXR right now, since we need to print head number of site number
                         parse_record(&pRec, item.pData.recHeader, item.pData.rawData, item.pData.binaryLen)
                         if item.pData.recHeader == REC_PIR:
                             dutCnt += 1
                             HEAD_NUM = (<PIR*>pRec).HEAD_NUM
                             SITE_NUM = (<PIR*>pRec).SITE_NUM
-                            tmpRes = "%s"%rec_name.get(item.pData.recHeader, "") + f" (HEAD: {HEAD_NUM}, SITE: {SITE_NUM})"
+                            tmpRes = "[%d] %s"%(dutCnt, rec_name.get(item.pData.recHeader, "")) + f" (HEAD: {HEAD_NUM}, SITE: {SITE_NUM})"
                             if isValidSignal:
                                 QSignal.emit(tmpRes)
                             else:
                                 resultLog += tmpRes + "\n"
+                            if isValidProgressSignal:
+                                currentProgress = (100 * item.pData.offset) // fileSize
+                                if currentProgress > previousProgress:
+                                    QSignalPgs.emit(currentProgress)
                             
                         elif item.pData.recHeader == REC_WIR:
                             waferCnt += 1
@@ -398,7 +417,7 @@ def analyzeSTDF(str filepath, QSignal=None, flag=None):
                                 resultLog += tmpRes + "\n"
                             
                         free_record(item.pData.recHeader, pRec)
-                        # reset preheader to 0
+                        # reset preheader to 0, in order to print every PXR WXR
                         preRecHeader = 0
                         recCnt = 0
                         
@@ -429,6 +448,9 @@ def analyzeSTDF(str filepath, QSignal=None, flag=None):
                         QSignal.emit(tmpRes)
                     else:
                         resultLog += tmpRes + "\n"
+                    if isValidProgressSignal:
+                        QSignalPgs.emit(100)
+                        
 
                 # check error
                 if item.error:
@@ -759,22 +781,6 @@ cdef int writeFailCount(void* sql_stmt, uint32_t TEST_NUM, uint32_t count) nogil
     return err
 
 # ** End of Callback ** #
-
-
-cdef uint64_t getFileSize(str filepath) except *:
-    cdef uint64_t fsize
-
-    pyfh = open(filepath, "rb")
-
-    if filepath.endswith(".gz"):
-        # for gzip, read last 4 bytes as filesize
-        pyfh.seek(-4, 2)
-        fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
-    else:
-        # bzip file size is not known before uncompressing, return compressed file size instead
-        fsize = <uint64_t>(pyfh.seek(0, 2))
-    pyfh.close()
-    return fsize
 
 
 cdef class stdfSummarizer:

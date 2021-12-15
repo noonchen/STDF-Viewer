@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Dec 10 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -100,7 +100,7 @@ logger = logging.getLogger("STDF-Viewer")
 logger.setLevel(logging.WARNING)
 logFolder = os.path.join(rootFolder, "logs")
 logPath = os.path.join(logFolder, f"{base}-{datetime.date.today()}.log")
-setattr(sys, "LOG_PATH", logPath)   # save the log location globally
+setattr(sys, "LOG_PATH", logFolder)   # save the log location globally
 os.makedirs(os.path.dirname(logPath), exist_ok=True)
 logFD = logging.FileHandler(logPath, mode="a+")
 logFD.setFormatter(logging.Formatter('%(asctime)s : %(name)s : %(levelname)s : %(message)s'))
@@ -944,17 +944,17 @@ class MyWindow(QtWidgets.QMainWindow):
         curLang = self.settingParams.language
         if curLang == "English":
             self.imageFont = self.defaultFontNames.English
-            self.translatorUI.loadFromData(transDict["MainUI_en_US"])
-            self.translatorCode.loadFromData(transDict["MainCode_en_US"])
-            self.loader.translator.loadFromData(transDict["loadingUI_en_US"])
-            self.failmarker.translator.loadFromData(transDict["failmarkerCode_en_US"])
-            self.exporter.translatorUI.loadFromData(transDict["exportUI_en_US"])
-            self.exporter.translatorCode.loadFromData(transDict["exportCode_en_US"])
-            self.settingUI.translator.loadFromData(transDict["settingUI_en_US"])
-            self.dutDataReader.translator.loadFromData(transDict["dutDataCode_en_US"])
-            self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_en_US"])
-            self.debugPanel.translator.loadFromData(transDict["debugUI_en_US"])
-            self.debugPanel.translator_code.loadFromData(transDict["debugCode_en_US"])
+            self.translatorUI.loadFromData(transDict["English"])
+            self.translatorCode.loadFromData(transDict["English"])
+            self.loader.translator.loadFromData(transDict["English"])
+            self.failmarker.translator.loadFromData(transDict["English"])
+            self.exporter.translatorUI.loadFromData(transDict["English"])
+            self.exporter.translatorCode.loadFromData(transDict["English"])
+            self.settingUI.translator.loadFromData(transDict["English"])
+            self.dutDataReader.translator.loadFromData(transDict["English"])
+            self.dutDataReader.tableUI.translator.loadFromData(transDict["English"])
+            self.debugPanel.translator.loadFromData(transDict["English"])
+            self.debugPanel.translator_code.loadFromData(transDict["English"])
             
         elif curLang == "简体中文":
             self.imageFont = self.defaultFontNames.Chinese
@@ -2897,6 +2897,7 @@ class MyWindow(QtWidgets.QMainWindow):
         HCnt = [binStats[BIN] for BIN in HList]
         HLable = []
         HColor = []
+        self.tr("MissingName")  # explicitly translation bin name, since it's always stored in the value
         for ind, i in enumerate(HList):
             HLable.append(self.tr(self.HBIN_dict[i]["BIN_NAME"]))
             HColor.append(self.settingParams.hbinColor[i])
@@ -3004,7 +3005,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
                 sbinCnt = len(coordsDict[sbin])
                 percent = 100 * sbinCnt / dutCnt
-                label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, sbinName, sbinCnt, percent)
+                label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, self.tr(sbinName), sbinCnt, percent)
                 rects = []
                 # skip dut with invalid coords
                 for (x, y) in coordsDict[sbin]:
@@ -3021,7 +3022,7 @@ class MyWindow(QtWidgets.QMainWindow):
             if len(ax.collections) == 0:
                 ax.text(x=0.5, y=0.5, s=self.tr('No DUT with valid (X,Y) is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
             # legend
-            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", fontsize=labelsize)
+            ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", prop={'family':self.imageFont, 'size':labelsize})
         
         # set ticks & draw coord lines
         ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
