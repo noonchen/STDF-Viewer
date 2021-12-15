@@ -2495,7 +2495,7 @@ class MyWindow(QtWidgets.QMainWindow):
         dataInvalid = np.all(np.isnan(y_raw))
         testInvalid = np.all(selData["flagList"] < 0)
 
-        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or dataInvalid or testInvalid:
+        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or (selData["recHeader"] != REC.MPR and (dataInvalid or testInvalid)):
             # show a warning text in figure
             # For PTR and FTR, any invalid would trigger this case
             # For MPR, dataInvalid and testInvalid both meet can it enter this case
@@ -2681,7 +2681,7 @@ class MyWindow(QtWidgets.QMainWindow):
         dataInvalid = np.all(np.isnan(selData["dataList"]))
         testInvalid = np.all(selData["flagList"] < 0)
 
-        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or dataInvalid or testInvalid:
+        if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or (selData["recHeader"] != REC.MPR and (dataInvalid or testInvalid)):
             # show a warning text in figure
             ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (selData["TEST_NAME"], head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:

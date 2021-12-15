@@ -29,7 +29,7 @@ from .cystdf import stdfRecordAnalyzer
 import sys, os, subprocess, platform
 # pyqt5
 from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtWidgets import QFileDialog, QApplication
+from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtCore import QTranslator, pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 
 
