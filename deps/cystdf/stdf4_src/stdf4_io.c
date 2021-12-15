@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Thu Aug 19 2021
+ * Last Modified: Fri Dec 10 2021
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -63,7 +63,7 @@ int _stdf_open_org(void* stdf, void* filename){
 #endif
 
     if (std->orgF == NULL) {
-        printf("file handler is null\n");
+        printf("file handler is null, failed to open %s\n", (char*)filename);
         fclose(std->orgF);
         return OS_FAIL;
     }
@@ -116,6 +116,7 @@ int _stdf_open_gz(void* stdf, void* filename){
     std->gzF = gzdopen(fd, "rb");
 
     if (std->gzF == NULL) {
+        printf("file handler is null, failed to open %s\n", (char*)filename);
         gzclose(std->gzF);
         return OS_FAIL;
     }
@@ -167,6 +168,7 @@ int _stdf_open_bz(void* stdf, void* filename){
     std->bzF = BZ2_bzdopen(fd, "rb");
 
     if (std->bzF == NULL) {
+        printf("file handler is null, failed to open %s\n", (char*)filename);
         BZ2_bzclose(std->bzF);
         return OS_FAIL;
     }

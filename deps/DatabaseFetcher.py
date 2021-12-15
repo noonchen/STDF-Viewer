@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Nov 24 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -26,7 +26,7 @@ import sqlite3
 import numpy as np
 
 
-getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "None")
+getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "Unknown")
 
 class DatabaseFetcher:
     def __init__(self):
@@ -63,12 +63,12 @@ class DatabaseFetcher:
     
     
     def getTestItemsList(self):
-        # return test_num + testname list in db ordered by test_num
+        # return test_num + testname list in db, keep original order here, do not ordered by test_num
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         self.connection.text_factory = str
         TestList = []
-        for row in self.cursor.execute("SELECT TEST_NUM, TEST_NAME from Test_Info ORDER by TEST_NUM"):
+        for row in self.cursor.execute("SELECT TEST_NUM, TEST_NAME from Test_Info ORDER by ROWID"):
             TestList.append(f"{row[0]}\t{row[1]}")
         return TestList
     
@@ -178,7 +178,7 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         allHeads = self.getHeadList()
-        dutSiteInfo = dict( zip(allHeads, [[]]*len(allHeads)) )    # initalize dutSiteInfo dict, head as key, [] as value
+        dutSiteInfo = dict( zip(allHeads, [[] for _ in range(len(allHeads))] ) )    # initalize dutSiteInfo dict, head as key, [] as value
         completeDutList = []
         
         sql = "SELECT HEAD_NUM, SITE_NUM, DUTIndex FROM Dut_Info ORDER by DUTIndex"
@@ -212,16 +212,22 @@ class DatabaseFetcher:
         sqlResult = self.cursor.execute(sql)
         
         for head, site, DUTIndex, testCount, Testtime, partID, hbin, sbin, prrFlag, waferIndex, xcoord, ycoord in sqlResult:
-            prrStat = getStatus(prrFlag)
+            # if PRR of certain DUTs is missing, testCount... will all be None
+            if isinstance(prrFlag, int):
+                prrStat = getStatus(prrFlag) 
+                dutFlagText = f"{prrStat} - 0x{prrFlag:02x}".encode()
+            else:
+                dutFlagText = b"-"
+                
             tmpRow = [partID if partID else b"MissingID", 
                     b"Head %d - Site %d" % (head, site),
-                    b"%d" % testCount,
-                    b"%d ms" % Testtime,
-                    b"Bin %d" % hbin,
-                    b"Bin %d" % sbin,
+                    b"%d" % testCount if testCount is not None else b"-",
+                    b"%d ms" % Testtime if Testtime is not None else b"-",
+                    b"Bin %d" % hbin if hbin is not None else b"-",
+                    b"Bin %d" % sbin if sbin is not None else b"-",
                     b"%d" % waferIndex if waferIndex is not None else b"-",
                     b"(%d, %d)" % (xcoord, ycoord) if not (xcoord is None or ycoord is None) else b"-",
-                    f"{prrStat} - 0x{prrFlag:02x}".encode()]
+                    dutFlagText]
             dutInfoDict[DUTIndex] = tmpRow
             
         return dutInfoDict
@@ -231,8 +237,9 @@ class DatabaseFetcher:
         # return number of total, passed, failed 
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        statsDict = {"Total": 0, "Pass": 0, "Failed": 0, "None": 0}
+        statsDict = {"Total": 0, "Pass": 0, "Failed": 0, "Unknown": 0}
         for flag, count in self.cursor.execute("SELECT Flag, count(Flag) FROM Dut_Info GROUP by Flag"):
+            flag = flag if isinstance(flag, int) else 0x10    # 0x10 == No pass/fail indication, force to be Unknown if flag is NAN
             dutStatus = getStatus(flag)
             statsDict[dutStatus] = statsDict[dutStatus] + count
             statsDict["Total"] = statsDict["Total"] + count
@@ -376,9 +383,11 @@ class DatabaseFetcher:
             sql_param = (head, site)
             
         for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
-            previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
-            if getStatus(Flag) == "Failed":
-                failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
+            if isinstance(XCOORD, int) and isinstance(YCOORD, int) and isinstance(Flag, int):
+                # skip invalid dut (e.g. dut without PRR)
+                previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
+                if getStatus(Flag) == "Failed":
+                    failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
         
         return failDieDistribution
     

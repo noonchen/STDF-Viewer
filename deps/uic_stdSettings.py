@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Nov 24 2021
+# Last Modified: Thu Dec 09 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -63,6 +63,11 @@ indexDic_notation_reverse = {v:k for k, v in indexDic_notation.items()}
 indexDic_lang = {0: "English",
                  1: "简体中文"}
 indexDic_lang_reverse = {v:k for k, v in indexDic_lang.items()}
+
+indexDic_sortby = {0: "Original",
+                   1: "Number",
+                   2: "Name"}
+indexDic_sortby_reverse = {v:k for k, v in indexDic_sortby.items()}
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
 
@@ -159,10 +164,11 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
         # general
         self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(self.originalParams.language, 0))
-        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse[self.originalParams.dataNotation])
+        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse.get(self.originalParams.dataNotation, 0))
         self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
         self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if self.originalParams.checkCpk else 1)
         self.settingsUI.lineEdit_cpk.setText(str(self.originalParams.cpkThreshold))
+        self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(self.originalParams.sortTestList, 0))
         # color
         for (orig_dict, layout) in [(self.originalParams.siteColor, self.settingsUI.gridLayout_site_color),
                                     (self.originalParams.sbinColor, self.settingsUI.gridLayout_sbin_color),
@@ -228,6 +234,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.parent.settingParams.dataPrecision = self.settingsUI.precisionSlider.value()
         self.parent.settingParams.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
         self.parent.settingParams.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
+        self.parent.settingParams.sortTestList = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
         # color
         for group in ["site", "sbin", "hbin"]:
             self.currentColorDict(get=False, group=group)
@@ -248,7 +255,7 @@ class stdfSettings(QtWidgets.QDialog):
          
     def isGeneralChanged(self):
         return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["language", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold"]])
+                        for attr in ["language", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold", "sortTestList"]])
 
 
     def isColorChanged(self):
@@ -263,6 +270,7 @@ class stdfSettings(QtWidgets.QDialog):
             refreshTab = False
             refreshTable = False
             refreshList = False
+            clearListBG = False
             refreshCursor = False
             retranslate = False
             if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
@@ -274,6 +282,8 @@ class stdfSettings(QtWidgets.QDialog):
             if self.isGeneralChanged(): 
                 if self.originalParams.language != self.parent.settingParams.language:
                     retranslate = True
+                if self.originalParams.sortTestList != self.parent.settingParams.sortTestList:
+                    refreshList = True
                 if self.parent.ui.tabControl.currentIndex() != tab.Bin:
                     refreshTable = True
                     refreshCursor = True
@@ -282,7 +292,7 @@ class stdfSettings(QtWidgets.QDialog):
                         refreshTab = True
                     # if cpk threshold changed, clear listView backgrounds
                     if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
-                        refreshList = True
+                        clearListBG = True
                     
             if self.isColorChanged():
                 refreshTab = True
@@ -290,7 +300,8 @@ class stdfSettings(QtWidgets.QDialog):
                 
             if refreshTab: self.parent.updateTabContent(forceUpdate=True)
             if refreshTable: self.parent.updateStatTableContent()
-            if refreshList: self.parent.clearTestItemBG()
+            if refreshList: self.parent.refreshTestList()
+            if clearListBG: self.parent.clearTestItemBG()
             if refreshCursor: self.parent.updateCursorPrecision()
             if retranslate: self.parent.changeLanguage()
                 

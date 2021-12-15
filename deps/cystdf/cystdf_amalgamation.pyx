@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Wed Nov 24 2021
+# Last Modified: Wed Dec 15 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -250,21 +250,49 @@ cdef void* parse(void* input_args) nogil:
 # *** end of funcs for stdIO *** #
 
 
+cdef uint64_t getFileSize(str filepath) except *:
+    cdef uint64_t fsize
+
+    pyfh = open(filepath, "rb")
+
+    if filepath.endswith(".gz"):
+        # for gzip, read last 4 bytes as filesize
+        pyfh.seek(-4, 2)
+        fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
+    else:
+        # bzip file size is not known before uncompressing, return compressed file size instead
+        fsize = <uint64_t>(pyfh.seek(0, 2))
+    pyfh.close()
+    return fsize
+
+
 #########################
 # *** STDF Analyzer *** #
 #########################
-def analyzeSTDF(str filepath):
+def analyzeSTDF(str filepath, QSignal=None, QSignalPgs=None, flag=None):
     cdef wchar_t* filepath_wc
     cdef bytes filepath_byte
     cdef char* filepath_c
+    cdef void* _filepath
+    cdef uint64_t fileSize
     cdef bint isWin = platform.system() == "Windows"
+    cdef bint isValidSignal = (QSignal is not None)
+    cdef bint isValidProgressSignal = (QSignalPgs is not None)
+    cdef int previousProgress = 0, currentProgress
+
+    fileSize = getFileSize(filepath)
+    if fileSize == 0:
+        raise OSError("Zero byte file detected")
 
     if isWin:
         filepath_wc = PyUnicode_AsWideCharString(filepath, NULL)
+        _filepath = <void*>filepath_wc
     else:
         filepath_byte = filepath.encode('utf-8')
         filepath_c = filepath_byte      # for parser in pthread
+        _filepath = <void*>filepath_c
     
+    cdef str tmpRes = ""
     cdef str resultLog = ""
 
     rec_name = {REC_FAR:"FAR",
@@ -299,15 +327,15 @@ def analyzeSTDF(str filepath):
     cdef dataCluster* item
     cdef uint32_t totalRecord = 0
     cdef void* pRec = NULL
-
+    cdef uint8_t HEAD_NUM, SITE_NUM
     cdef uint16_t preRecHeader = 0
-    cdef int recCnt = 0
+    cdef int recCnt = 0, dutCnt = 0, waferCnt = 0
 
     # init queue
     message_queue_init(&q, sizeof(dataCluster), 1024*8)
     # args for parser
     cdef parse_arg args
-    args.filename = <void*>filepath_wc if isWin else <void*>filepath_c
+    args.filename = _filepath
     args.q = &q
     args.p_needByteSwap = &needByteSwap
     args.stopFlag = &stopFlag
@@ -315,6 +343,10 @@ def analyzeSTDF(str filepath):
     pthread_create(&th, NULL, parse, <void*>&args)
 
     while True:
+        if flag is not None and flag.stop:
+            (&stopFlag)[0] = <bint>flag.stop
+            break
+        
         item = <dataCluster*>message_queue_read(&q)
         if item == NULL:
             break
@@ -322,22 +354,88 @@ def analyzeSTDF(str filepath):
         else:
             if item.operation == SET_ENDIAN:
                 if needByteSwap:
-                    resultLog += "Byte Order: big endian\n"
+                    tmpRes = "Byte Order: big endian"
                 else:
-                    resultLog += "Byte Order: little endian\n"
+                    tmpRes = "Byte Order: little endian"
+                if isValidSignal:
+                    QSignal.emit(tmpRes)
+                else:
+                    resultLog += tmpRes + "\n"
+                    
             elif item.operation == PARSE:
                 if item.pData:
-                    if preRecHeader != item.pData.recHeader:
-                        # print previous cnt
-                        if preRecHeader != 0:
-                            resultLog += "%s"%rec_name.get(preRecHeader, "") + " × %d\n"%recCnt if recCnt else "\n"
-                            if preRecHeader == REC_PRR or preRecHeader == REC_WRR:
-                                resultLog += "\n"
-                        # update new
-                        preRecHeader = item.pData.recHeader
-                        recCnt = 1
+                    if (item.pData.recHeader == REC_PIR or item.pData.recHeader == REC_WIR or
+                        item.pData.recHeader == REC_PRR or item.pData.recHeader == REC_WRR):
+                        if recCnt != 0 and preRecHeader != 0:
+                            # print previous result
+                            tmpRes = "%s"%rec_name.get(preRecHeader, "") + " × %d"%recCnt if recCnt else ""
+                            if isValidSignal:
+                                QSignal.emit(tmpRes)
+                            else:
+                                resultLog += tmpRes + "\n"
+                            
+                        # write PXR and WXR right now, since we need to print head number of site number
+                        parse_record(&pRec, item.pData.recHeader, item.pData.rawData, item.pData.binaryLen)
+                        if item.pData.recHeader == REC_PIR:
+                            dutCnt += 1
+                            HEAD_NUM = (<PIR*>pRec).HEAD_NUM
+                            SITE_NUM = (<PIR*>pRec).SITE_NUM
+                            tmpRes = "[%d] %s"%(dutCnt, rec_name.get(item.pData.recHeader, "")) + f" (HEAD: {HEAD_NUM}, SITE: {SITE_NUM})"
+                            if isValidSignal:
+                                QSignal.emit(tmpRes)
+                            else:
+                                resultLog += tmpRes + "\n"
+                            if isValidProgressSignal:
+                                currentProgress = (100 * item.pData.offset) // fileSize
+                                if currentProgress > previousProgress:
+                                    QSignalPgs.emit(currentProgress)
+                            
+                        elif item.pData.recHeader == REC_WIR:
+                            waferCnt += 1
+                            HEAD_NUM = (<WIR*>pRec).HEAD_NUM
+                            tmpRes = "%s"%rec_name.get(item.pData.recHeader, "") + f" (HEAD: {HEAD_NUM})"
+                            if isValidSignal:
+                                QSignal.emit(tmpRes)
+                            else:
+                                resultLog += tmpRes + "\n"
+                            
+                        elif item.pData.recHeader == REC_PRR:
+                            HEAD_NUM    = (<PRR*>pRec).HEAD_NUM
+                            SITE_NUM    = (<PRR*>pRec).SITE_NUM
+                            tmpRes = "%s"%rec_name.get(item.pData.recHeader, "") + f" (HEAD: {HEAD_NUM}, SITE: {SITE_NUM})"
+                            if isValidSignal:
+                                QSignal.emit(tmpRes)
+                            else:
+                                resultLog += tmpRes + "\n"
+                            
+                        else:
+                            HEAD_NUM = (<WRR*>pRec).HEAD_NUM
+                            tmpRes = "%s"%rec_name.get(item.pData.recHeader, "") + f" (HEAD: {HEAD_NUM})"
+                            if isValidSignal:
+                                QSignal.emit(tmpRes)
+                            else:
+                                resultLog += tmpRes + "\n"
+                            
+                        free_record(item.pData.recHeader, pRec)
+                        # reset preheader to 0, in order to print every PXR WXR
+                        preRecHeader = 0
+                        recCnt = 0
+                        
                     else:
-                        recCnt += 1
+                        if preRecHeader != item.pData.recHeader:
+                            # print previous cnt
+                            if preRecHeader != 0:
+                                tmpRes = "%s"%rec_name.get(preRecHeader, "") + " × %d"%recCnt if recCnt else ""
+                                if isValidSignal:
+                                    QSignal.emit(tmpRes)
+                                else:
+                                    resultLog += tmpRes + "\n"
+                                
+                            # update new
+                            preRecHeader = item.pData.recHeader
+                            recCnt = 1
+                        else:
+                            recCnt += 1
 
                     totalRecord += 1
                     free(item.pData.rawData)
@@ -345,33 +443,54 @@ def analyzeSTDF(str filepath):
             else:
                 if recCnt != 0 and preRecHeader != 0:
                     # print last record
-                    resultLog += "%s"%rec_name.get(preRecHeader, "") + " × %d\n"%recCnt if recCnt else "\n"
+                    tmpRes = "%s"%rec_name.get(preRecHeader, "") + " × %d"%recCnt if recCnt else ""
+                    if isValidSignal:
+                        QSignal.emit(tmpRes)
+                    else:
+                        resultLog += tmpRes + "\n"
+                    if isValidProgressSignal:
+                        QSignalPgs.emit(100)
+                        
 
                 # check error
                 if item.error:
                     if item.error == INVAILD_STDF:
-                        resultLog += "INVAILD_STDF\n"
+                        tmpRes = "INVAILD_STDF\n"
                     elif item.error == WRONG_VERSION:
-                        resultLog += "WRONG_VERSION\n"
+                        tmpRes = "WRONG_VERSION\n"
                     elif item.error == OS_FAIL:
-                        resultLog += "OS_FAIL\n"
+                        tmpRes = "OS_FAIL\n"
                     elif item.error == NO_MEMORY:
-                        resultLog += "NO_MEMORY\n"
+                        tmpRes = "NO_MEMORY\n"
                     elif item.error == STD_EOF:
-                        resultLog += "STD_EOF\n"
+                        tmpRes = "STD_EOF\n"
                     elif item.error == TERMINATE:
-                        resultLog += "TERMINATE\n"
+                        tmpRes = "TERMINATE\n"
                     else:
-                        resultLog += "Unknwon error\n"
+                        tmpRes = "Unknwon error\n"
+
+                    if isValidSignal:
+                        QSignal.emit(tmpRes)
+                    else:
+                        resultLog += tmpRes
                 break
+            
 
         message_queue_message_free(&q, item)
     
     pthread_join(th, NULL)
     pthread_kill(th, 0)
     message_queue_destroy(&q)
-    resultLog += "\nTotal record: %d\n"%totalRecord
-    resultLog += "Analysis Finished"
+    tmpRes = ""
+    tmpRes += "\nTotal wafers: %d"%waferCnt
+    tmpRes += "\nTotal duts/dies: %d"%dutCnt
+    tmpRes += "\nTotal records: %d\n"%totalRecord
+    tmpRes += "Analysis Finished"
+    if isValidSignal:
+        QSignal.emit(tmpRes)
+    else:
+        resultLog += tmpRes
+    
     return resultLog
 
 # *** end of Record Analyzer *** #
@@ -381,7 +500,7 @@ def analyzeSTDF(str filepath):
 # *** funcs of Record Parser *** #
 ##################################
 NPINT = int
-NPFLOAT = np.float
+NPFLOAT = float
 ctypedef cnp.int_t NPINT_t
 ctypedef cnp.float_t NPFLOAT_t
 cdef bint* p_needByteSwap = &needByteSwap
@@ -576,7 +695,7 @@ def parseMPR_rawList(uint16_t recHeader, uint16_t pinCount, uint16_t rsltCount, 
 # ** Wrappers of standard sqlite3 functions ** #
 ################################################
 # close sqlite3 database
-cdef void csqlite3_close(sqlite3 *db):
+cdef void csqlite3_close(sqlite3 *db) except *:
     cdef int exitcode
     cdef const char *errMsg
 
@@ -587,7 +706,7 @@ cdef void csqlite3_close(sqlite3 *db):
 
 
 # open sqlite3 database
-cdef void csqlite3_open(str dbPath, sqlite3 **db_ptr):
+cdef void csqlite3_open(str dbPath, sqlite3 **db_ptr) except *:
     cdef bytes dbPath_utf8 = dbPath.encode('UTF-8')
     cdef char *fpath = dbPath_utf8
     cdef const char *errMsg
@@ -600,7 +719,7 @@ cdef void csqlite3_open(str dbPath, sqlite3 **db_ptr):
 
 
 # execute sqlite3 query
-cdef void csqlite3_exec(sqlite3 *db, const char *sql):
+cdef void csqlite3_exec(sqlite3 *db, const char *sql) except *:
     cdef int exitcode
     cdef char *errMsg
 
@@ -608,20 +727,19 @@ cdef void csqlite3_exec(sqlite3 *db, const char *sql):
     if exitcode != SQLITE_OK:
         raise Exception(errMsg.decode('UTF-8'))
 
-# *** The following sqlite3 funcs will be called massive times, 
-# *** use error code instead of python exception
 # prepare sqlite3 statement
-cdef int csqlite3_prepare_v2(sqlite3 *db, const char *Sql, sqlite3_stmt **ppStmt) nogil:
+cdef void csqlite3_prepare_v2(sqlite3 *db, const char *Sql, sqlite3_stmt **ppStmt) except *:
     cdef int exitcode
-    # cdef const char *errMsg
+    cdef const char *errMsg
 
     exitcode = sqlite3_prepare_v2(db, Sql, -1, ppStmt, NULL)
     if exitcode != SQLITE_OK:
-        return exitcode
-    else:
-        return 0
+        errMsg = sqlite3_errmsg(db)
+        raise Exception(errMsg.decode('UTF-8'))
 
 
+# *** The following sqlite3 funcs will be called massive times, 
+# *** use error code instead of python exception
 # execute sqlite3 statement and reset/clear
 cdef int csqlite3_step(sqlite3_stmt *stmt) nogil:
     cdef int exitcode
@@ -663,22 +781,6 @@ cdef int writeFailCount(void* sql_stmt, uint32_t TEST_NUM, uint32_t count) nogil
     return err
 
 # ** End of Callback ** #
-
-
-cdef uint64_t getFileSize(str filepath):
-    cdef uint64_t fsize
-
-    pyfh = open(filepath, "rb")
-
-    if filepath.endswith(".gz"):
-        # for gzip, read last 4 bytes as filesize
-        pyfh.seek(-4, 2)
-        fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
-    else:
-        # bzip file size is not known before uncompressing, return compressed file size instead
-        fsize = <uint64_t>(pyfh.seek(0, 2))
-    pyfh.close()
-    return fsize
 
 
 cdef class stdfSummarizer:
@@ -807,7 +909,7 @@ cdef class stdfSummarizer:
                                                                 FUNC_CNT INTEGER);
 
                                         CREATE TABLE IF NOT EXISTS Test_Info (
-                                                                TEST_NUM INTEGER PRIMARY KEY, 
+                                                                TEST_NUM INTEGER PRIMARY KEY DESC, /* break rowid alias */
                                                                 recHeader INTEGER,
                                                                 TEST_NAME TEXT,
                                                                 RES_SCAL INTEGER,
@@ -930,7 +1032,10 @@ cdef class stdfSummarizer:
             csqlite3_prepare_v2(self.db_ptr, insertTestPin, &self.insertTestPin_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertDynamicLimit, &self.insertDynamicLimit_stmt)
         except Exception:
-            csqlite3_close(self.db_ptr)
+            try:
+                csqlite3_close(self.db_ptr)
+            except Exception as e:
+                logger.error("Error when close database: " + repr(e))
             raise
 
         # get file size in Bytes
@@ -1093,6 +1198,7 @@ cdef class stdfSummarizer:
     def after_complete(self):
         cdef:
             uint32_t TEST_NUM, count
+            int errorCode
 
         self.reading = False
         # update failcount
@@ -1100,7 +1206,16 @@ cdef class stdfSummarizer:
         cdef sqlite3_stmt* updateFailCount_stmt
         csqlite3_prepare_v2(self.db_ptr, updateFailCount, &updateFailCount_stmt)
 
-        hashmap_iterate(self.TestFailCount, <PFany>writeFailCount, updateFailCount_stmt)
+        errorCode = hashmap_iterate(self.TestFailCount, <PFany>writeFailCount, updateFailCount_stmt)
+        if errorCode:
+            # log error if occurred, but do not raise it, it's not that important
+            if errorCode == MAP_MISSING:
+                # empty TestFailCount map
+                logger.warning("No test count information detect.")
+            else:
+                # sqlite error
+                logger.warning(f"Sqlite error when saving test count data: {sqlite3_errstr(errorCode)}")
+
         csqlite3_finalize(updateFailCount_stmt)
         
         cdef char* createIndex_COMMIT = '''CREATE INDEX dutKey ON Dut_Info (
