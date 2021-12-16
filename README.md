@@ -1,12 +1,39 @@
 # STDF Viewer <img src="screenshots/stdfViewer.png" height=50>
 
-[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/noonchen/STDF-Viewer.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/noonchen/STDF-Viewer/context:python)
+[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/noonchen/STDF-Viewer.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/noonchen/STDF-Viewer/context:python)  [![version](https://img.shields.io/github/v/release/noonchen/STDF-Viewer?include_prereleases)](https://github.com/noonchen/STDF-Viewer/releases/latest)  [![downloads](https://img.shields.io/github/downloads/noonchen/STDF-Viewer/total?label=total%20downloads)](https://github.com/noonchen/STDF-Viewer/releases)  [![license](https://img.shields.io/github/license/noonchen/STDF-Viewer)](https://github.com/noonchen/STDF-Viewer/blob/main/LICENSE)
 
 STDF Viewer is a free, fast and powerful GUI tool to visualize STDF (semiconductor Standard Test Data Format) data files.
 
 Devloped by Noon Chen <chennoon233@foxmail.com>
 
 <img src="screenshots/mainUI.png">
+
+## Table of Content
+- [**Usage**](#usage)
+  - [Open a STDF file](#open-a-stdf-file)
+  - [Find failed test items](#find-failed-test-items)
+  - [Looking for DUTs' info](#looking-for-duts-info)
+  - [Analyzing test data](#analyzing-test-data)
+      - [Test data](#test-data)
+      - [Trend chart](#trend-chart)
+      - [Histogram](#histogram)
+  - [Analyzing bin distribution](#analyzing-bin-distribution)
+  - [Viewing wafer maps](#viewing-wafer-maps)
+  - [Read complete test data of specific DUTs](#read-complete-test-data-of-specific-duts)
+      - [From `DUT Summary`](#from-dut-summary)
+      - [From `Test Summary`](#from-test-summary)
+      - [From `Trend Chart`](#from-trend-chart)
+      - [From `Histogram`](#from-histogram)
+      - [From `Bin Summary`](#from-bin-summary)
+      - [From `Wafer Map`](#from-wafer-map)
+  - [Generating a STDF report](#generating-a-stdf-report)
+  - [Settings](#settings)
+- [**Having issues?**](#having-issues)
+- [**Acknowledgements**](#acknowledgements)
+- [**License**](#license)
+- [**Download**](#download)
+- [**Contributions**](#contributions)
+
 
 ## Usage
 
@@ -46,7 +73,7 @@ DUTs' info can be sorted by any columns. For instance, the screenshot below show
 
 ### **Analyzing test data**
 
-***Importance Notice**: Functional Tests (FTR) have no test value, instead, the test flag is used as the test value for drawing trend charts and histograms; Multiple Parameter Tests (MPR) are currently not supported, because I don't have a STDF file contains MPR records to test :(*
+***Importance Notice**: Functional Tests (FTR) have no test value, instead, the test flag is used as the test value for drawing trend charts and histograms*
 
 All test items in the STDF file will be shown in the `Test Selection`, in which you can select single or multiple test item(s). The search box below can help you find test item(s) more easily.
 
@@ -58,88 +85,115 @@ Select test item(s) and then navigate to `Detailed Info` -> `Test Summary`. Each
 <img src="screenshots/test summary.png">
 
 #### **Trend chart**
-Display interactive trend charts of test item(s), y axis is the value of the test item, x axis is the index of DUTs that's been tested in selected head and site.
-
-Elements can be shown/hidden in `Settings`:
- - Upper limit
- - Lower limit
- - Mean line
- - Median line
+Display interactive trend charts of test item(s), y axis is the value of the test item, x axis is the index of DUTs that's been tested in selected head and site. You can hover over the point to show more information.
 
 <img src="screenshots/trend interactive.png">
 
-#### **Histogram**
-Display histograms of test item(s), x axis is the test value distribution, y axis is the DUT counts of each bin.
+If the test have PAT enabled, e.g. high/low limits in PTRs are changing over duts, the dynamic limits will be shown instead.
 
-Elements can be shown/hidden in `Settings`:
- - Upper limit
- - Lower limit
- - Mean line
- - Median line
- - σ lines
- - Gaussian curve
- - Boxplot
- - Color
+<img src="screenshots/trend dynamic limit.png">
+
+#### **Histogram**
+Display interactive histograms of test item(s), x axis is the test value distribution, y axis is the DUT counts of each bin. you can hover over the rectangle to display its data range and dut counts.
 
 <img src="screenshots/histo.png">
 
 <br>
 
-### **Read all test data of specific DUTs**
-In some cases, it would be helpful to see the detailed test results of some DUTs, as shown below. It can be achieved by several methods in the STDF Viewer.
-
-<img src="screenshots/dut data table.png">
-
-#### **In `DUT Summary`**
-Select row(s) of interest and right click, click `Read selected DUT data` in the context menu.
-
-<img src="screenshots/dut summary read dut data.png">
-
-#### **In `Test Summary`**
-Select cell(s) of interest and right click, click `Read selected DUT data` in the context menu.
-
-<img src="screenshots/test summary read dut data.png">
-
-#### **In `Trend Chart`**
-Click on the data point (or press `Shift` to select multiple), when the point(s) are marked by *`S`*, press `Enter` on the keyboard.
-
-<img src="screenshots/trend interactive 2.png">
-
-<br>
-
 ### **Analyzing bin distribution**
-Display histograms of hardware bin and software bin of selected heads and sites. 
+Display histograms of dut counts of each hardware bin and software bin in selected heads and sites. 
 
-`Test Statistic` displays the bin name, bin number and precentage, for the bins with DUT counts of 0 will be hidden.
+`Test Statistic` table displays the bin name, bin number and precentage, bins with DUT counts of 0 will be hidden.
 
 <img src="screenshots/bin.png">
 
 <br>
 
 ### **Viewing wafer maps**
-If STDF files contain wafer information (WIR, WRR records), the `Wafer Map` tab will be enabled.
+If STDF files contain wafer information (WIR, WRR records), the `Wafer Map` tab will be enabled. 
 
-<img src="screenshots/wafermap.png">
+There is a stacked wafer map at the top of `Wafer Selection` that summarizes the total count of fail dut in each (X, Y) coordinates of all wafermaps in the current file.
+
+<img src="screenshots/wafer stacked.png">
+
+Other entries in `Wafer Selection` represents the wafer maps in the file, color of each die is determined by its software bin.
+
+<img src="screenshots/wafer.png">
+
+<br>
+
+### **Read complete test data of specific DUTs**
+In some cases, it would be helpful to see the detailed test results of some DUTs, as shown below. It can be achieved by several methods in the STDF Viewer.
+
+<img src="screenshots/dut data table.png">
+
+#### **From `DUT Summary`**
+Select row(s) of interest and right click, click `Read selected DUT data` in the context menu.
+
+<img src="screenshots/dut summary read dut data.png">
+
+#### **From `Test Summary`**
+Select cell(s) of interest and right click, click `Read selected DUT data` in the context menu.
+
+<img src="screenshots/test summary read dut data.png">
+
+#### **From `Trend Chart`**
+Click on the data point (or press `Shift` to select multiple), when the point(s) are marked by *`S`*, press `Enter` on the keyboard.
+
+<img src="screenshots/trend interactive 2.png">
+
+#### **From `Histogram`**
+Click on the histogram rectangle (or press `Shift` to select multiple), selected rectangles will be marked in <span style="color:red">red</span> stroke, press `Enter` will list all duts whose test values lie in select range(s).
+
+<img src="screenshots/histo interactive.png">
+
+#### **From `Bin Summary`**
+Click on the bins of interest (or press `Shift` to select multiple), press `Enter` will show all duts in these bins.
+
+<img src="screenshots/bin interactive.png">
+
+#### **From `Wafer Map`**
+Click on the die(s), press `Enter` will show you duts in the selected (X, Y).
+
+<img src="screenshots/wafer interactive.png">
 
 <br>
 
 ### **Generating a STDF report**
 Almost all information displayed on STDF Viewer can be exported to a Excel report.
 
+<img src="screenshots/report content selection.png">
+<img src="screenshots/report test selection.png">
+<img src="screenshots/report site selection.png">
+
 Each checkbox in `Report Content Selection` will be saved in a individual sheet in the report. 
 
-The numbers of figures/data in the report are based on numbers of tests in `Export Tests` and selected Heads and Sites.
+- `File Info`: File properties and MIR + MRR inifo.
+- `DUT Summary`: Content in DUT Summary table, test data will be added if test items are selected.
+- `Trend Chart`: Trend Plot + Statistics.
+- `Histogram`: Histogram Plot + Statistics.
+- `Bin Chart`: Bin Plot + bin summary.
+- `Wafer Map`: All Wafermap Plots.
+- `Test Statistics`: Statistics of all selected test items.
 
-<img src="screenshots/exportUI.png">
+The numbers of figures/data in the report are based on numbers of tests in `Export Tests` and selected Heads and Sites.
 
 <br>
 
 ### **Settings**
-STDF Viewer offers a global setting, which can change the appearance of figures, colors of each sites/bins, etc. in STDF Viewer or the exported report. 
+STDF Viewer offers a global setting UI, which can change the appearance of figures, colors of each sites/bins, etc. in STDF Viewer or the exported report. 
 
 The description should be self-explanatory, feel free to play it around.
 
-<img src="screenshots/settingUI.png">
+<img src="screenshots/setting.png">
+
+
+## Having issues?
+If you have encountered any error, follow these steps to create a report:
+1. Open STDF-Viewer and click `About` in the top-right corner.<img src="screenshots/how to open debug panel.png">
+2. Click `debug` button to show the debug panel.<img src="screenshots/debug panel.png">
+3. Click `Display Log File` to print all the error logs on the screen; If the error is file-related, click `STDF Record Type Reader` and select the file that triggers the error.
+4. Click `Save Result` and create an issue on github.
 
 
 ## Acknowledgements
@@ -166,12 +220,10 @@ The icons that I designed for STDF Viewer is licensed under [Attribution-NonComm
 
 ## Download
 
-[I will take you to the download page.](https://github.com/noonchen/STDF-Viewer/releases)
+[Click here](https://github.com/noonchen/STDF-Viewer/releases)
 
 <br>
 
 ## Contributions
 
 Pull requests and bug reports are always welcomed. 
-
-If you have encountered any error (error dialog pops up), please create a new issue and upload the log (located in `logs` folder beside STDF Viewer executable).
