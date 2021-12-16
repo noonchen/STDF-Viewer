@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Thu Dec 16 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -166,7 +166,8 @@ class stdDebugPanel(QtWidgets.QDialog):
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"')
+            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
+                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
         else:                                   # linux variants
             subprocess.call(('xdg-open', filepath))        
             
@@ -176,7 +177,8 @@ class stdDebugPanel(QtWidgets.QDialog):
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', '-R', filepath))
         elif platform.system() == 'Windows':    # Windows
-            subprocess.Popen(f'explorer /select,"{filepath}"')
+            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
+                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
         else:                                   # linux variants
             subprocess.call(('xdg-open', os.path.dirname(filepath)))
             
