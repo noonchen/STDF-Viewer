@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Fri Dec 17 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -2331,7 +2331,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                             cpkList = [ele.split(": ")[-1] for ele in item.split("\n")]
                                             for cpkString in cpkList:
                                                 if cpkString != "N/A" and cpkString != "∞":
-                                                    if float(item) < self.settingParams.cpkThreshold:
+                                                    if float(cpkString) < self.settingParams.cpkThreshold:
                                                         qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                                                         qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
                                                         break
@@ -3086,6 +3086,9 @@ class MyWindow(QtWidgets.QMainWindow):
         [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
         # clear magic cursor as well, it contains copies of figures
         self.cursorDict = {}
+        self.selData = {}
+        self.preTestSelection = set()
+        self.preHeadSelection = set()
             
         gc.collect()
     
