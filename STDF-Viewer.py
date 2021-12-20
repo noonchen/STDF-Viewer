@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Dec 17 2021
+# Last Modified: Mon Dec 20 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -80,7 +80,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 # QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
-Version = "V3.2.0"
+Version = "V3.2.1"
 isMac = platform.system() == 'Darwin'
     
 # save config path to sys
