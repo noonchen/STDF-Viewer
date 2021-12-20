@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Mon Dec 20 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -147,6 +147,7 @@ class DatabaseFetcher:
                 sql = f'''SELECT {bin}, count({bin}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM GROUP by {bin}'''
                 
             for bin, count in self.cursor.execute(sql, sql_param):
+                if bin is None: continue
                 BinStats[bin] = count
         else:
             raise ValueError("Bin should be 'HBIN' or 'SBIN'")
@@ -219,7 +220,7 @@ class DatabaseFetcher:
             else:
                 dutFlagText = b"-"
                 
-            tmpRow = [partID if partID else b"MissingID", 
+            tmpRow = [partID if partID else b"-", 
                     b"Head %d - Site %d" % (head, site),
                     b"%d" % testCount if testCount is not None else b"-",
                     b"%d ms" % Testtime if Testtime is not None else b"-",
