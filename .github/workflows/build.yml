@@ -42,6 +42,9 @@ jobs:
           zipBall: true
           out-file-path: "downloads"
           
+      - name: Get appdmg for dmg build
+        run: npm install -g appdmg
+          
       - name: Install Numpy-No-ACC-Pack
         run: |
           cd downloads/
@@ -101,9 +104,6 @@ jobs:
         run: |
           rm -rf "./dist/STDF-Viewer"
           python build_tools/clean.py
-
-      - name: Get appdmg for dmg build
-        run: npm install -g appdmg
 
       - name: Build dmg package
         run: |
