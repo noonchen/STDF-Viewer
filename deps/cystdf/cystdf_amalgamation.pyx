@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Thu Dec 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -618,9 +618,9 @@ def parseMPR_rawList(uint16_t recHeader, uint16_t pinCount, uint16_t rsltCount, 
 
     # data containers & views for nogil operation
     # Pin as row, dut as column
-    cdef cnp.ndarray[NPINT_t, ndim=2] statesList = np.full([pinCount, cnt], 16, dtype=NPINT)  # use 0xF as the invalid states
+    cdef cnp.ndarray[NPINT_t, ndim=2] statesList = np.full([pinCount, cnt], 16, dtype=NPINT)  # use 0x10 as the invalid states
     cdef cnp.ndarray[NPFLOAT_t, ndim=2] dataList = np.full([rsltCount, cnt], NAN, dtype=NPFLOAT)
-    cdef cnp.ndarray[NPINT_t, ndim=1] flagList = np.zeros(cnt, dtype=NPINT)
+    cdef cnp.ndarray[NPINT_t, ndim=1] flagList = np.full(cnt, -1, dtype=NPINT)      # init flag with invalid -1 value
     cdef NPINT_t   [:,:] statesList_view = statesList
     cdef NPFLOAT_t [:,:] dataList_view = dataList
     cdef NPINT_t   [:] flagList_view = flagList
@@ -667,21 +667,23 @@ def parseMPR_rawList(uint16_t recHeader, uint16_t pinCount, uint16_t rsltCount, 
             parse_record(&pRec, recHeader, &rawDataView[i,0], lengthArray[i])
 
             flagList_view[i] = (<MPR*>pRec).TEST_FLG
-            for j in range(pinCount):
-                # write MPR states into ith column of statesList
-                statesList_view[j, i] = ((<MPR*>pRec).RTN_STAT)[j]
+            if (<MPR*>pRec).RTN_STAT != NULL:
+                for j in range(pinCount):
+                    # write MPR states into ith column of statesList
+                    statesList_view[j, i] = ((<MPR*>pRec).RTN_STAT)[j]
             
-            for j in range(rsltCount):
-                # write MPR data into ith column of dataList
-                infType = isinf(((<MPR*>pRec).RTN_RSLT)[j])
-                if infType > 0:
-                    # replace +inf with max float
-                    dataList_view[j, i] = FLT_MAX
-                elif infType < 0:
-                    # replace -inf with min float
-                    dataList_view[j, i] = FLT_MIN
-                else:
-                    dataList_view[j, i] = ((<MPR*>pRec).RTN_RSLT)[j]
+            if (<MPR*>pRec).RTN_RSLT != NULL:
+                for j in range(rsltCount):
+                    # write MPR data into ith column of dataList
+                    infType = isinf(((<MPR*>pRec).RTN_RSLT)[j])
+                    if infType > 0:
+                        # replace +inf with max float
+                        dataList_view[j, i] = FLT_MAX
+                    elif infType < 0:
+                        # replace -inf with min float
+                        dataList_view[j, i] = FLT_MIN
+                    else:
+                        dataList_view[j, i] = ((<MPR*>pRec).RTN_RSLT)[j]
             
             free_record(recHeader, pRec)
             pRec = NULL
@@ -922,7 +924,8 @@ cdef class stdfSummarizer:
                                                                 RTN_ICNT INTEGER,
                                                                 RSLT_PGM_CNT INTEGER,
                                                                 LSpec REAL,
-                                                                HSpec REAL);
+                                                                HSpec REAL,
+                                                                VECT_NAM TEXT);
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
@@ -988,7 +991,7 @@ cdef class stdfSummarizer:
             # I am not adding IGNORE below, since tracking seen test_nums can skip a huge amount of codes
             const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_NUM, :recHeader, :TEST_NAME, 
                                                                         :RES_SCAL, :LLimit, :HLimit, 
-                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec);'''
+                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec, :VECT_NAM);'''
             const char* insertHBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("H", :HBIN_NUM, :HBIN_NAME, :PF);'''
             # const char* updateHBIN = '''UPDATE Bin_Info SET BIN_NAME=:HBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="H" AND BIN_NUM=:HBIN_NUM'''
             const char* insertSBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("S", :SBIN_NUM, :SBIN_NAME, :PF);'''
@@ -1679,6 +1682,7 @@ cdef class stdfSummarizer:
             float LLimit = 0, HLimit = 0, LSpec = 0, HSpec = 0
             bint No_RES_SCAL = False, No_LLimit = False, No_HLimit = False, No_HSpec = False, No_LSpec = False
             bint LLimitChanged = False, HLimitChanged = False
+            char* VECT_NAM = NULL
             char* TEST_TXT
             char* Unit
             uint16_t*   pRTN_INDX = NULL   # For FTR & MPR
@@ -1725,6 +1729,7 @@ cdef class stdfSummarizer:
                 RSLT_PGM_CNT= (<FTR*>self.pRec).PGM_ICNT
                 pRTN_INDX   = (<FTR*>self.pRec).RTN_INDX
                 pPGM_INDX   = (<FTR*>self.pRec).PGM_INDX
+                VECT_NAM    = (<FTR*>self.pRec).VECT_NAM
 
             elif recHeader == REC_PTR:
                 TEST_TXT    = (<PTR*>self.pRec).TEST_TXT
@@ -1789,6 +1794,8 @@ cdef class stdfSummarizer:
                     sqlite3_bind_double(self.insertTestInfo_stmt, 12, LSpec)            # LSpec
                 if not No_HSpec:
                     sqlite3_bind_double(self.insertTestInfo_stmt, 13, HSpec)            # LSpec
+                if not VECT_NAM == NULL:
+                    sqlite3_bind_text(self.insertTestInfo_stmt, 14, VECT_NAM, -1, NULL) # VECT_NAM
                     
                 err = csqlite3_step(self.insertTestInfo_stmt)
 

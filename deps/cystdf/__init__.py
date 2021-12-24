@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 25th 2021
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Mon Dec 20 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -40,11 +40,11 @@ def stdfRecordAnalyzer(filepath:str, QSignal:object=None, QSignalPgs:object=None
     return _cystdf.analyzeSTDF(filepath, QSignal, QSignalPgs, stopFlag)
 
 def stdf_PFTR_Parser(recHeader:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
-    '''For PTR & FTR only'''
+    '''For PTR & FTR only, keys: {dataList, flagList}'''
     return _cystdf.parsePFTR_rawList(recHeader, offsetArray, lengthArray, file_handle)
 
 def stdf_MPR_Parser(recHeader:int, pinCount:int, rsltCount:int, offsetArray:np.ndarray, lengthArray:np.ndarray, file_handle) -> dict:
-    '''For MPR only'''
+    '''For MPR only, keys: {dataList, statesList, flagList}'''
     return _cystdf.parseMPR_rawList(recHeader, pinCount, rsltCount, offsetArray, lengthArray, file_handle)
 
 def setByteSwap(swapOn:bool):

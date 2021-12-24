@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Dec 20 2021
+# Last Modified: Fri Dec 24 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -68,9 +68,27 @@ class DatabaseFetcher:
             
         self.connection.text_factory = str
         TestList = []
-        for row in self.cursor.execute("SELECT TEST_NUM, TEST_NAME from Test_Info ORDER by ROWID"):
-            TestList.append(f"{row[0]}\t{row[1]}")
+        for TEST_NUM, TEST_NAME, PMR_INDX in self.cursor.execute("SELECT Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX \
+                                                                 FROM Test_Info \
+                                                                 LEFT JOIN TestPin_Map on Test_Info.TEST_NUM = TestPin_Map.TEST_NUM\
+                                                                 ORDER by Test_Info.ROWID, TestPin_Map.ROWID"):
+            if isinstance(PMR_INDX, int):
+                # Create test items for each pin in MPR data
+                TestList.append(f"{TEST_NUM}\t#{PMR_INDX}\t{TEST_NAME}")
+            else:
+                TestList.append(f"{TEST_NUM}\t{TEST_NAME}")
         return TestList
+    
+    
+    def getTestRecordTypeDict(self):
+        # return MPR test numbers
+        if self.cursor is None: raise RuntimeError("No database is connected")
+            
+        self.connection.text_factory = str
+        recTypeDict = {}
+        for TEST_NUM, recHeader in self.cursor.execute("SELECT TEST_NUM, recHeader FROM Test_Info"):
+            recTypeDict[TEST_NUM] = recHeader
+        return recTypeDict
     
     
     def getWaferList(self):
@@ -109,13 +127,31 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         self.connection.text_factory = str        
-        
-        pinNameDict = {"PMR": [], "LOG_NAM": []}
-        sql = "SELECT DISTINCT PMR_INDX, LOG_NAM FROM Pin_Map WHERE PMR_INDX in (SELECT PMR_INDX FROM TestPin_Map WHERE TEST_NUM=? AND PIN_TYPE=?)"
+        # note: channel name is head-site dependent
+        pinNameDict = {"PMR": [], "LOG_NAM": [], "PHY_NAM": [], "CHAN_NAM": {}}
+        # must keep orignal order of PMR index, it's related to the order of values
+        sql = "SELECT A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM FROM \
+            (SELECT  PMR_INDX FROM TestPin_Map WHERE TEST_NUM=? AND PIN_TYPE=? ORDER by ROWID) as A \
+            INNER JOIN \
+            Pin_Map on A.PMR_INDX = Pin_Map.PMR_INDX"
         sqlResult = self.cursor.execute(sql, [testNum, pinType])
-        for pmr_index, logic_name in sqlResult:
-            pinNameDict["PMR"].append(pmr_index)
-            pinNameDict["LOG_NAM"].append("No pin name" if logic_name is None else logic_name)
+        for pmr_index, physical_name, logic_name, HEAD_NUM, SITE_NUM, channel_name in sqlResult:
+            LOG_NAM = "" if logic_name is None else logic_name
+            PHY_NAM = "" if physical_name is None else physical_name
+            CHAN_NAM = "" if channel_name is None else channel_name
+            # same pmr will loop multiple times in multi-site file, use it to detect duplicates
+            # don't use XXX_NAM, since it might be "" even if PMR is different
+            duplicate = pmr_index in pinNameDict["PMR"]
+            
+            if not duplicate:
+                pinNameDict["PMR"].append(pmr_index)
+                pinNameDict["LOG_NAM"].append(LOG_NAM)
+                pinNameDict["PHY_NAM"].append(PHY_NAM)
+            # channel name is vary from site to site
+            if not (HEAD_NUM, SITE_NUM) in pinNameDict["CHAN_NAM"]:
+                pinNameDict["CHAN_NAM"][(HEAD_NUM, SITE_NUM)] = [CHAN_NAM]
+            else:
+                pinNameDict["CHAN_NAM"][(HEAD_NUM, SITE_NUM)].append(CHAN_NAM)
             
         return pinNameDict
     
@@ -239,7 +275,8 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         statsDict = {"Total": 0, "Pass": 0, "Failed": 0, "Unknown": 0}
-        for flag, count in self.cursor.execute("SELECT Flag, count(Flag) FROM Dut_Info GROUP by Flag"):
+        # use count(*) instead of count(Flag) to count NULL values
+        for flag, count in self.cursor.execute("SELECT Flag, count(*) FROM Dut_Info GROUP by Flag"):
             flag = flag if isinstance(flag, int) else 0x10    # 0x10 == No pass/fail indication, force to be Unknown if flag is NAN
             dutStatus = getStatus(flag)
             statsDict[dutStatus] = statsDict[dutStatus] + count
@@ -285,46 +322,6 @@ class DatabaseFetcher:
         testInfo.update({"Offset": tmp_oft, "BinaryLen": tmp_biL})
         return testInfo
     
-    
-    def getTestInfo_selDUTs(self, testNum:int, selDUTs:list[int]) -> dict:
-        # return test info of selected duts in the database, including offsets and length in stdf file.
-        if self.cursor is None: raise RuntimeError("No database is connected")
-        
-        testInfo = {}
-        # get test item's additional info
-        self.connection.text_factory = str
-        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=?", [testNum])
-        col = [tup[0] for tup in self.cursor.description]
-        val = self.cursor.fetchone()
-        testInfo.update(zip(col, val))
-        
-        # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
-        if len(selDUTs) == 0:
-            testInfo.update({"Offset": np.array([]), "BinaryLen": np.array([])})
-            return testInfo
-        
-        dutCnt = len(selDUTs)
-        # get offset & length, insert -1 if testNum is not presented in a DUT
-        tmpContainer = dict(zip( selDUTs, [[-1, -1]] * dutCnt))
-        # BUG? parameter substitution is not working, use unsafe method instead
-        # sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets WHERE TEST_NUM=? AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join(["?"] * dutCnt))
-        # sql_param = [testNum, *selDUTs]
-        
-        sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets WHERE TEST_NUM=? AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join([str(i) for i in selDUTs]))
-        sql_param = [testNum]
-        # fill in the sql result in a dict where key=dutIndex, value= offset & length        
-        for ind, oft, biL in self.cursor.execute(sql, sql_param):
-            tmpContainer[ind] = [oft, biL]
-
-        tmp_oft = np.empty(dutCnt, dtype=np.int64)
-        tmp_biL = np.empty(dutCnt, dtype=np.int32)
-        
-        for i, ind in enumerate(selDUTs):
-            tmp_oft[i], tmp_biL[i] = tmpContainer[ind]
-        
-        testInfo.update({"Offset": tmp_oft, "BinaryLen": tmp_biL})
-        return testInfo
-
     
     def getWaferBounds(self):
         if self.cursor is None: raise RuntimeError("No database is connected")
