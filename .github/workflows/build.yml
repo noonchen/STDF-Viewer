@@ -232,17 +232,18 @@ jobs:
           # add a patch to cygwinccompiler.py
           python -c "import os, distutils, string; cypath=os.path.join(os.path.dirname(distutils.__file__), 'cygwinccompiler.py'); patchpath=os.path.join('.github', 'workflows', 'cy.patch'); command='patch -u '+cypath+' '+patchpath; os.system(command)"
 
-      - uses: suisei-cn/actions-download-file@v1
-        id: numpy_vanilla
-        name: Download numpy vanilla
-        with:
-          url: "https://download.lfd.uci.edu/pythonlibs/w6tyco5e/numpy-1.21.4+vanilla-cp39-cp39-win_amd64.whl"
-          target: "mydownloads"
+      # - uses: suisei-cn/actions-download-file@v1
+      #   id: numpy_vanilla
+      #   name: Download numpy vanilla
+      #   with:
+      #     url: "https://download.lfd.uci.edu/pythonlibs/w6tyco5e/numpy-1.21.4+vanilla-cp39-cp39-win_amd64.whl"
+      #     target: "mydownloads"
 
       - name: Install numpy vanilla
         run: |
-          cd mydownloads
-          pip install ${{steps.numpy_vanilla.outputs.filename}}
+          # cd mydownloads
+          # pip install ${{steps.numpy_vanilla.outputs.filename}}
+          pip install .github/workflows/numpy-1.21.5+vanilla-cp39-cp39-win_amd64.whl
       
       - name: Install dependencies
         run: |

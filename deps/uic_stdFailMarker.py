@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Nov 03 2021
+# Last Modified: Thu Dec 23 2021
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -70,9 +70,9 @@ class FailMarker(QtWidgets.QWidget):
             QApplication.processEvents()    # force refresh UI to update progress bar
             
             qitem = self.sim.item(i)
-            test_num = int(qitem.text().split("\t")[0])
+            test_num, pmr = self.parent.getTestNumTup(qitem.text())
             
-            status = self.parent.isTestFail(test_num)
+            status = self.parent.isTestFail(test_num, pmr)
             if status == "testFailed":
                 failCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
