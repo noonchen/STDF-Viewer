@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Fri Dec 24 2021
+# Last Modified: Tue Jan 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -28,6 +28,22 @@ import numpy as np
 
 getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "Unknown")
 
+
+def tryDecode(b: bytes) -> str:
+    '''Try to decode bytes into string using limited codesets'''
+    # try decode with utf-8, compatible with ascii
+    try:
+        return b.decode('utf_8')
+    except UnicodeDecodeError:
+        pass
+    # try decode with windows-1252, compatible with latin1
+    try:
+        return b.decode('cp1252')
+    except UnicodeDecodeError:
+        # decode with utf-8 and replace any unrecognized characters
+        return b.decode(errors="replace")
+
+
 class DatabaseFetcher:
     def __init__(self):
         self.connection = None
@@ -37,11 +53,8 @@ class DatabaseFetcher:
     
     def connectDB(self, dataBasePath):
         self.closeDB()
-        diskDB = sqlite3.connect(dataBasePath)
-        self.connection = sqlite3.connect(":memory:")
-        # move disk database to memory for faster access
-        diskDB.backup(self.connection)
-        diskDB.close()
+        self.connection = sqlite3.connect(dataBasePath)
+        self.connection.text_factory = tryDecode
         self.cursor = self.connection.cursor()
         
     
@@ -66,7 +79,6 @@ class DatabaseFetcher:
         # return test_num + testname list in db, keep original order here, do not ordered by test_num
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str
         TestList = []
         for TEST_NUM, TEST_NAME, PMR_INDX in self.cursor.execute("SELECT Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX \
                                                                  FROM Test_Info \
@@ -84,7 +96,6 @@ class DatabaseFetcher:
         # return MPR test numbers
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str
         recTypeDict = {}
         for TEST_NUM, recHeader in self.cursor.execute("SELECT TEST_NUM, recHeader FROM Test_Info"):
             recTypeDict[TEST_NUM] = recHeader
@@ -95,7 +106,6 @@ class DatabaseFetcher:
         # return waferIndex + waferID list in db ordered by waferIndex
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str
         WaferList = ["-\tStacked Wafer Map"]
         for row in self.cursor.execute("SELECT WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
             WaferList.append(f"#{row[0]}\t{row[1]}")
@@ -126,7 +136,6 @@ class DatabaseFetcher:
         # return a list of dicts contains bin info
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str        
         # note: channel name is head-site dependent
         pinNameDict = {"PMR": [], "LOG_NAM": [], "PHY_NAM": [], "CHAN_NAM": {}}
         # must keep orignal order of PMR index, it's related to the order of values
@@ -160,7 +169,6 @@ class DatabaseFetcher:
         # return a list of dicts contains bin info
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str
         if bin == "HBIN" or bin == "SBIN":
             BinInfoDict = {}
             for BIN_NUM, BIN_NAME, BIN_PF in self.cursor.execute('''SELECT BIN_NUM, BIN_NAME, BIN_PF FROM Bin_Info WHERE BIN_TYPE = ? ORDER by BIN_NUM''', bin[0]):
@@ -194,7 +202,6 @@ class DatabaseFetcher:
         # return MIR & WCR field-value dict
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        self.connection.text_factory = str
         MIR_Info = {}
         for field, value in self.cursor.execute("SELECT * FROM File_Info"):
             MIR_Info[field] = value
@@ -242,9 +249,6 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         dutInfoDict = {}
-        sqlResult = None
-        
-        self.connection.text_factory = bytes
         sql = "SELECT * FROM Dut_Info ORDER by DUTIndex"
         sqlResult = self.cursor.execute(sql)
         
@@ -252,19 +256,19 @@ class DatabaseFetcher:
             # if PRR of certain DUTs is missing, testCount... will all be None
             if isinstance(prrFlag, int):
                 prrStat = getStatus(prrFlag) 
-                dutFlagText = f"{prrStat} - 0x{prrFlag:02x}".encode()
+                dutFlagText = f"{prrStat} - 0x{prrFlag:02X}"
             else:
-                dutFlagText = b"-"
+                dutFlagText = "-"
                 
-            tmpRow = [partID if partID else b"-", 
-                    b"Head %d - Site %d" % (head, site),
-                    b"%d" % testCount if testCount is not None else b"-",
-                    b"%d ms" % Testtime if Testtime is not None else b"-",
-                    b"Bin %d" % hbin if hbin is not None else b"-",
-                    b"Bin %d" % sbin if sbin is not None else b"-",
-                    b"%d" % waferIndex if waferIndex is not None else b"-",
-                    b"(%d, %d)" % (xcoord, ycoord) if not (xcoord is None or ycoord is None) else b"-",
-                    dutFlagText]
+            tmpRow = (partID if partID else "-",
+                      "Head %d - Site %d" % (head, site),
+                      "%d" % testCount if testCount is not None else "-",
+                      "%d ms" % Testtime if Testtime is not None else "-",
+                      "Bin %d" % hbin if hbin is not None else "-",
+                      "Bin %d" % sbin if sbin is not None else "-",
+                      "%d" % waferIndex if waferIndex is not None else "-",
+                      "(%d, %d)" % (xcoord, ycoord) if not (xcoord is None or ycoord is None) else "-",
+                      dutFlagText)
             dutInfoDict[DUTIndex] = tmpRow
             
         return dutInfoDict
@@ -291,7 +295,6 @@ class DatabaseFetcher:
         testInfo = {}
         sqlResult = None
         # get test item's additional info
-        self.connection.text_factory = str
         self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=?", [testNum])
         col = [tup[0] for tup in self.cursor.description]
         val = self.cursor.fetchone()
@@ -335,7 +338,6 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         waferDict = {}     # key: waferIndex, value: {"WAFER_ID"}
-        self.connection.text_factory = str
         sqlResult = self.cursor.execute("SELECT * FROM Wafer_Info ORDER by WaferIndex")
         col = [tup[0] for tup in self.cursor.description]   # column names
         waferIndex_pos = col.index("WaferIndex")

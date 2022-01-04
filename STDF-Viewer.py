@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Dec 24 2021
+# Last Modified: Tue Jan 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -874,7 +874,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.failCntDict = {}
         self.dutArray = np.array([])    # complete dut array in the stdf
         self.dutSiteInfo = {}           # site of each dut in self.dutArray
-        self.dutSummaryDict = {}        # complete dut summary dict
         self.fileInfoDict = {}          # info of MIR and WCR
         self.dutFlagBitInfo = {}        # description of dut flag
         self.testFlagBitInfo = {}       # description of test flag
@@ -1237,20 +1236,20 @@ class MyWindow(QtWidgets.QMainWindow):
         return dataTips
     
     
-    def genQItemList(self, dutSumList: list[bytes]) -> list:
-        '''Convert a bytes list to a QStandardItem list'''
+    def genQItemList(self, dutSumList: list[str]) -> list[QtGui.QStandardItem]:
+        '''Convert a str list to a QStandardItem list'''
         qitemRow = []
         fontsize = 13 if isMac else 10
-        dutStatus, dutFlagString = dutSumList[-1].split(b"-")
-        dutFail = dutStatus.startswith(b"Failed")
-        dutUnknown = (dutStatus == b"" or dutStatus.startswith(b"Unknown"))
+        dutStatus, dutFlagString = dutSumList[-1].split("-")
+        dutFail = dutStatus.startswith("Failed")
+        dutUnknown = (dutStatus == "" or dutStatus.startswith("Unknown"))
         flagInfo = self.dut_flag_parser(dutFlagString)
         
         for item in dutSumList:
-            qitem = QtGui.QStandardItem(item.decode("utf-8"))
+            qitem = QtGui.QStandardItem(item)
             qitem.setTextAlignment(QtCore.Qt.AlignCenter)
             qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-            qitem.setData(QtGui.QFont("Tahoma", fontsize), QtCore.Qt.FontRole)
+            qitem.setData(QtGui.QFont(self.imageFont, fontsize), QtCore.Qt.FontRole)
             # mark red when failed
             if dutFail: 
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
@@ -1264,6 +1263,17 @@ class MyWindow(QtWidgets.QMainWindow):
             qitemRow.append(qitem)
         return qitemRow
 
+    
+    def getDutSummaryOfIndex(self, dutIndex: int) -> list[str]:
+        row = dutIndex - 1
+        dutSumList = [self.tmodel_dut.data(self.tmodel_dut.index(row, col)) for col in range(self.tmodel_dut.columnCount())]
+        if self.containsWafer:
+            return dutSumList
+        else:
+            # insert empty waferIndex & (X,Y) before DUT Flag
+            dutSumList[-1:-1] = ["-", "-"]
+            return dutSumList
+    
     
     def showDutDataTable(self, dutIndexes:list):
         self.dutDataReader.setDutIndexes(dutIndexes)
@@ -1374,7 +1384,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # Append Part ID head & site to the table
             selectedDUTs = self.dutArray[currentMask]
             for dutIndex in selectedDUTs:
-                qitemRow = self.genQItemList(self.dutSummaryDict[dutIndex])
+                qitemRow = self.genQItemList(self.getDutSummaryOfIndex(dutIndex))
                 id_head_site = [qitemRow[i] for i in range(len(hheaderLabels))]     # index0: ID; index1: Head/Site
                 self.tmodel_raw.appendRow(id_head_site)
             # row header
@@ -1659,10 +1669,12 @@ class MyWindow(QtWidgets.QMainWindow):
         # load all duts info into the table, dutArray is ordered and consecutive
         keyPoints = list(range(5, 106, 5))
         self.updateStatus(self.tr("Please wait, reading DUT information..."))
+        # get complete dut summary dict from stdf
+        dutSummaryDict = self.DatabaseFetcher.getDUT_Summary()
         
         for dutIndex in self.dutArray:
-            itemRow = self.dutSummaryDict[dutIndex] if self.containsWafer else \
-                self.dutSummaryDict[dutIndex][0:-3]+[self.dutSummaryDict[dutIndex][-1]]
+            itemRow = dutSummaryDict[dutIndex] if self.containsWafer else \
+                dutSummaryDict[dutIndex][0:-3]+(dutSummaryDict[dutIndex][-1],)
             self.tmodel_dut.appendRow(self.genQItemList(itemRow))
             
             progress = 100 * dutIndex / totalDutCnt
@@ -2032,8 +2044,14 @@ class MyWindow(QtWidgets.QMainWindow):
                 else:
                     # get from selectDUTs
                     for dutIndex in selectDUTs:
-                        headstring, sitestring = self.dutSummaryDict[dutIndex][1].split(b"-")
-                        pinNameKeys.add( (int(headstring.strip(b"Head ")), int(sitestring.strip(b"Site "))) )
+                        arrIndex = dutIndex - 1     # dutIndex starts from 1
+                        for h, siteL in self.dutSiteInfo.items():
+                            # get site number of dutIndex
+                            s = siteL[arrIndex]
+                            if not np.isnan(s):
+                                # if site number is valid, means dutIndex is in (h, s)
+                                pinNameKeys.add( (h, s) )
+                                break
                 ChanNames = []
                 for hskey in pinNameKeys:
                     if hskey in channelNameDict:
@@ -2343,7 +2361,7 @@ class MyWindow(QtWidgets.QMainWindow):
             selectedDUTs = self.dutArray[currentMask]
             for dutIndex in selectedDUTs:
                 # decode bytes to str
-                result.append(list(map(lambda b: b.decode("utf-8"), self.dutSummaryDict[dutIndex])))
+                result.append(self.getDutSummaryOfIndex(dutIndex))
 
         return result
         
@@ -2791,7 +2809,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # blended transformation
             transXdYa = matplotlib.transforms.blended_transform_factory(ax.transData, ax.transAxes)
             # vertical lines for n * σ
-            sigmaList = [int(i) for i in self.settingParams.showSigma.split(",")]
+            sigmaList = [] if self.settingParams.showSigma == "" else [int(i) for i in self.settingParams.showSigma.split(",")]
             for n in sigmaList:
                 position_pos = avg + sd * n
                 position_neg = avg - sd * n
@@ -3131,8 +3149,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
             # get dutArray and its site info
             self.dutArray, self.dutSiteInfo = self.DatabaseFetcher.getDUT_SiteInfo()
-            # get complete dut summary dict from stdf
-            self.dutSummaryDict = self.DatabaseFetcher.getDUT_Summary()
             
             self.settingUI.removeColorBtns()               # remove existing color btns
             self.settingUI.initColorBtns()
