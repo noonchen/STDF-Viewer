@@ -140,7 +140,7 @@ jobs:
         name: Download latest numpy source
         with: 
           repository: "numpy/numpy"
-          latest: true
+          tag: "v1.21.5"
           zipBall: true
           out-file-path: "downloads"
           
