@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Tue Dec 21 2021
+# Last Modified: Tue Jan 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -80,9 +80,9 @@ class DutDataReader(QtWidgets.QWidget):
         
         self.test_number_tuple_List = [self.parent.getTestNumTup(ele) for ele in self.parent.completeTestList]
         self.total = len(self.test_number_tuple_List)
-        dutInfo = [self.parent.dutSummaryDict[i] for i in self.selectedDutIndex]
+        dutInfo = [self.parent.getDutSummaryOfIndex(i) for i in self.selectedDutIndex]
         # get dut flag info for showing tips
-        dutFlagAsString = [dutSumList[-1].split(b"-")[-1] for dutSumList in dutInfo]
+        dutFlagAsString = [dutSumList[-1].split("-")[-1] for dutSumList in dutInfo]
         dutFlagInfo = [self.parent.dut_flag_parser(ele) for ele in dutFlagAsString]
         # test data section
         dutData = []
@@ -168,19 +168,19 @@ class dutDataDisplayer(QtWidgets.QDialog):
         # get dut pass/fail list
         statIndex = self.hh.index(self.tr("DUT Flag"))
         self.dutFlagInfo = [""] * vh_len + self.dutFlagInfo     # prepend empty tips for non-data cell
-        dutStatus = [b"P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
+        dutStatus = ["P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
         for col_tuple in zip(*self.dutInfo):
-            tmpCol = [b""] * vh_len + list(col_tuple)
+            tmpCol = [""] * vh_len + list(col_tuple)
             qitemCol = []
             for i, (item, flagCap, dutTip) in enumerate(zip(tmpCol, dutStatus, self.dutFlagInfo)):
-                qitem = QtGui.QStandardItem(item.decode("utf-8"))
+                qitem = QtGui.QStandardItem(item)
                 qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                 qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
                 # use first letter to check dut status
-                if flagCap == b"P":
+                if flagCap == "P":
                     pass
-                elif flagCap == b"F": 
+                elif flagCap == "F": 
                     qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                     qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
                 else:
@@ -188,7 +188,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
                     qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
                 if dutTip != "":
                     qitem.setToolTip(dutTip)
-                qitemCol.append(qitem)                        
+                qitemCol.append(qitem)
             self.tmodel.appendColumn(qitemCol)
         
         for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.testFlagInfo):
