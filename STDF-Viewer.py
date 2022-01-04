@@ -2050,7 +2050,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             s = siteL[arrIndex]
                             if not np.isnan(s):
                                 # if site number is valid, means dutIndex is in (h, s)
-                                pinNameKeys.add( (h, s) )
+                                pinNameKeys.add( (h, int(s)) )
                                 break
                 ChanNames = []
                 for hskey in pinNameKeys:
