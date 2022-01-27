@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 11th 2021
  * -----
- * Last Modified: Wed Sep 15 2021
+ * Last Modified: Wed Jan 26 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "stdf4_types.h"
+#include <stdio.h>
 
 
 int needByteSwap;
@@ -205,7 +206,7 @@ void read_Cn(Cn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
     };
 }
 
-void read_Bn(Bn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+void read_Bn(Bn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos, uint16_t* byteCnt) {
     U1 count = 0;
     // clear contents
     memset(*desptr, 0, sizeof(*desptr));
@@ -213,6 +214,8 @@ void read_Bn(Bn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
     if (*pos < binaryLen) {
         // read count
         count = rawData[*pos];
+        // save count to byteCnt if it's not NULL
+        if (byteCnt) { *byteCnt = (uint16_t)count; }
         (*pos) += sizeof(U1);
         if (count) {
             // read string if count is not 0
@@ -220,9 +223,12 @@ void read_Bn(Bn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
             (*pos) += count;
         }
     }
+    else {
+        if (byteCnt) { *byteCnt = 0; }
+    }
 }
 
-void read_Dn(Dn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+void read_Dn(Dn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos, uint16_t* byteCnt) {
     U2 bitcount = 0;
     U2 bytecount = 0;
     // clear contents
@@ -236,11 +242,17 @@ void read_Dn(Dn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
         }
         (*pos) += sizeof(U2);
         bytecount = (bitcount/8 + bitcount%8);
+        // save count to byteCnt if it's not NULL
+        if (byteCnt) { *byteCnt = bytecount; }
+        
         if (bytecount != 0 && (*pos + bytecount <= binaryLen)) {
             // read data if bytecount is not 0 AND remaining bytes are enough
             memcpy(*desptr, &rawData[*pos], bytecount);
             (*pos) += bytecount;
         }
+    }
+    else {
+        if (byteCnt) { *byteCnt = 0; }
     }
 }
 
@@ -362,52 +374,89 @@ void read_V1(V1** desptr, const unsigned char* rawData, uint16_t binaryLen, uint
         return;
     } else {
         // read 1 byte as the type code
-        (*desptr)->type = (V1_type)rawData[*pos];   // force cast byte to V1 type
-        (*pos) += 1;
+        if (*pos < binaryLen) {
+            (*desptr)->dataType = rawData[*pos];   // force cast byte to V1 type
+            (*pos) += 1;
+        }
+        else {
+            (*desptr)->dataType = 0xF;   // 0xF is an invalid data type
+        }
 
         void **pData = &((*desptr)->data);         // pointer to V1's data
-        switch ((*desptr)->type)
+        switch ((*desptr)->dataType)
         {   // get pointer to void* data and convert it to corresponding type*
             case GDR_B0: 
-                *pData = malloc(sizeof(B1));
-                if (*pData) {read_B1((B1*)(*pData), rawData, binaryLen, pos); break;}
+                // B0 is for padding only
+                *pData = NULL;
+                (*desptr)->byteCnt = 0; 
+                break;
             case GDR_U1: 
                 *pData = malloc(sizeof(U1));
-                if (*pData) {read_U1((U1*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 1;
+                if (*pData) {read_U1((U1*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_U2: 
                 *pData = malloc(sizeof(U2));
-                if (*pData) {read_U2((U2*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 2;
+                if (*pData) {read_U2((U2*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_U4: 
                 *pData = malloc(sizeof(U4));
-                if (*pData) {read_U4((U4*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 4;
+                if (*pData) {read_U4((U4*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_I1: 
                 *pData = malloc(sizeof(I1));
-                if (*pData) {read_I1((I1*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 1;
+                if (*pData) {read_I1((I1*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_I2: 
                 *pData = malloc(sizeof(I2));
-                if (*pData) {read_I2((I2*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 2;
+                if (*pData) {read_I2((I2*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_I4: 
                 *pData = malloc(sizeof(I4));
-                if (*pData) {read_I4((I4*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 4;
+                if (*pData) {read_I4((I4*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_R4: 
                 *pData = malloc(sizeof(R4));
-                if (*pData) {read_R4((R4*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 4;
+                if (*pData) {read_R4((R4*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_R8: 
                 *pData = malloc(sizeof(R8));
-                if (*pData) {read_R8((R8*)(*pData), rawData, binaryLen, pos); break;}
+                (*desptr)->byteCnt = 8;
+                if (*pData) {read_R8((R8*)(*pData), rawData, binaryLen, pos); }
+                break;
             case GDR_N1: 
                 *pData = malloc(sizeof(B1));
-                if (*pData) {read_B1((B1*)(*pData), rawData, binaryLen, pos); break;}
-            // for Bn and Dn, read_Xn require preallocated array, use calloc for initialize memory                
+                (*desptr)->byteCnt = 1;
+                if (*pData) {read_B1((B1*)(*pData), rawData, binaryLen, pos); }
+                break;
+            // for Bn and Dn, read_Xn require preallocated array, use calloc for initialize memory
             case GDR_Bn: 
                 *pData = calloc(255, sizeof(B1));
-                if (*pData) {read_Bn((Bn*)(*pData), rawData, binaryLen, pos); break;}
+                if (*pData) {read_Bn((Bn*)(*pData), rawData, binaryLen, pos, &((*desptr)->byteCnt)); }
+                break;
             case GDR_Dn: 
                 *pData = calloc(8196, sizeof(B1));
-                if (*pData) {read_Dn((Dn*)(*pData), rawData, binaryLen, pos); break;}
-            // malloc for Cn is not required, it's handled in read_Cn
-            case GDR_Cn: read_Cn((Cn*)(*pData), rawData, binaryLen, pos); break;
-            default: break;
+                if (*pData) {read_Dn((Dn*)(*pData), rawData, binaryLen, pos, &((*desptr)->byteCnt)); }
+                break;
+            // for Cn and Dn, require preallocated memory to store the pointer to Cn
+            case GDR_Cn:
+                // not read byte cnt from read_Cn, for it affects so many func calls
+                (*desptr)->byteCnt = 0;
+                *pData = malloc(sizeof(Cn));
+                if (*pData) {read_Cn((Cn*)(*pData), rawData, binaryLen, pos);} 
+                break;
+            default: 
+                // if *pos > binaryLen, dataType is invalid
+                // we must assign NULL to *pData, otherwise segfault will occur when record being freed
+                *pData = NULL;
+                (*desptr)->byteCnt = 0;
+                break;
         }
     }
 }
@@ -419,7 +468,8 @@ void read_Vn(uint16_t k, Vn* desptr, const unsigned char* rawData, uint16_t bina
     } else {
         int i;
         for (i=0; i<k; i++) {
-            read_V1((desptr+i), rawData, binaryLen, pos);
+            V1* pV1 = (*desptr) + i;
+            read_V1(&pV1, rawData, binaryLen, pos);
         }
     }
 }
@@ -798,7 +848,7 @@ void parse_PRR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     read_U4(&record->TEST_T, rawData, binaryLen, &pos);
     read_Cn(&record->PART_ID, rawData, binaryLen, &pos);
     read_Cn(&record->PART_TXT, rawData, binaryLen, &pos);
-    read_Bn(&record->PART_FIX, rawData, binaryLen, &pos);
+    read_Bn(&record->PART_FIX, rawData, binaryLen, &pos, NULL);
 
     *pRec = record;
 }
@@ -932,7 +982,7 @@ void parse_FTR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     read_kxN1(record->RTN_ICNT, &record->RTN_STAT, rawData, binaryLen, &pos);
     read_kxU2(record->PGM_ICNT, &record->PGM_INDX, rawData, binaryLen, &pos);
     read_kxN1(record->PGM_ICNT, &record->PGM_STAT, rawData, binaryLen, &pos);
-    read_Dn(&record->FAIL_PIN, rawData, binaryLen, &pos);
+    read_Dn(&record->FAIL_PIN, rawData, binaryLen, &pos, NULL);
     read_Cn(&record->VECT_NAM, rawData, binaryLen, &pos);
     read_Cn(&record->TIME_SET, rawData, binaryLen, &pos);
     read_Cn(&record->OP_CODE, rawData, binaryLen, &pos);
@@ -941,7 +991,7 @@ void parse_FTR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     read_Cn(&record->PROG_TXT, rawData, binaryLen, &pos);
     read_Cn(&record->RSLT_TXT, rawData, binaryLen, &pos);
     read_U1(&record->PATG_NUM, rawData, binaryLen, &pos);
-    read_Dn(&record->SPIN_MAP, rawData, binaryLen, &pos);
+    read_Dn(&record->SPIN_MAP, rawData, binaryLen, &pos, NULL);
 
     *pRec = record;
 }
@@ -973,10 +1023,8 @@ void parse_GDR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
         return;
     }
     uint16_t pos = 0;
-
     read_U2(&record->FLD_CNT, rawData, binaryLen, &pos);
     read_Vn(record->FLD_CNT, &record->GEN_DATA, rawData, binaryLen, &pos);
-
     *pRec = record;
 }
 
@@ -1030,18 +1078,27 @@ void parse_record(void** pRec, uint16_t recHeader, const unsigned char* rawData,
 
 // Free records
 void free_FAR(_FAR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->CPU_TYPE);
     // free(record->STDF_VER);
     free(record);
 }
 
 void free_ATR(ATR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->MOD_TIM);
     free(record->CMD_LINE);
     free(record);
 }
 
 void free_MIR(MIR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->SETUP_T);
     // free(record->START_T);
     // free(record->STAT_NUM);
@@ -1084,6 +1141,9 @@ void free_MIR(MIR* record) {
 }
 
 void free_MRR(MRR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->FINISH_T);
     // free(record->DISP_COD);
     free(record->USR_DESC);
@@ -1092,6 +1152,9 @@ void free_MRR(MRR* record) {
 }
 
 void free_PCR(PCR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     // free(record->PART_CNT);
@@ -1103,6 +1166,9 @@ void free_PCR(PCR* record) {
 }
 
 void free_HBR(HBR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     // free(record->HBIN_NUM);
@@ -1113,6 +1179,9 @@ void free_HBR(HBR* record) {
 }
 
 void free_SBR(SBR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     // free(record->SBIN_NUM);
@@ -1123,6 +1192,9 @@ void free_SBR(SBR* record) {
 }
 
 void free_PMR(PMR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->PMR_INDX);
     // free(record->CHAN_TYP);
     free(record->CHAN_NAM);
@@ -1134,6 +1206,9 @@ void free_PMR(PMR* record) {
 }
 
 void free_PGR(PGR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->GRP_INDX);
     free(record->GRP_NAM);
     // free(record->INDX_CNT);
@@ -1142,6 +1217,9 @@ void free_PGR(PGR* record) {
 }
 
 void free_PLR(PLR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->GRP_CNT);
     free(record->GRP_INDX);
     free(record->GRP_MODE);
@@ -1161,12 +1239,18 @@ void free_PLR(PLR* record) {
 }
 
 void free_RDR(RDR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->NUM_BINS);
     free(record->RTST_BIN);
     free(record);
 }
 
 void free_SDR(SDR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_GRP);
     // free(record->SITE_CNT);
@@ -1191,6 +1275,9 @@ void free_SDR(SDR* record) {
 }
 
 void free_WIR(WIR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_GRP);
     // free(record->START_T);
@@ -1199,6 +1286,9 @@ void free_WIR(WIR* record) {
 }
 
 void free_WRR(WRR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_GRP);
     // free(record->FINISH_T);
@@ -1217,6 +1307,9 @@ void free_WRR(WRR* record) {
 }
 
 void free_WCR(WCR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->WAFR_SIZ);
     // free(record->DIE_HT);
     // free(record->DIE_WID);
@@ -1230,12 +1323,18 @@ void free_WCR(WCR* record) {
 }
 
 void free_PIR(PIR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     free(record);
 }
 
 void free_PRR(PRR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     // free(record->PART_FLG);
@@ -1252,6 +1351,9 @@ void free_PRR(PRR* record) {
 }
 
 void free_TSR(TSR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
     // free(record->TEST_TYP);
@@ -1272,6 +1374,9 @@ void free_TSR(TSR* record) {
 }
 
 void free_PTR(PTR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->TEST_NUM);
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
@@ -1296,6 +1401,9 @@ void free_PTR(PTR* record) {
 }
 
 void free_MPR(MPR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->TEST_NUM);
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
@@ -1327,6 +1435,9 @@ void free_MPR(MPR* record) {
 }
 
 void free_FTR(FTR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->TEST_NUM);
     // free(record->HEAD_NUM);
     // free(record->SITE_NUM);
@@ -1359,6 +1470,9 @@ void free_FTR(FTR* record) {
 }
 
 void free_BPS(BPS* record) {
+    if (record == NULL) {
+        return;
+    }
     free(record->SEQ_NAME);
     free(record);
 }
@@ -1368,17 +1482,36 @@ void free_EPS(EPS* record) {
 }
 
 void free_GDR(GDR* record) {
+    if (record == NULL) {
+        return;
+    }
     // free(record->FLD_CNT);
     int i;
-    for (i=0; i<(record->FLD_CNT); i++) {
-        // (record->GEN_DATA)+i  pointer to i-th V1
-        free(((record->GEN_DATA)+i)->data);
+    if (record->GEN_DATA) {
+        for (i=0; i<(record->FLD_CNT); i++) {
+            // (record->GEN_DATA)+i  pointer to i-th V1
+            void* pData = ((record->GEN_DATA)+i)->data;
+            if ( ((record->GEN_DATA)+i)->dataType == GDR_Cn ) {
+                // free Cn
+                if (pData) {
+                    Cn CnString = *((Cn*)pData);
+                    free(CnString);
+                }
+                free(pData);
+            }
+            else {
+                free(pData);
+            }
+        }
     }
     free(record->GEN_DATA);
     free(record);
 }
 
 void free_DTR(DTR* record) {
+    if (record == NULL) {
+        return;
+    }
     free(record->TEXT_DAT);
     free(record);
 }

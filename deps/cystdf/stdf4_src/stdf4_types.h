@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: April 27th 2021
  * -----
- * Last Modified: Mon May 31 2021
+ * Last Modified: Tue Jan 25 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -159,7 +159,8 @@ typedef enum {
 } V1_type;
 
 typedef struct {
-	V1_type		type;
+	V1_type		dataType;
+    U2          byteCnt;
 	void*		data;
 } V1;
 
