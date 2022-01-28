@@ -6,7 +6,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: April 19th 2021
 # -----
-# Last Modified: Thu Nov 18 2021
+# Last Modified: Tue Jan 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -88,8 +88,36 @@ cdef extern from "stdf4_func.c" nogil:
     ctypedef	R4*				kxR4
     ctypedef	U1*				kxN1
 
-    ctypedef struct _FAR
-    ctypedef struct ATR
+    ctypedef enum V1_type:
+        GDR_B0
+        GDR_U1
+        GDR_U2
+        GDR_U4
+        GDR_I1
+        GDR_I2
+        GDR_I4
+        GDR_R4
+        GDR_R8
+        GDR_Cn
+        GDR_Bn
+        GDR_Dn
+        GDR_N1
+    
+    ctypedef struct V1:
+        V1_type		dataType
+        U2          byteCnt
+        void*		data
+
+    ctypedef    V1*             Vn
+
+    ctypedef struct _FAR:
+        U1   CPU_TYPE
+        U1   STDF_VER
+
+    ctypedef struct ATR:
+        U4   MOD_TIM
+        Cn   CMD_LINE
+
     ctypedef struct MIR:
         U4  SETUP_T
         U4  START_T
@@ -186,8 +214,32 @@ cdef extern from "stdf4_func.c" nogil:
         kxCn    PGM_CHAL
         kxCn    RTN_CHAL
 
-    ctypedef struct RDR
-    ctypedef struct SDR
+    ctypedef struct RDR:
+        U2    NUM_BINS
+        kxU2  RTST_BIN
+
+    ctypedef struct SDR:
+        U1    HEAD_NUM
+        U1    SITE_GRP
+        U1    SITE_CNT
+        kxU1  SITE_NUM
+        Cn    HAND_TYP
+        Cn    HAND_ID
+        Cn    CARD_TYP
+        Cn    CARD_ID
+        Cn    LOAD_TYP
+        Cn    LOAD_ID
+        Cn    DIB_TYP
+        Cn    DIB_ID
+        Cn    CABL_TYP
+        Cn    CABL_ID
+        Cn    CONT_TYP
+        Cn    CONT_ID
+        Cn    LASR_TYP
+        Cn    LASR_ID
+        Cn    EXTR_TYP
+        Cn    EXTR_ID
+
     ctypedef struct WIR:
         U1  HEAD_NUM
         U1  SITE_GRP
@@ -338,10 +390,16 @@ cdef extern from "stdf4_func.c" nogil:
         U1      PATG_NUM
         Dn      SPIN_MAP
     
-    ctypedef struct BPS
+    ctypedef struct BPS:
+        Cn  SEQ_NAME
+
     ctypedef struct EPS
-    ctypedef struct GDR
-    ctypedef struct DTR
+    ctypedef struct GDR:
+        U2  FLD_CNT
+        Vn  GEN_DATA
+
+    ctypedef struct DTR:
+        Cn  TEXT_DAT
 
 
 cdef extern from "stdf4_io.c" nogil:

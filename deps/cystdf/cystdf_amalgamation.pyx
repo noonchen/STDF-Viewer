@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Thu Dec 23 2021
+# Last Modified: Thu Jan 27 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -48,11 +48,11 @@ from libc.stdint cimport *
 from libc.stddef cimport wchar_t
 from libc.math cimport NAN, isinf
 from libc.float cimport FLT_MAX, FLT_MIN
-from libc.string cimport memcpy, memset, strcpy, strrchr, strcmp
+from libc.string cimport memcpy, memset, strcpy, strrchr, strcmp, strcat, strlen
 from posix.stdio cimport fseeko, ftello
 from posix.unistd cimport usleep
-from libc.stdio cimport sprintf, printf
-from libc.stdlib cimport malloc, free
+from libc.stdio cimport sprintf, printf, snprintf
+from libc.stdlib cimport malloc, free, calloc, realloc
 
 # including a str to wchar_t func that missed from cython
 cdef extern from "Python.h":
@@ -156,7 +156,9 @@ cdef void get_offset(STDF* std, tsQueue* q, bint* p_needByteSwap, bint* stopFlag
                 recHeader == REC_PTR or recHeader == REC_FTR or recHeader == REC_MPR or recHeader == REC_TSR or
                 recHeader == REC_PIR or recHeader == REC_PRR or recHeader == REC_HBR or recHeader == REC_SBR or 
                 recHeader == REC_PCR or recHeader == REC_PMR or recHeader == REC_PGR or recHeader == REC_PLR or
-                recHeader == REC_MRR):
+                recHeader == REC_MRR or recHeader == REC_DTR or recHeader == REC_GDR or recHeader == REC_EPS or
+                recHeader == REC_BPS or recHeader == REC_SDR or recHeader == REC_RDR or recHeader == REC_ATR or
+                recHeader == REC_FAR):
                 # get binaryLen and read rawData
                 # alloc memory
                 ele = <dataCluster*>message_queue_message_alloc_blocking(q)
@@ -200,9 +202,16 @@ cdef void get_offset(STDF* std, tsQueue* q, bint* p_needByteSwap, bint* stopFlag
                     break
                 
             else:
-                # skip current record
-                std.fops.stdf_skip(std, hData.rec_len)
-                offset += hData.rec_len  # manually advanced by length of raw data
+                # # skip current record
+                # std.fops.stdf_skip(std, hData.rec_len)
+                # offset += hData.rec_len  # manually advanced by length of raw data
+
+                # since we read all record types now, in this case means unexpected record types
+                ele = <dataCluster*>message_queue_message_alloc_blocking(q)
+                ele.error = INVAILD_STDF
+                ele.operation = FINISH
+                message_queue_write(q, ele)
+                break
         else:
             # end of file
             ele = <dataCluster*>message_queue_message_alloc_blocking(q)
@@ -790,12 +799,14 @@ cdef class stdfSummarizer:
         object QSignal, flag, pb_thread
         uint64_t offset, fileSize
         uint32_t dutIndex, waferIndex
-        bint reading, isLittleEndian, stopFlag, isWindows
+        int programSectionsDepth
+        bint reading, isLittleEndian, stopFlag, isWindows, isBeforePRR
         dict pinDict
         bytes filepath_bt
         void* pRec
         char* endian
         char* TEST_TXT
+        char** programSections
         char detailErrorMsg[512]
         const char* filepath_c
         const wchar_t*  filepath_wc
@@ -818,6 +829,7 @@ cdef class stdfSummarizer:
         sqlite3_stmt *insertPinInfo_stmt
         sqlite3_stmt *insertTestPin_stmt
         sqlite3_stmt *insertDynamicLimit_stmt
+        sqlite3_stmt *insertDatalog_stmt
         map_t   defaultLLimit
         map_t   defaultHLimit
         map_t   TestFailCount
@@ -826,6 +838,7 @@ cdef class stdfSummarizer:
 
 
     def __cinit__(self):
+        self.programSections        = NULL
         self.db_ptr                 = NULL
         self.insertFileInfo_stmt    = NULL
         self.insertDut_stmt         = NULL
@@ -845,6 +858,7 @@ cdef class stdfSummarizer:
         self.insertPinInfo_stmt     = NULL
         self.insertTestPin_stmt     = NULL
         self.insertDynamicLimit_stmt= NULL
+        self.insertDatalog_stmt     = NULL
         self.pRec                   = NULL
         self.defaultLLimit          = NULL
         self.defaultHLimit          = NULL        
@@ -867,6 +881,7 @@ cdef class stdfSummarizer:
                                         DROP TABLE IF EXISTS Pin_Info;
                                         DROP TABLE IF EXISTS TestPin_Map;
                                         DROP TABLE IF EXISTS Dynamic_Limits;
+                                        DROP TABLE IF EXISTS Datalog;
                                         VACUUM;
                                         
                                         CREATE TABLE IF NOT EXISTS File_Info (
@@ -925,7 +940,8 @@ cdef class stdfSummarizer:
                                                                 RSLT_PGM_CNT INTEGER,
                                                                 LSpec REAL,
                                                                 HSpec REAL,
-                                                                VECT_NAM TEXT);
+                                                                VECT_NAM TEXT,
+                                                                SEQ_NAME TEXT);
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
@@ -972,6 +988,12 @@ cdef class stdfSummarizer:
                                                                 LLimit REAL,
                                                                 HLimit REAL,
                                                                 PRIMARY KEY (DUTIndex, TEST_NUM));
+                                        
+                                        CREATE TABLE IF NOT EXISTS Datalog (
+                                                                RecordType TEXT,
+                                                                Value TEXT, 
+                                                                AfterDUTIndex INTEGER,
+                                                                isBeforePRR INTEGER);
                                                                 
                                         DROP INDEX IF EXISTS dutKey;
                                         PRAGMA synchronous = OFF;
@@ -991,7 +1013,7 @@ cdef class stdfSummarizer:
             # I am not adding IGNORE below, since tracking seen test_nums can skip a huge amount of codes
             const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_NUM, :recHeader, :TEST_NAME, 
                                                                         :RES_SCAL, :LLimit, :HLimit, 
-                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec, :VECT_NAM);'''
+                                                                        :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec, :VECT_NAM, :SEQ_NAME);'''
             const char* insertHBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("H", :HBIN_NUM, :HBIN_NAME, :PF);'''
             # const char* updateHBIN = '''UPDATE Bin_Info SET BIN_NAME=:HBIN_NAME, BIN_PF=:BIN_PF WHERE BIN_TYPE="H" AND BIN_NUM=:HBIN_NUM'''
             const char* insertSBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("S", :SBIN_NUM, :SBIN_NAME, :PF);'''
@@ -1012,6 +1034,7 @@ cdef class stdfSummarizer:
                                                                         :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);'''
             const char* insertTestPin = '''INSERT INTO TestPin_Map VALUES (:TEST_NUM, :PMR_INDX, :PIN_TYPE);'''
             const char* insertDynamicLimit = '''INSERT OR REPLACE INTO Dynamic_Limits VALUES (:DUTIndex, :TEST_NUM, :LLimit ,:HLimit);'''
+            const char* insertDatalog = '''INSERT INTO Datalog VALUES (:RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);'''
 
         # init sqlite3 database api
         try:
@@ -1035,6 +1058,7 @@ cdef class stdfSummarizer:
             csqlite3_prepare_v2(self.db_ptr, insertPinInfo, &self.insertPinInfo_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertTestPin, &self.insertTestPin_stmt)
             csqlite3_prepare_v2(self.db_ptr, insertDynamicLimit, &self.insertDynamicLimit_stmt)
+            csqlite3_prepare_v2(self.db_ptr, insertDatalog, &self.insertDatalog_stmt)
         except Exception:
             try:
                 csqlite3_close(self.db_ptr)
@@ -1068,6 +1092,8 @@ cdef class stdfSummarizer:
             self.QSignal.emit(0)
             self.pb_thread = th.Thread(target=self.sendProgress)
             self.pb_thread.start()
+        # track depth of BPS-EPS block
+        self.programSectionsDepth = 0
         # default endianness & byteswap
         self.endian = "Little endian"
         self.isLittleEndian = True
@@ -1089,6 +1115,7 @@ cdef class stdfSummarizer:
         # for counting
         self.dutIndex = 0  # get 1 as index on first +1 action, used for counting total DUT number
         self.waferIndex = 0 # used for counting total wafer number
+        self.isBeforePRR = True # used for determining location of DTR & GDR
         self.pinDict = {}   # key: Pin index, value: Pin name
         
         self.analyze()  # start
@@ -1209,6 +1236,14 @@ cdef class stdfSummarizer:
             int errorCode
 
         self.reading = False
+        # check if all BPSs are closed
+        cdef int i
+        if self.programSectionsDepth > 0:
+            # if not all closed, clean it now
+            for i in range(self.programSectionsDepth):
+                free(self.programSections[i])
+            free(self.programSections)
+            self.programSections = NULL        
         # update failcount
         cdef const char* updateFailCount = '''UPDATE Test_Info SET FailCount=:count WHERE TEST_NUM=:TEST_NUM'''
         cdef sqlite3_stmt* updateFailCount_stmt
@@ -1250,6 +1285,7 @@ cdef class stdfSummarizer:
         csqlite3_finalize(self.insertPinInfo_stmt)
         csqlite3_finalize(self.insertTestPin_stmt)
         csqlite3_finalize(self.insertDynamicLimit_stmt)
+        csqlite3_finalize(self.insertDatalog_stmt)
         csqlite3_close(self.db_ptr)
         # clean hashmap
         hashmap_free(self.defaultLLimit)
@@ -1298,17 +1334,55 @@ cdef class stdfSummarizer:
             err = self.onPCR(recHeader, binaryLen, rawData)
         elif recHeader == 276: # MRR 276
             err = self.onMRR(recHeader, binaryLen, rawData)
+        elif recHeader == 12830: # DTR 12830
+            err = self.onDTR(recHeader, binaryLen, rawData)
+        elif recHeader == 12810: # GDR 12810
+            err = self.onGDR(recHeader, binaryLen, rawData)
+        elif recHeader == 5130: # BPS 5130
+            err = self.onBPS(recHeader, binaryLen, rawData)
+        elif recHeader == 5140: # EPS 5140
+            err = self.onEPS(recHeader, binaryLen, rawData)
+        elif recHeader == 10: # FAR 10
+            err = self.onFAR(recHeader, binaryLen, rawData)
+        elif recHeader == 20: # ATR 20
+            err = self.onATR(recHeader, binaryLen, rawData)
+        elif recHeader == 326: # RDR 326
+            err = self.onRDR(recHeader, binaryLen, rawData)
+        elif recHeader == 336: # SDR 336
+            err = self.onSDR(recHeader, binaryLen, rawData)
         return err
             
-        # FAR 10
-        # ATR 20
-        # RDR 326
-        # SDR 336
-        # BPS 5130
-        # EPS 5140
-        # GDR 12810
-        # DTR 12830
+
+    cdef int onFAR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        return 0
+
+    cdef int onATR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, l = 0
+            time_t timeStamp
+            tm*    tmPtr
+            char   stringBuffer[256]
+            char*  result
         
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        # get time string
+        timeStamp = <time_t>((<ATR*>self.pRec).MOD_TIM)
+        tmPtr = localtime(&timeStamp)
+        strftime(stringBuffer, 26, "%Y-%m-%d %H:%M:%S (UTC)", tmPtr)
+        # get size of final string
+        l = snprintf(NULL, 0, "Time: %s\nCMD: %s", stringBuffer, (<ATR*>self.pRec).CMD_LINE)
+        result = <char*>malloc((l+1) * sizeof(char))
+        # get final string
+        snprintf(result, l+1, "Time: %s\nCMD: %s", stringBuffer, (<ATR*>self.pRec).CMD_LINE)
+
+        sqlite3_bind_text(self.insertFileInfo_stmt, 1, "File Modification", -1, NULL)
+        sqlite3_bind_text(self.insertFileInfo_stmt, 2, result, -1, NULL)
+        err = csqlite3_step(self.insertFileInfo_stmt)
+
+        free(result)
+        free_record(recHeader, self.pRec)
+        return err
+
 
     cdef int onMIR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
         cdef int err = 0
@@ -1655,6 +1729,7 @@ cdef class stdfSummarizer:
 
         # used for linking TRs with PRR
         self.dutIndex += 1
+        self.isBeforePRR = True
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         HEAD_NUM = (<PIR*>self.pRec).HEAD_NUM
         SITE_NUM = (<PIR*>self.pRec).SITE_NUM
@@ -1685,6 +1760,8 @@ cdef class stdfSummarizer:
             char* VECT_NAM = NULL
             char* TEST_TXT
             char* Unit
+            char* SEQ_NAM
+            int SEQ_NAM_LEN = 0
             uint16_t*   pRTN_INDX = NULL   # For FTR & MPR
             uint16_t*   pPGM_INDX = NULL   # For FTR
 
@@ -1796,8 +1873,21 @@ cdef class stdfSummarizer:
                     sqlite3_bind_double(self.insertTestInfo_stmt, 13, HSpec)            # LSpec
                 if not VECT_NAM == NULL:
                     sqlite3_bind_text(self.insertTestInfo_stmt, 14, VECT_NAM, -1, NULL) # VECT_NAM
+                if self.programSectionsDepth > 0:
+                    for i in range(self.programSectionsDepth):
+                        SEQ_NAM_LEN += (strlen(self.programSections[i]) + 1)
+                    SEQ_NAM = <char*>calloc(SEQ_NAM_LEN, sizeof(char))
+                    if SEQ_NAM:
+                        for i in range(self.programSectionsDepth):
+                            sprintf(SEQ_NAM + strlen(SEQ_NAM), "%s;", self.programSections[i])
+                        SEQ_NAM[strlen(SEQ_NAM)-1] = 0x00
+                        sqlite3_bind_text(self.insertTestInfo_stmt, 15, SEQ_NAM, -1, NULL) # SEQ_NAM
+                    else:
+                        return NO_MEMORY
                     
                 err = csqlite3_step(self.insertTestInfo_stmt)
+                if self.programSectionsDepth > 0:
+                    free(SEQ_NAM)
 
             # store PMR indexes of each FTR & MPR
             if not err and recHeader != REC_PTR:
@@ -1865,6 +1955,17 @@ cdef class stdfSummarizer:
             uint32_t currentDutIndex, currentWaferIndex
             int HARD_BIN, SOFT_BIN, NUM_TEST, X_COORD, Y_COORD, TEST_T, err = 0
             char* PART_ID
+        
+        self.isBeforePRR = False
+        # in PRR, all BPS should be closed by EPS
+        cdef int i
+        if self.programSectionsDepth > 0:
+            # if not all closed, clean it now
+            for i in range(self.programSectionsDepth):
+                free(self.programSections[i])
+            free(self.programSections)
+            self.programSections = NULL
+
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         HEAD_NUM    = (<PRR*>self.pRec).HEAD_NUM
         SITE_NUM    = (<PRR*>self.pRec).SITE_NUM
@@ -2095,6 +2196,7 @@ cdef class stdfSummarizer:
             sqlite3_bind_text(self.insertFileInfo_stmt, 2, POS_Y, -1, NULL)
             err = csqlite3_step(self.insertFileInfo_stmt)
 
+        free_record(recHeader, self.pRec)
         return err
     
     
@@ -2216,6 +2318,7 @@ cdef class stdfSummarizer:
                 if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, FAIL_CNT)):
                     err = MAP_OMEM
                     sprintf(self.detailErrorMsg, "Error in TSR when storing count for TEST_NUM %d", TEST_NUM)
+        free_record(recHeader, self.pRec)
         return err
 
 
@@ -2258,9 +2361,403 @@ cdef class stdfSummarizer:
             sqlite3_bind_int(self.insertDutCount_stmt, 7, -1)
 
         err = csqlite3_step(self.insertDutCount_stmt)
+        free_record(recHeader, self.pRec)
         return err    
 
 
+    cdef int onDTR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0
+        
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        
+        sqlite3_bind_text(self.insertDatalog_stmt, 1, "DTR", -1, NULL)                      # RecordType
+        sqlite3_bind_text(self.insertDatalog_stmt, 2, (<DTR*>self.pRec).TEXT_DAT, -1, NULL) # Value
+        sqlite3_bind_int(self.insertDatalog_stmt, 3, self.dutIndex)
+        sqlite3_bind_int(self.insertDatalog_stmt, 4, self.isBeforePRR)
+        err = csqlite3_step(self.insertDatalog_stmt)
+
+        free_record(recHeader, self.pRec)
+        return err
+
+
+    cdef int onGDR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, result_len = 0, previous_len = 0, tmp_len = 0, i, j
+            char* result = NULL
+            char* tmp = NULL
+            char* hexString = NULL
+            uint16_t FLD_CNT
+            Vn GEN_DATA
+            V1 Gen_ele
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        FLD_CNT = (<GDR*>self.pRec).FLD_CNT
+        GEN_DATA = (<GDR*>self.pRec).GEN_DATA
+        
+        if FLD_CNT > 0 and GEN_DATA != NULL:
+            # Flatten Vn to char*
+            for i in range(FLD_CNT):
+                Gen_ele = GEN_DATA[i]
+                if Gen_ele.dataType < 0 or Gen_ele.dataType > 13:
+                    # invalid type, the rest V1 is not valid
+                    break
+                else:
+                    # valid type
+                    if Gen_ele.dataType == GDR_B0:
+                        # store old result_len for snprintf
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d B0: NULL\n", i)
+                        result_len = tmp_len + previous_len
+                        # alloc memory to store new string
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        # append string
+                        snprintf(result + previous_len, tmp_len+1, "%d B0: NULL\n", i)
+
+                    elif Gen_ele.dataType == GDR_U1:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d U1: %d\n", i, (<U1*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d U1: %d\n", i, (<U1*>(Gen_ele.data))[0])
+                    
+                    elif Gen_ele.dataType == GDR_U2:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d U2: %d\n", i, (<U2*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d U2: %d\n", i, (<U2*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_U4:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d U4: %d\n", i, (<U4*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d U4: %d\n", i, (<U4*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_I1:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d I1: %d\n", i, (<I1*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d I1: %d\n", i, (<I1*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_I2:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d I2: %d\n", i, (<I2*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d I2: %d\n", i, (<I2*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_I4:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d I4: %d\n", i, (<I4*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d I4: %d\n", i, (<I4*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_R4:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d R4: %f\n", i, (<R4*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d R4: %f\n", i, (<R4*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_R8:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d R8: %f\n", i, (<R8*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d R8: %f\n", i, (<R8*>(Gen_ele.data))[0])
+                        
+                    elif Gen_ele.dataType == GDR_Cn:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d Cn: %s\n", i, (<Cn*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d Cn: %s\n", i, (<Cn*>(Gen_ele.data))[0])
+                    
+                    # For Bn & Dn, convert the data to Hex string
+                    elif Gen_ele.dataType == GDR_Bn:
+                        if Gen_ele.byteCnt > 0:
+                            tmp_len = 5 + 3 * Gen_ele.byteCnt + 1  # (HEX)_FF_..._FF\0
+                            hexString = <char*>calloc(tmp_len, sizeof(char))
+                            if hexString:
+                                sprintf( hexString + strlen(hexString), "%s", <char*>"(HEX)")
+                                for j in range(Gen_ele.byteCnt):
+                                    sprintf( hexString + strlen(hexString), " %02X", (<Bn*>(Gen_ele.data))[0][j])
+                            else:
+                                return NO_MEMORY
+                        else:
+                            hexString = "NULL"
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d Bn: %s\n", i, hexString)
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d Bn: %s\n", i, hexString)
+                        if Gen_ele.byteCnt > 0:
+                            free(hexString)
+                        
+                    elif Gen_ele.dataType == GDR_Dn:
+                        if Gen_ele.byteCnt > 0:
+                            tmp_len = 5 + 3 * Gen_ele.byteCnt + 1  # (HEX)_FF_..._FF\0
+                            hexString = <char*>calloc(tmp_len, sizeof(char))
+                            if hexString:
+                                sprintf( hexString + strlen(hexString), "%s", <char*>"(HEX)")
+                                for j in range(Gen_ele.byteCnt):
+                                    sprintf( hexString + strlen(hexString), " %02X", (<Dn*>(Gen_ele.data))[0][j])
+                            else:
+                                return NO_MEMORY
+                        else:
+                            hexString = "NULL"
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d Dn: %s\n", i, hexString)
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d Dn: %s\n", i, hexString)
+                        if Gen_ele.byteCnt > 0:
+                            free(hexString)
+                    
+                    elif Gen_ele.dataType == GDR_N1:
+                        previous_len = result_len
+                        tmp_len = snprintf(NULL, 0, "%d N1: %X\n", i, (<B1*>(Gen_ele.data))[0])
+                        result_len = tmp_len + previous_len
+                        tmp = <char*>realloc(result, result_len + 1)   # plus 1 for \0
+                        if tmp: result = tmp
+                        else: return NO_MEMORY
+                        snprintf(result + previous_len, tmp_len+1, "%d N1: %X\n", i, (<B1*>(Gen_ele.data))[0])
+        else:
+            result = "NULL"
+
+        sqlite3_bind_text(self.insertDatalog_stmt, 1, "GDR", -1, NULL)      # RecordType
+        sqlite3_bind_text(self.insertDatalog_stmt, 2, result, -1, NULL)     # Value
+        sqlite3_bind_int(self.insertDatalog_stmt, 3, self.dutIndex)
+        sqlite3_bind_int(self.insertDatalog_stmt, 4, self.isBeforePRR)
+        err = csqlite3_step(self.insertDatalog_stmt)
+
+        if FLD_CNT > 0 and GEN_DATA != NULL:
+            free(result)
+        free_record(recHeader, self.pRec)
+        return err
+
+
+    cdef int onBPS(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            void* tmpPtr = NULL
+            char* SEQ_NAME
+
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        SEQ_NAME = (<BPS*>self.pRec).SEQ_NAME
+
+        tmpPtr = realloc(self.programSections, self.programSectionsDepth + 1)
+        if tmpPtr:
+            # increase depth only if successfully realloc
+            self.programSectionsDepth += 1
+            self.programSections = <char**>tmpPtr
+            # alloc memory to store SEQ_NAME
+            tmpPtr = calloc( (strlen(SEQ_NAME)+1), sizeof(char))
+            if tmpPtr:
+                self.programSections[self.programSectionsDepth - 1] = <char*>tmpPtr
+                strcpy(self.programSections[self.programSectionsDepth - 1], SEQ_NAME)
+            else:
+                return NO_MEMORY
+        else:
+            return NO_MEMORY
+
+        free_record(recHeader, self.pRec)
+        return 0
+
+
+    cdef int onEPS(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        # reduce programSectionsDepth by 1, and free memory
+        if self.programSectionsDepth:
+            # free the last char*
+            free(self.programSections[self.programSectionsDepth - 1])
+            self.programSectionsDepth -= 1
+        return 0
+
+
+    cdef int onRDR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, l = 0, i
+            uint16_t  NUM_BINS
+            uint16_t* RTST_BIN
+            char*     result
+        
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        NUM_BINS = (<RDR*>self.pRec).NUM_BINS
+        RTST_BIN = (<RDR*>self.pRec).RTST_BIN
+        if NUM_BINS > 0:
+            for i in range(NUM_BINS):
+                l += snprintf(NULL, 0, "%d, ", RTST_BIN[i])
+            l += 10 # add more budget
+            # convert array to string
+            result = <char*>calloc(l, sizeof(char))
+            for i in range(NUM_BINS-1):
+                sprintf( result + strlen(result), "%d, ", RTST_BIN[i])
+            sprintf( result + strlen(result), "%d", RTST_BIN[NUM_BINS-1])
+        else:
+            result = "All hardware bins are retested"
+
+        sqlite3_bind_text(self.insertFileInfo_stmt, 1, "Retest Hardware Bins", -1, NULL)
+        sqlite3_bind_text(self.insertFileInfo_stmt, 2, result, -1, NULL)
+        err = csqlite3_step(self.insertFileInfo_stmt)
+
+        if NUM_BINS > 0:
+            free(result)
+        free_record(recHeader, self.pRec)
+        return err
+
+
+    cdef int onSDR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
+        cdef:
+            int err = 0, l
+            char     tmpName[100]
+            uint8_t  SITE_GRP
+        
+        parse_record(&self.pRec, recHeader, rawData, binaryLen)
+        SITE_GRP = (<SDR*>self.pRec).SITE_GRP
+
+        if not err and (<SDR*>self.pRec).HAND_TYP != NULL:
+            l = sprintf(tmpName, "Handler Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).HAND_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        if not err and (<SDR*>self.pRec).HAND_ID != NULL:
+            l = sprintf(tmpName, "Handler ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).HAND_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        if not err and (<SDR*>self.pRec).CARD_TYP != NULL:
+            l = sprintf(tmpName, "Probe Card Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CARD_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).CARD_ID != NULL:
+            l = sprintf(tmpName, "Probe Card ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CARD_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).LOAD_TYP != NULL:
+            l = sprintf(tmpName, "Load Board Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).LOAD_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).LOAD_ID != NULL:
+            l = sprintf(tmpName, "Load Board ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).LOAD_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).DIB_TYP != NULL:
+            l = sprintf(tmpName, "DIB Board Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).DIB_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).DIB_ID != NULL:
+            l = sprintf(tmpName, "DIB Board ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).DIB_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).CABL_TYP != NULL:
+            l = sprintf(tmpName, "Interface Cable Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CABL_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).CABL_ID != NULL:
+            l = sprintf(tmpName, "Interface Cable ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CABL_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).CONT_TYP != NULL:
+            l = sprintf(tmpName, "Handler Contactor Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CONT_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).CONT_ID != NULL:
+            l = sprintf(tmpName, "Handler Contactor ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).CONT_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).LASR_TYP != NULL:
+            l = sprintf(tmpName, "Laser Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).LASR_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).LASR_ID != NULL:
+            l = sprintf(tmpName, "Laser ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).LASR_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).EXTR_TYP != NULL:
+            l = sprintf(tmpName, "Extra Equipment Type (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).EXTR_TYP, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+            
+        if not err and (<SDR*>self.pRec).EXTR_ID != NULL:
+            l = sprintf(tmpName, "Extra Equipment ID (Group %d)", SITE_GRP)
+            tmpName[l] = 0x00
+            sqlite3_bind_text(self.insertFileInfo_stmt, 1, tmpName, -1, NULL)
+            sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<SDR*>self.pRec).EXTR_ID, -1, NULL)
+            err = csqlite3_step(self.insertFileInfo_stmt)
+
+        free_record(recHeader, self.pRec)
+        return err
+    
+    
     cdef int onMRR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
         cdef:
             int err = 0
@@ -2297,6 +2794,7 @@ cdef class stdfSummarizer:
             sqlite3_bind_text(self.insertFileInfo_stmt, 2, (<MRR*>self.pRec).EXC_DESC, -1, NULL)
             err = csqlite3_step(self.insertFileInfo_stmt)
         
+        free_record(recHeader, self.pRec)
         return err    
 
     
