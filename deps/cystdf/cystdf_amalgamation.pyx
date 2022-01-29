@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Thu Jan 27 2022
+# Last Modified: Sat Jan 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1243,7 +1243,8 @@ cdef class stdfSummarizer:
             for i in range(self.programSectionsDepth):
                 free(self.programSections[i])
             free(self.programSections)
-            self.programSections = NULL        
+            self.programSections = NULL
+            self.programSectionsDepth = 0
         # update failcount
         cdef const char* updateFailCount = '''UPDATE Test_Info SET FailCount=:count WHERE TEST_NUM=:TEST_NUM'''
         cdef sqlite3_stmt* updateFailCount_stmt
@@ -1965,6 +1966,7 @@ cdef class stdfSummarizer:
                 free(self.programSections[i])
             free(self.programSections)
             self.programSections = NULL
+            self.programSectionsDepth = 0
 
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         HEAD_NUM    = (<PRR*>self.pRec).HEAD_NUM
@@ -2550,6 +2552,8 @@ cdef class stdfSummarizer:
                         if tmp: result = tmp
                         else: return NO_MEMORY
                         snprintf(result + previous_len, tmp_len+1, "%d N1: %X\n", i, (<B1*>(Gen_ele.data))[0])
+            # replace the last \n with \0 terminator
+            result[strlen(result) - 1] = 0x00
         else:
             result = "NULL"
 

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Tue Jan 04 2022
+# Last Modified: Sat Jan 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -456,6 +456,34 @@ class DatabaseFetcher:
         else:
             # return empty array if all limits are None
             return hasDynamicLow, np.array([]), hasDynamicHigh, np.array([])
+    
+    
+    def getDTR_GDRs(self) -> list[tuple]:
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        DR_List = []
+        leftStr = ""
+        midStr = ""
+        rightStr = ""
+        sql = "SELECT * FROM Datalog"
+            
+        for RecordType, Value, AfterDUTIndex, isBeforePRR in self.cursor.execute(sql):
+            # generate approx location
+            if AfterDUTIndex == 0:
+                leftStr = "|"
+                midStr = RecordType
+                rightStr = "PIR #1"
+            elif isBeforePRR:
+                leftStr = f"PIR #{AfterDUTIndex}"
+                midStr = RecordType
+                rightStr = f"PRR #{AfterDUTIndex}"
+            else:
+                leftStr = f"PIR #{AfterDUTIndex}"
+                midStr = f"PRR #{AfterDUTIndex}"
+                rightStr = RecordType
+            DR_List.append((RecordType, f"\n{Value}\n", f"{leftStr} ··· {midStr} ··· {rightStr}"))
+            
+        return DR_List
 
 
 if __name__ == "__main__":
@@ -489,6 +517,7 @@ if __name__ == "__main__":
     
     # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
     # print(df.getDUTIndexFromXY(40, -10, -1))
+    # print(df.getDTR_GDRs())
     
     
     e = time()

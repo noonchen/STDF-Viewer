@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Fri Dec 10 2021
+ * Last Modified: Sat Jan 29 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -74,6 +74,10 @@ int _stdf_read_org(void* stdf, void* buf, int length){
     STDF* std = (STDF*)stdf;
     int num = fread(buf, length, 1, std->orgF);
     if (num != 1) {
+        if (length == 0 && length == num) {
+            // EPS, length = 0
+            return STD_OK;
+        }
         return STD_EOF;
     }
     return STD_OK;

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Jan 04 2022
+# Last Modified: Sat Jan 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1479,6 +1479,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel = QtGui.QStandardItemModel()
         self.ui.dataTable.setModel(self.tmodel)
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
+        # runtime info table
+        self.tmodel_datalog = QtGui.QStandardItemModel()
+        self.ui.datalogTable.setModel(self.tmodel_datalog)
+        self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
         # test summary table
         self.tmodel_raw = QtGui.QStandardItemModel()
         self.ui.rawDataTable.setModel(self.tmodel_raw)
@@ -1499,6 +1503,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.fileInfoTable.setSelectionMode(QAbstractItemView.NoSelection)
         # self.ui.fileInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.fileInfoTable))
         # smooth scrolling
+        self.ui.datalogTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.ui.datalogTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.ui.dataTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.ui.dataTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.ui.rawDataTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -1685,6 +1691,34 @@ class MyWindow(QtWidgets.QMainWindow):
         
         for column in range(header.count()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+        
+        
+    def updateRuntimeInfoTable(self):
+        # clear
+        self.tmodel_datalog.removeRows(0, self.tmodel_datalog.rowCount())
+        self.tmodel_datalog.removeColumns(0, self.tmodel_datalog.columnCount())
+        
+        fontsize = 13 if isMac else 10
+        headerLabels = [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")]
+        self.tmodel_datalog.setHorizontalHeaderLabels(headerLabels)
+        header = self.ui.datalogTable.horizontalHeader()
+        header.setVisible(True)
+        
+        DR_List = self.DatabaseFetcher.getDTR_GDRs()
+        
+        for tupleData in DR_List:
+            qitemList = []
+            for i, item in enumerate(tupleData):
+                qitem = QtGui.QStandardItem(item)
+                qitem.setTextAlignment(QtCore.Qt.AlignCenter if i != 1 else QtCore.Qt.AlignLeft)
+                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                qitem.setData(QtGui.QFont("Courier New", fontsize), QtCore.Qt.FontRole)
+                qitemList.append(qitem)
+            self.tmodel_datalog.appendRow(qitemList)
+                    
+        for column in [1, 2]:
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+        self.ui.datalogTable.resizeRowsToContents()
         
         
     def clearSearchBox(self):
@@ -3159,6 +3193,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateFileHeader()
             setByteSwap(self.needByteSwap)   # specify the parse endian
             self.updateDutSummaryTable()
+            self.updateRuntimeInfoTable()
             self.updateStatTableContent()
             self.updateTabContent(forceUpdate=True)
             
