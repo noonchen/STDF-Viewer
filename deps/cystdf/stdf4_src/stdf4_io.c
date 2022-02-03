@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Sat Jan 29 2022
+ * Last Modified: Thu Feb 03 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -104,7 +104,7 @@ int _stdf_close_org(void* stdf){
 stdf_fops stdf_fops_org = {
     _stdf_open_org,
     _stdf_read_org,
-    _stdf_skip_org,
+    // _stdf_skip_org,
     _stdf_close_org
 };
 
@@ -156,7 +156,7 @@ int _stdf_close_gz(void* stdf){
 stdf_fops stdf_fops_gz = {
     _stdf_open_gz,
     _stdf_read_gz,
-    _stdf_skip_gz,
+    // _stdf_skip_gz,
     _stdf_close_gz
 };
 
@@ -207,10 +207,62 @@ int _stdf_close_bz(void* stdf){
 stdf_fops stdf_fops_bz = {
     _stdf_open_bz,
     _stdf_read_bz,
-    _stdf_skip_bz,
+    // _stdf_skip_bz,
     _stdf_close_bz
 };
 
+
+/* ZIP */
+int _stdf_open_zip(void* stdf, void* filename){
+    STDF* std = (STDF*)stdf;
+#ifdef _WIN32
+    zlib_filefunc64_def ffunc;
+    fill_win32_filefunc64W(&ffunc);
+    std->zipF = unzOpen2_64(filename, &ffunc);
+#else
+    std->zipF = unzOpen64(filename);
+#endif
+    unzGoToFirstFile(std->zipF);
+    unzOpenCurrentFile(std->zipF);
+
+    if (std->zipF == NULL) {
+        printf("file handler is null, failed to open %s\n", (char*)filename);
+        unzCloseCurrentFile(std->zipF);
+        unzClose(std->zipF);        
+        return OS_FAIL;
+    }
+    return STD_OK;
+}
+
+int _stdf_read_zip(void* stdf, void* buf, int length){
+    STDF* std = (STDF*)stdf;
+    int nread = unzReadCurrentFile(std->zipF, buf, length);
+    if (nread != length) {
+        return STD_EOF;
+    }
+    return STD_OK;
+}
+
+int _stdf_skip_zip(void* stdf, int num){
+    return STD_OK;
+}
+
+int _stdf_close_zip(void* stdf){
+    STDF* std = (STDF*)stdf;
+    unzCloseCurrentFile(std->zipF);
+    int status = unzClose(std->zipF);
+    if (status != UNZ_OK) {
+        return OS_FAIL;
+    }
+    return STD_OK;
+}
+
+stdf_fops stdf_fops_zip = {
+    _stdf_open_zip,
+    _stdf_read_zip,
+    // _stdf_skip_zip,
+    _stdf_close_zip
+};
 
 
 /* API */
@@ -232,6 +284,8 @@ STDERR stdf_open(STDF** sh_ptr, void* filename) {
         sh->fmt = BZ_compressed;
     } else if (!_wcsnicmp(ext, L".bz2", 4)){
         sh->fmt = BZ_compressed;
+    } else if (!_wcsnicmp(ext, L".zip", 4)){
+        sh->fmt = ZIP_compressed;    
     } else {
         sh->fmt = NotCompressed;
     }
@@ -243,6 +297,8 @@ STDERR stdf_open(STDF** sh_ptr, void* filename) {
         sh->fmt = BZ_compressed;
     } else if (!strncasecmp(ext, ".bz2", 4)){
         sh->fmt = BZ_compressed;
+    } else if (!strncasecmp(ext, ".zip", 4)){
+        sh->fmt = ZIP_compressed;
     } else {
         sh->fmt = NotCompressed;
     }
@@ -257,6 +313,10 @@ STDERR stdf_open(STDF** sh_ptr, void* filename) {
     case BZ_compressed:
         sh->bzF = NULL;
         sh->fops = &stdf_fops_bz;
+        break;
+    case ZIP_compressed:
+        sh->zipF = NULL;
+        sh->fops = &stdf_fops_zip;
         break;
     
     default:

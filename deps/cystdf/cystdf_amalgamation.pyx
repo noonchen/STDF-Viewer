@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Sat Jan 29 2022
+# Last Modified: Fri Feb 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -31,6 +31,7 @@ import logging
 import platform
 import numpy as np
 import threading as th
+import zipfile
 
 cimport numpy as cnp
 cimport cython
@@ -268,6 +269,9 @@ cdef uint64_t getFileSize(str filepath) except *:
         # for gzip, read last 4 bytes as filesize
         pyfh.seek(-4, 2)
         fsize = <uint64_t>(int.from_bytes(pyfh.read(4), "little"))
+    elif filepath.endswith(".zip"):
+        with zipfile.ZipFile(filepath, "r") as zipObj:
+            fsize = <uint64_t>(zipObj.filelist[0].file_size)
     else:
         # bzip file size is not known before uncompressing, return compressed file size instead
         fsize = <uint64_t>(pyfh.seek(0, 2))
