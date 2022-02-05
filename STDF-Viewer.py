@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Jan 29 2022
+# Last Modified: Sat Feb 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -34,6 +34,7 @@ from enum import IntEnum
 from random import choice
 from base64 import b64decode
 from operator import itemgetter
+import zipfile
 from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 from deps.ui.ImgSrc_svg import ImgDict
@@ -222,6 +223,46 @@ def isHexColor(color: str) -> bool:
         return True
     else:
         return False
+
+
+class StdfFile:
+    def __init__(self, path: str):
+        self.fpath = path
+        self.ftype = ""
+        
+        if (path.lower()).endswith("gz"):
+            self.ftype = "gz"
+            self.fHandle = IndexedGzipFile(filename=path, mode='rb')
+        
+        elif (path.lower()).endswith("bz2"):
+            self.ftype = "bzip"
+            self.fHandle = IndexedBzip2File(path, parallelization = 4)
+        
+        elif (path.lower()).endswith("zip"):
+            self.ftype = "zip"
+            self.zipObj = zipfile.ZipFile(path, "r")
+            if len(self.zipObj.namelist()) == 0:
+                raise OSError("Empty zip file detected")
+            # open the 1st file in zip, ignore the rest
+            fileNameOf1st = self.zipObj.namelist()[0]
+            if self.zipObj.filelist[0].file_size == 0:
+                raise OSError(f"The first item in the zip is not a file: \n{fileNameOf1st}")            
+            self.fHandle = self.zipObj.open(fileNameOf1st, "r", force_zip64=True)
+        
+        else:
+            self.ftype = "orig"
+            self.fHandle = open(path, 'rb')
+    
+    def seek(self, offset: int, whence: int = 0):
+        self.fHandle.seek(offset, whence)
+        
+    def read(self, numBytes: int):
+        return self.fHandle.read(numBytes)
+    
+    def close(self):
+        self.fHandle.close()
+        if self.ftype == "zip":
+            self.zipObj.close()
 
 
 class FontNames:
@@ -837,15 +878,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if pathList: 
             f = pathList[0]     # only open the first file
             self.updateRecentFolder(f)
-            if f.endswith("gz"):
-                self.std_handle = IndexedGzipFile(filename=f, mode='rb')
-                setattr(self.std_handle, "fpath", f)     # manually add file path to gz/bzip handler
-            elif f.endswith("bz2"):
-                self.std_handle = IndexedBzip2File(f, parallelization = 4)  # enable back seeking
-                setattr(self.std_handle, "fpath", f)
-            else:
-                self.std_handle = open(f, 'rb')
-                setattr(self.std_handle, "fpath", f)
+            self.std_handle = StdfFile(f)
             self.stdHandleList.append(self.std_handle)
             
         # init and connect signals
@@ -874,7 +907,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.failCntDict = {}
         self.dutArray = np.array([])    # complete dut array in the stdf
         self.dutSiteInfo = {}           # site of each dut in self.dutArray
-        self.fileInfoDict = {}          # info of MIR and WCR
+        self.waferOrientation = ["Unknown", "Unknown"]
         self.dutFlagBitInfo = {}        # description of dut flag
         self.testFlagBitInfo = {}       # description of test flag
         self.returnStateInfo = {}       # description of return state
@@ -1070,24 +1103,14 @@ class MyWindow(QtWidgets.QMainWindow):
             f, _typ = QFileDialog.getOpenFileName(self, 
                                                   caption=self.tr("Select a STD File To Open"), 
                                                   directory=self.settingParams.recentFolder,
-                                                  filter=self.tr("All Supported Files (*.std *.stdf *.std* *.gz *.bz2);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2)"),)
+                                                  filter=self.tr("All Supported Files (*.std *.stdf *.std* *.gz *.bz2 *.zip);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2 *.zip)"),)
         else:
             f = os.path.normpath(f)
             
         if os.path.isfile(f):
             # store folder path
             self.updateRecentFolder(f)
-            
-            if f.endswith("gz"):
-                self.std_handle = IndexedGzipFile(filename=f, mode='rb')
-                setattr(self.std_handle, "fpath", f)     # manually add file path to gz/bzip handler
-            elif f.endswith("bz2"):
-                self.std_handle = IndexedBzip2File(f, parallelization = 4)
-                setattr(self.std_handle, "fpath", f)
-            else:
-                self.std_handle = open(f, 'rb')            
-                setattr(self.std_handle, "fpath", f)
-            # clear handles on each new file open
+            self.std_handle = StdfFile(f)
             self.stdHandleList.append(self.std_handle)   # if a file is already open, its handle is saved in case the new file not opened successfully
             self.callFileLoader(self.std_handle)
               
@@ -1610,9 +1633,9 @@ class MyWindow(QtWidgets.QMainWindow):
             extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Unknown: "), str(statsDict["Unknown"])]])
 
         # append mir info
-        self.fileInfoDict = self.DatabaseFetcher.getFileInfo()
+        fileInfoDict = self.DatabaseFetcher.getFileInfo()
         for fn in mirFieldNames:
-            value:str = self.fileInfoDict.get(fn, "")
+            value:str = fileInfoDict.pop(fn, "")
             if fn == "BYTE_ORD":
                 self.needByteSwap = not (value.lower().startswith(sys.byteorder))
             if value == "" or value == " " : continue
@@ -1620,23 +1643,35 @@ class MyWindow(QtWidgets.QMainWindow):
             
         # append wafer configuration info
         if self.containsWafer:
-            wafer_unit = self.fileInfoDict.get("WF_UNITS", "")
-            if "WAFR_SIZ" in self.fileInfoDict:
-                extraInfoList.append([self.tr("Wafer Size: "), f'{self.fileInfoDict["WAFR_SIZ"]} {wafer_unit}'])
-            if "DIE_WID" in self.fileInfoDict and "DIE_HT" in self.fileInfoDict:
-                extraInfoList.append([self.tr("Wafer Die Width × Height: "), f'{self.fileInfoDict["DIE_WID"]} {wafer_unit} × {self.fileInfoDict["DIE_HT"]} {wafer_unit}'])
-            if "CENTER_X" in self.fileInfoDict and "CENTER_Y" in self.fileInfoDict:
-                extraInfoList.append([self.tr("Wafer Center: "), f'({self.fileInfoDict["CENTER_X"]}, {self.fileInfoDict["CENTER_Y"]})'])
+            wafer_unit = fileInfoDict.pop("WF_UNITS", "")
+            if "WAFR_SIZ" in fileInfoDict:
+                WAFR_SIZ = fileInfoDict.pop("WAFR_SIZ")
+                extraInfoList.append([self.tr("Wafer Size: "), f'{WAFR_SIZ} {wafer_unit}'])
+            if "DIE_WID" in fileInfoDict and "DIE_HT" in fileInfoDict:
+                DIE_WID = fileInfoDict.pop("DIE_WID")
+                DIE_HT = fileInfoDict.pop("DIE_HT")
+                extraInfoList.append([self.tr("Wafer Die Width Height: "), f'{DIE_WID} {wafer_unit} × {DIE_HT} {wafer_unit}'])
+            if "CENTER_X" in fileInfoDict and "CENTER_Y" in fileInfoDict:
+                CENTER_X = fileInfoDict.pop("CENTER_X")
+                CENTER_Y = fileInfoDict.pop("CENTER_Y")
+                extraInfoList.append([self.tr("Wafer Center: "), f'({CENTER_X}, {CENTER_Y})'])
             
             direction_symbol = {"U": self.tr("Up"), 
                                 "D": self.tr("Down"), 
                                 "L": self.tr("Left"), 
                                 "R": self.tr("Right")}
-            flat_orient = direction_symbol.get(self.fileInfoDict.get("WF_FLAT", ""), self.tr("Unknown"))
-            x_orient = direction_symbol.get(self.fileInfoDict.get("POS_X", ""), self.tr("Unknown"))
-            y_orient = direction_symbol.get(self.fileInfoDict.get("POS_Y", ""), self.tr("Unknown"))
+            flat_orient = direction_symbol.get(fileInfoDict.pop("WF_FLAT", ""), self.tr("Unknown"))
+            x_orient = direction_symbol.get(fileInfoDict.pop("POS_X", ""), self.tr("Unknown"))
+            y_orient = direction_symbol.get(fileInfoDict.pop("POS_Y", ""), self.tr("Unknown"))
+            self.waferOrientation = [x_orient, y_orient]
             extraInfoList.append([self.tr("Wafer Flat Direction: "), f'{flat_orient}'])
             extraInfoList.append([self.tr("Wafer XY Direction: "), f'({x_orient}, {y_orient})'])
+            
+        # append other info: ATR, RDR, SDRs, sort names for better display
+        for propertyName in sorted(fileInfoDict.keys()):
+            value = fileInfoDict[propertyName]
+            if value == "" or value == " " : continue
+            extraInfoList.append([f"{propertyName}: ", value])
             
         for tmpRow in extraInfoList:
             qitemRow = [QtGui.QStandardItem(ele) for ele in tmpRow]
@@ -3024,9 +3059,9 @@ class MyWindow(QtWidgets.QMainWindow):
         ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
         ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
         # switch x, y positive direction if WCR specified the orientation.
-        if self.fileInfoDict.get("POS_X", "") == "L":   # x towards left
+        if self.waferOrientation[0] == self.tr("Left"):   # x towards left
             ax.invert_xaxis()
-        if self.fileInfoDict.get("POS_Y", "") == "D":   # y towards down
+        if self.waferOrientation[1] == self.tr("Down"):   # y towards down
             ax.invert_yaxis()
             
         return ax
@@ -3096,8 +3131,13 @@ class MyWindow(QtWidgets.QMainWindow):
             self.clearAllContents()
             
             # remove old std file handler
+            if len(self.stdHandleList) == 2:
+                if not self.stdHandleList[0] is None:
+                    self.stdHandleList[0].close()
             self.stdHandleList = [self.std_handle]
+            self.DatabaseFetcher.closeDB()
             databasePath = os.path.join(sys.rootFolder, "logs", "tmp.db")
+            os.rename(os.path.join(sys.rootFolder, "logs", "tmp_new.db"), databasePath)
             self.DatabaseFetcher.connectDB(databasePath)
             self.dbConnected = True
             
@@ -3199,8 +3239,13 @@ class MyWindow(QtWidgets.QMainWindow):
             
         else:
             # aborted, restore to original stdf file handler
+            self.std_handle.close()
             self.std_handle = self.stdHandleList[0]
             self.stdHandleList = [self.std_handle]
+            # delete tmp_new.db
+            tmp_new_path = os.path.join(sys.rootFolder, "logs", "tmp_new.db")
+            if os.path.exists(tmp_new_path):
+                os.remove(tmp_new_path)
 
     
     @Slot(str, bool, bool, bool)
