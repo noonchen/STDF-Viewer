@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Dec 23 2021
+# Last Modified: Sat Feb 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -61,6 +61,7 @@ class tab(IntEnum):
     Wafer = 4   # It should match tab order of the main window
     Stat = 5
     FileInfo = 6
+    GDR_DTR = 7
 
 
 class REC(IntEnum):
@@ -75,6 +76,9 @@ class sv:
     # file info
     finfoRow     = 0
     finfoCol     = 0
+    # GDR/DTR
+    drRow        = 0
+    drCol        = 0
     
     trendRow     = 0
     histoRow     = 0
@@ -91,6 +95,9 @@ class sv:
         # file info
         sv.finfoRow  = 0
         sv.finfoCol  = 0
+        # GDR/DTR
+        sv.drRow     = 0
+        sv.drCol     = 0
         
         sv.trendRow  = 0
         sv.histoRow  = 0
@@ -179,7 +186,7 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
         
     
-    def waitForImage(self, head, site, test_num, pmr, chartType):
+    def waitForImage(self, head, site, test_num, pmr, chartType) -> io.BytesIO:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
         self.retrieveImageSignal.emit(head, site, test_num, pmr, chartType)
@@ -189,7 +196,7 @@ class reportGenerator(QtCore.QObject):
         return self.channel.imageChannel
             
             
-    def waitForDataList(self, chartType, kargs):
+    def waitForDataList(self, chartType, kargs) -> list:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
         self.retrieveDataListSignal.emit(chartType, kargs)
@@ -200,7 +207,7 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel
     
     
-    def waitForTableData(self, conType):
+    def waitForTableData(self, conType) -> list[str]:
         self.mutex.lock()
         self.retrieveTableDataSignal.emit(conType)
         self.condWait.wait(self.mutex)
@@ -277,11 +284,12 @@ class reportGenerator(QtCore.QObject):
             2. write the contents that don't relay on the test numbers: file header, bin, wafer, dut summary (dut info part)
             3. loop thru test numbers, prepare the test data, write dut summary (test data part), then loop thru site & head to get trend/histo images
             '''
-            for cont in [tab.FileInfo, tab.DUT, tab.Stat, tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+            for cont in [tab.FileInfo, tab.DUT, tab.GDR_DTR, tab.Stat, tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
                 # sheet order in the xlsx is fixed
                 sheetName = ""
                 if   cont == tab.FileInfo:  sheetName = self.tr("File Info")
                 elif cont == tab.DUT:       sheetName = self.tr("DUT Summary")
+                elif cont == tab.GDR_DTR:   sheetName = self.tr("GDR & DTR Summary")
                 elif cont == tab.Stat:      sheetName = self.tr("Test Statistics")
                 elif cont == tab.Trend:     sheetName = self.tr("Trend Chart")
                 elif cont == tab.Histo:     sheetName = self.tr("Histogram")
@@ -309,7 +317,30 @@ class reportGenerator(QtCore.QObject):
                     
                 loopCnt += 1
                 sendProgress(loopCnt)
-                [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                
+            # GDR & DTR Summary
+            if tab.GDR_DTR in self.contL:
+                # Sheet for GDR & DTR
+                GDR_DTR_Sheet:Worksheet = sheetDict[tab.GDR_DTR]
+                headerLabels = [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")]
+                col_width = [len(s) for s in headerLabels]
+                
+                GDR_DTR_Sheet.write_row(sv.drRow, sv.drCol, headerLabels, centerStyle)
+                sv.drRow += 1
+                data = self.waitForTableData(tab.GDR_DTR)
+                                        
+                for row in data:
+                    if self.forceQuit: return
+                    # remove \n that added besides values
+                    row = [ele.strip("\n") for ele in row]
+                    write_row_col(GDR_DTR_Sheet, sv.drRow, sv.drCol, row, centerStyle, writeRow=True)
+                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
+                    sv.drRow += 1
+                    
+                loopCnt += 1
+                sendProgress(loopCnt)
+                _ = [GDR_DTR_Sheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                 
             # dut summary (dut part)
             if tab.DUT in self.contL:
@@ -338,7 +369,7 @@ class reportGenerator(QtCore.QObject):
                     
                 loopCnt += 1
                 sendProgress(loopCnt)
-                [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                 # set current col to the last empty column
                 sv.dutCol = len(headerLabelList[0])
             
@@ -371,7 +402,7 @@ class reportGenerator(QtCore.QObject):
                         
                         loopCnt += 1
                         sendProgress(loopCnt)
-                [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
             
             # wafer sheet
             if tab.Wafer in self.contL:
@@ -620,6 +651,8 @@ class progressDisplayer(QtWidgets.QDialog):
             model = self.parent().parent.tmodel_dut
         elif conType == tab.FileInfo:
             model = self.parent().parent.tmodel_info
+        elif conType == tab.GDR_DTR:
+            model = self.parent().parent.tmodel_datalog
             
         if model:
             for row in range(model.rowCount()):
@@ -680,6 +713,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.DUT_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.GDR_DTR_cb.clicked.connect(self.changeBtnStyle)
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
@@ -851,6 +885,7 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.DUT_cb.isChecked(): selectedContents.append(tab.DUT)
         if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(tab.FileInfo)
         if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(tab.Wafer)
+        if self.exportUI.GDR_DTR_cb.isChecked(): selectedContents.append(tab.GDR_DTR)
         
         return selectedContents
     
@@ -875,8 +910,8 @@ class stdfExporter(QtWidgets.QDialog):
         currentPage = self.exportUI.stackedWidget.currentIndex()
         
         if currentPage == 0:
-            # change to "Confirm" only if file info is selected
-            if self.getSelectedContents() == [tab.FileInfo]:
+            # change to "Confirm" only if file info & GDR/DTR are selected
+            if set(self.getSelectedContents()) | {tab.FileInfo, tab.GDR_DTR} == {tab.FileInfo, tab.GDR_DTR}:
                 changeToConfirm = True
         
         elif currentPage == 2:
@@ -945,7 +980,7 @@ class stdfExporter(QtWidgets.QDialog):
                 self.changeBtnStyle()
                 
             else:
-                # only file info is selected
+                # only file info & GDR/DTR are selected
                 self.start()
         
         elif currentPage == 1:
@@ -991,6 +1026,7 @@ class stdfExporter(QtWidgets.QDialog):
         if tab.FileInfo in self.contL:  self.totalLoopCnt += 1
         if tab.DUT in self.contL:       self.totalLoopCnt += (1 + len(self.numTupL))   # dut info part + test part
         if tab.Wafer in self.contL:     self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
+        if tab.GDR_DTR in self.contL:   self.totalLoopCnt += 1
                     
         self.pd = progressDisplayer(parent=self)
         if self.pd.errorOccured:

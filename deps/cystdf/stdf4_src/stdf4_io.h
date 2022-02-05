@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Thu May 20 2021
+ * Last Modified: Thu Feb 03 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include "zlib_src/zlib.h"
 #include "bzip2_src/bzlib.h"
+#include "minizip_src/unzip.h"
 
 #ifndef __STDF_IO_TYPES__
 #define __STDF_IO_TYPES__
@@ -44,16 +45,17 @@ typedef enum {
 
 
 typedef enum {
-    GZ_compressed   = 0,
-    BZ_compressed   = 1,
-    NotCompressed   = 2
+    NotCompressed   = 0,
+    GZ_compressed   = 1,
+    BZ_compressed   = 2,
+    ZIP_compressed  = 3,
 } stdf_format;
 
 
 typedef struct _stdf_fops {
     int (*stdf_open)(void* stdf, void* filename);
     int (*stdf_read)(void* stdf, void* buf, int length);
-    int (*stdf_skip)(void* stdf, int num);
+    // int (*stdf_skip)(void* stdf, int num);
     int (*stdf_close)(void* stdf);
 } stdf_fops;
 
@@ -64,6 +66,7 @@ typedef struct _stdf_handler {
     FILE*           orgF;
     gzFile          gzF;
     BZFILE*         bzF;
+    unzFile         zipF;
     stdf_fops*      fops;
 } STDF;
 

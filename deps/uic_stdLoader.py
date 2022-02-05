@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Dec 15 2021
+# Last Modified: Fri Feb 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -165,7 +165,7 @@ class stdReader(QtCore.QObject):
         try:
             if self.msgSignal: self.msgSignal.emit("Loading STD file...", False, False, False)
             start = time.time()
-            databasePath = os.path.join(sys.rootFolder, "logs", "tmp.db")
+            databasePath = os.path.join(sys.rootFolder, "logs", "tmp_new.db")
             stdfDataRetriever(filepath=self.stdPath, dbPath=databasePath, QSignal=self.progressBarSignal, flag=self.flag)
             end = time.time()
             print(end - start)
