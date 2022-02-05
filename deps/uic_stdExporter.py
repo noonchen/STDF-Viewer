@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Fri Feb 04 2022
+# Last Modified: Sat Feb 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -317,7 +317,7 @@ class reportGenerator(QtCore.QObject):
                     
                 loopCnt += 1
                 sendProgress(loopCnt)
-                [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                 
             # GDR & DTR Summary
             if tab.GDR_DTR in self.contL:
@@ -340,7 +340,7 @@ class reportGenerator(QtCore.QObject):
                     
                 loopCnt += 1
                 sendProgress(loopCnt)
-                [GDR_DTR_Sheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [GDR_DTR_Sheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                 
             # dut summary (dut part)
             if tab.DUT in self.contL:
@@ -369,7 +369,7 @@ class reportGenerator(QtCore.QObject):
                     
                 loopCnt += 1
                 sendProgress(loopCnt)
-                [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
                 # set current col to the last empty column
                 sv.dutCol = len(headerLabelList[0])
             
@@ -402,7 +402,7 @@ class reportGenerator(QtCore.QObject):
                         
                         loopCnt += 1
                         sendProgress(loopCnt)
-                [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+                _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
             
             # wafer sheet
             if tab.Wafer in self.contL:
