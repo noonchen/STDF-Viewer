@@ -81,7 +81,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 # QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
-Version = "V3.3.1"
+Version = "V3.4.0"
 isMac = platform.system() == 'Darwin'
     
 # save config path to sys
