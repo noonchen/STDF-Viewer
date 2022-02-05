@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_exportUI_new.ui'
+# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_exportUI.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.4
 #
@@ -72,6 +72,9 @@ class Ui_exportUI(object):
         self.Wafer_cb = QtWidgets.QCheckBox(self.content_selection)
         self.Wafer_cb.setObjectName("Wafer_cb")
         self.gridLayout_2.addWidget(self.Wafer_cb, 1, 1, 1, 1)
+        self.GDR_DTR_cb = QtWidgets.QCheckBox(self.content_selection)
+        self.GDR_DTR_cb.setObjectName("GDR_DTR_cb")
+        self.gridLayout_2.addWidget(self.GDR_DTR_cb, 1, 3, 1, 1)
         self.horizontalLayout_4.addLayout(self.gridLayout_2)
         self.verticalLayout_2.addWidget(self.content_selection)
         self.exportPath_selection = QtWidgets.QGroupBox(self.contentPage)
@@ -398,6 +401,7 @@ class Ui_exportUI(object):
         self.Histo_cb.setText(_translate("exportUI", "Histogram"))
         self.Bin_cb.setText(_translate("exportUI", "Bin Chart"))
         self.Wafer_cb.setText(_translate("exportUI", "Wafer Map"))
+        self.GDR_DTR_cb.setText(_translate("exportUI", "GDR && DTR Summary"))
         self.exportPath_selection.setTitle(_translate("exportUI", "Export Path Selection"))
         self.toolButton.setText(_translate("exportUI", "..."))
         self.test_selection.setTitle(_translate("exportUI", "Test Selection"))
