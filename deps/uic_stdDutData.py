@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Tue Mar 01 2022
+# Last Modified: Mon Mar 07 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -129,6 +129,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         
         self.transposeBtn = QPushButton("T")
         self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
+        self.transposeBtn.setShortcut("t")
         self.UI.horizontalLayout.insertWidget(0, self.transposeBtn)
         self.transposeBtn.clicked.connect(self.onTransposeTable)
         
@@ -237,8 +238,8 @@ class dutDataDisplayer(QtWidgets.QDialog):
             self.activeModel = self.flipModel
         else:
             self.activeModel = self.normalModel
-        self.UI.tableView_dutData.setModel(self.activeModel)
         self.activeModel.layoutAboutToBeChanged.emit()
+        self.UI.tableView_dutData.setModel(self.activeModel)
         self.activeModel.layoutChanged.emit()
     
     
