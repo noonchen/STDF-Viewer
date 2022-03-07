@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Tue Jan 04 2022
+# Last Modified: Mon Mar 07 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -25,11 +25,11 @@
 
 
 import subprocess, os, platform
-from .customizedQtClass import StyleDelegateForTable_List
+from .customizedQtClass import StyleDelegateForTable_List, FlippedProxyModel, NormalProxyModel
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal, QTranslator
+from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog, QPushButton
+from PyQt5.QtCore import pyqtSignal as Signal, QTranslator, Qt
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
@@ -127,6 +127,12 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = ([], [], [], [], [])
         self.hideSignal = hideSignal
         
+        self.transposeBtn = QPushButton("T")
+        self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
+        self.transposeBtn.setShortcut("t")
+        self.UI.horizontalLayout.insertWidget(0, self.transposeBtn)
+        self.transposeBtn.clicked.connect(self.onTransposeTable)
+        
         self.UI.save.clicked.connect(self.onSave_csv)
         self.UI.save_xlsx.clicked.connect(self.onSave_xlsx)
         self.UI.close.clicked.connect(self.close)
@@ -145,7 +151,14 @@ class dutDataDisplayer(QtWidgets.QDialog):
         
     def init_Table(self):
         self.tmodel = QtGui.QStandardItemModel()
-        self.UI.tableView_dutData.setModel(self.tmodel)
+        # proxy model for normal display & transpose
+        self.flipModel = FlippedProxyModel()
+        self.normalModel = NormalProxyModel()
+        self.flipModel.setSourceModel(self.tmodel)
+        self.normalModel.setSourceModel(self.tmodel)
+        # use normal model as default
+        self.activeModel = self.normalModel
+        self.UI.tableView_dutData.setModel(self.activeModel)
         self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
         self.sd.setParent(self.UI.tableView_dutData)
@@ -153,20 +166,21 @@ class dutDataDisplayer(QtWidgets.QDialog):
 
 
     def refresh_Table(self):
+        self.activeModel.layoutAboutToBeChanged.emit()
         # clear
         self.tmodel.removeColumns(0, self.tmodel.columnCount())
         self.tmodel.removeRows(0, self.tmodel.rowCount())
         # header
-        self.hh = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
-                   self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), 
-                   self.tr("DUT Flag")] + [tmp[0] for tmp in self.dutData]
+        hh = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"),
+              self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"),
+              self.tr("DUT Flag")] + [tmp[0] for tmp in self.dutData]
         vh_base = [self.tr("Test Number"), self.tr("HiLimit"), self.tr("LoLimit"), self.tr("Unit")]
-        self.vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
+        vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
         vh_len = len(vh_base)
 
         # append value
         # get dut pass/fail list
-        statIndex = self.hh.index(self.tr("DUT Flag"))
+        statIndex = hh.index(self.tr("DUT Flag"))
         self.dutFlagInfo = [""] * vh_len + self.dutFlagInfo     # prepend empty tips for non-data cell
         dutStatus = ["P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
         for col_tuple in zip(*self.dutInfo):
@@ -207,27 +221,42 @@ class dutDataDisplayer(QtWidgets.QDialog):
                 qitemCol.append(qitem)                        
             self.tmodel.appendColumn(qitemCol)
         
-        self.tmodel.setHorizontalHeaderLabels(self.hh)
-        self.tmodel.setVerticalHeaderLabels(self.vh)
+        self.tmodel.setHorizontalHeaderLabels(hh)
+        self.tmodel.setVerticalHeaderLabels(vh)
         self.UI.tableView_dutData.horizontalHeader().setVisible(True)
         self.UI.tableView_dutData.verticalHeader().setVisible(True)        
         # resize cells
         header = self.UI.tableView_dutData.horizontalHeader()
         for column in range(header.model().columnCount()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
+        # emit signal to show data
+        self.activeModel.layoutChanged.emit()
         
         
+    def onTransposeTable(self):
+        if self.activeModel == self.normalModel:
+            self.activeModel = self.flipModel
+        else:
+            self.activeModel = self.normalModel
+        self.activeModel.layoutAboutToBeChanged.emit()
+        self.UI.tableView_dutData.setModel(self.activeModel)
+        self.activeModel.layoutChanged.emit()
+    
+    
     def onSave_csv(self):
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("CSV file (*.csv)"))
         checkComma = lambda text: '"' + text + '"' if "," in text else text
         if outPath:
+            rowTotal = self.activeModel.rowCount()
+            columnTotal = self.activeModel.columnCount()
+            # if comma is in the string, needs to close with ""
+            hh = [checkComma(self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole)) for i in range(columnTotal)]
+            vh = [checkComma(self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole)) for i in range(rowTotal)]
             with open(outPath, "w") as f:
-                # if comma is in the string, needs to close with ""
-                self.hh = [checkComma(ele) for ele in self.hh]
-                f.write(",".join([""] + self.hh)+"\n")
-                for row in range(self.tmodel.rowCount()):
-                    rowDataList = [checkComma(self.tmodel.data(self.tmodel.index(row, col))) for col in range(self.tmodel.columnCount())]
-                    f.write(",".join([self.vh[row]] + rowDataList)+"\n")
+                f.write(",".join([""] + hh)+"\n")
+                for row in range(rowTotal):
+                    rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), Qt.DisplayRole)) for col in range(columnTotal)]
+                    f.write(",".join([vh[row]] + rowDataList)+"\n")
             msgbox = QtWidgets.QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
@@ -258,19 +287,23 @@ class dutDataDisplayer(QtWidgets.QDialog):
             with xw.Workbook(outPath) as wb:
                 noStyle = wb.add_format({"align": "center"})
                 failStyle = wb.add_format({"bg_color": "#CC0000", "bold": True, "align": "center"})
-                
                 sheetOBJ = wb.add_worksheet(self.tr("DUT Data"))
-                colHeader = [""] + self.hh
-                write_row(sheetOBJ, 0, 0, colHeader, [noStyle]*len(colHeader))
+                
+                rowTotal = self.activeModel.rowCount()
+                columnTotal = self.activeModel.columnCount()
+                colHeader = [""] + [self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole) for i in range(columnTotal)]
+                vh = [self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole) for i in range(rowTotal)]
+                
+                write_row(sheetOBJ, 0, 0, colHeader, [noStyle] * (columnTotal + 1))
                 col_width = [len(s) for s in colHeader]     # get max string len to adjust cell width
                 
-                for row in range(self.tmodel.rowCount()):
-                    rowDataList = [self.vh[row]]    # row header, #num
-                    rowStyleList = [noStyle]        # no style for row header
-                    if len(self.vh[row]) > col_width[0]: col_width[0] = len(self.vh[row])
+                for row in range(rowTotal):
+                    rowDataList = [vh[row]]     # row header
+                    rowStyleList = [noStyle]    # no style for row header
+                    if len(vh[row]) > col_width[0]: col_width[0] = len(vh[row])
                     
-                    for col in range(self.tmodel.columnCount()):
-                        qitem = self.tmodel.item(row, col)
+                    for col in range(columnTotal):
+                        qitem = self.activeModel.item(row, col)
                         data = qitem.text()
                         color = qitem.background().color().name().lower()
                         rowDataList.append(data)
