@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Thu Dec 09 2021
+# Last Modified: Tue Mar 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -26,7 +26,7 @@
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QStyledItemDelegate
-from PyQt5.QtCore import QModelIndex, QSortFilterProxyModel
+from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
 
 
 
@@ -53,7 +53,9 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
         model = parentWidget.model()
         # TableView
         if isinstance(parentWidget, QtWidgets.QTableView):
-            if isinstance(model, QtCore.QSortFilterProxyModel):
+            if isinstance(model, QtCore.QSortFilterProxyModel) or \
+               isinstance(model, FlippedProxyModel) or \
+               isinstance(model, NormalProxyModel):
                 sourceIndex = model.mapToSource(index)
                 qitem = model.sourceModel().itemFromIndex(sourceIndex)
             else:
@@ -164,6 +166,78 @@ class DutSortFilter(QSortFilterProxyModel):
         
         return hsMatched
     
+    
+class FlippedProxyModel(QAbstractProxyModel):
+    '''
+    For transposing tableView display, modified from:
+    https://www.howtobuildsoftware.com/index.php/how-do/bgJv/pyqt-pyside-qsqltablemodel-qsqldatabase-qsqlrelationaltablemodel-with-qsqlrelationaldelegate-not-working-behind-qabstractproxymodel
+    '''
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def mapFromSource(self, index):
+        return self.createIndex(index.column(), index.row())
+
+    def mapToSource(self, index):
+        return self.sourceModel().index(index.column(), index.row(), QModelIndex())
+
+    def columnCount(self, parent = QModelIndex()):
+        return self.sourceModel().rowCount(parent)
+
+    def rowCount(self, parent = QModelIndex()):
+        return self.sourceModel().columnCount(parent)
+
+    def index(self, row, column, parent = QModelIndex()):
+        return self.createIndex(row, column)
+
+    def parent(self, index):
+        return QModelIndex()
+
+    def data(self, index, role):
+        return self.sourceModel().data(self.mapToSource(index), role)
+
+    def item(self, row, column) -> QtGui.QStandardItem:
+        return self.sourceModel().item(column, row)
+    
+    def headerData(self, section, orientation, role):
+        if orientation == Qt.Horizontal:
+            return self.sourceModel().headerData(section, Qt.Vertical, role)
+        if orientation == Qt.Vertical:
+            return self.sourceModel().headerData(section, Qt.Horizontal, role)
+
+
+# For normal tableView display
+class NormalProxyModel(QAbstractProxyModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def mapFromSource(self, index):
+        return self.createIndex(index.row(), index.column())
+
+    def mapToSource(self, index):
+        return self.sourceModel().index(index.row(), index.column(), QModelIndex())
+
+    def columnCount(self, parent = QModelIndex()):
+        return self.sourceModel().columnCount(parent)
+
+    def rowCount(self, parent = QModelIndex()):
+        return self.sourceModel().rowCount(parent)
+
+    def index(self, row, column, parent = QModelIndex()):
+        return self.createIndex(row, column)
+
+    def parent(self, index):
+        return QModelIndex()
+
+    def data(self, index, role):
+        return self.sourceModel().data(self.mapToSource(index), role)
+
+    def item(self, row, column) -> QtGui.QStandardItem:
+        return self.sourceModel().item(column, row)
+    
+    def headerData(self, section, orientation, role):
+        return self.sourceModel().headerData(section, orientation, role)
+
     
 if __name__ == '__main__':
     testStrings = ['Site 1', 'Site 10', 'Site 100', 'Site 2', 'Site 22']
