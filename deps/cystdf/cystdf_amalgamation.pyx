@@ -57,7 +57,7 @@ from libc.stdlib cimport malloc, free, calloc, realloc
 
 # including a str to wchar_t func that missed from cython
 cdef extern from "Python.h":
-    wchar_t* PyUnicode_AsWideCharString(object, Py_ssize_t *)
+    wchar_t* PyUnicode_AsWideCharString(object, Py_ssize_t *) except NULL
 
 logger = logging.getLogger("STDF Viewer")
 
