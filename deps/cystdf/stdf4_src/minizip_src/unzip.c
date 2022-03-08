@@ -85,7 +85,13 @@
 #else
 #   include <errno.h>
 #endif
-
+#ifdef _WIN32
+#   include <wchar.h>
+#   include <io.h>
+#   include <share.h>
+#   include <locale.h>
+#   include <stdio.h>
+#endif
 
 #ifndef local
 #  define local static
@@ -611,12 +617,15 @@ local unzFile unzOpenInternal (const void *path,
         us.z_filefunc = *pzlib_filefunc64_32_def;
     us.is64bitOpenFunction = is64bitOpenFunction;
 
-
-
+#ifdef _WIN32
+    // open file with wchar_t path in windows
+    us.filestream = _wfsopen((wchar_t*)path, L"rb", _SH_DENYWR);
+#else
     us.filestream = ZOPEN64(us.z_filefunc,
                                                  path,
                                                  ZLIB_FILEFUNC_MODE_READ |
                                                  ZLIB_FILEFUNC_MODE_EXISTING);
+#endif
     if (us.filestream==NULL)
         return NULL;
 

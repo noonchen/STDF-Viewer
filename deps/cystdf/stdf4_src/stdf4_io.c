@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 18th 2021
  * -----
- * Last Modified: Thu Feb 03 2022
+ * Last Modified: Sun Feb 06 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -215,13 +215,8 @@ stdf_fops stdf_fops_bz = {
 /* ZIP */
 int _stdf_open_zip(void* stdf, void* filename){
     STDF* std = (STDF*)stdf;
-#ifdef _WIN32
-    zlib_filefunc64_def ffunc;
-    fill_win32_filefunc64W(&ffunc);
-    std->zipF = unzOpen2_64(filename, &ffunc);
-#else
     std->zipF = unzOpen64(filename);
-#endif
+
     unzGoToFirstFile(std->zipF);
     unzOpenCurrentFile(std->zipF);
 
