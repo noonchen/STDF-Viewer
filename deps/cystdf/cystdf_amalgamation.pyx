@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Fri Feb 04 2022
+# Last Modified: Tue Mar 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -261,7 +261,7 @@ cdef void* parse(void* input_args) nogil:
 
 
 cdef uint64_t getFileSize(str filepath) except *:
-    cdef uint64_t fsize
+    cdef uint64_t fsize = 0
 
     pyfh = open(filepath, "rb")
 
@@ -1763,9 +1763,9 @@ cdef class stdfSummarizer:
             bint No_RES_SCAL = False, No_LLimit = False, No_HLimit = False, No_HSpec = False, No_LSpec = False
             bint LLimitChanged = False, HLimitChanged = False
             char* VECT_NAM = NULL
-            char* TEST_TXT
-            char* Unit
-            char* SEQ_NAM
+            char* TEST_TXT = NULL
+            char* Unit = NULL
+            char* SEQ_NAM = NULL
             int SEQ_NAM_LEN = 0
             uint16_t*   pRTN_INDX = NULL   # For FTR & MPR
             uint16_t*   pPGM_INDX = NULL   # For FTR
@@ -1880,7 +1880,7 @@ cdef class stdfSummarizer:
                     sqlite3_bind_text(self.insertTestInfo_stmt, 14, VECT_NAM, -1, NULL) # VECT_NAM
                 if self.programSectionsDepth > 0:
                     for i in range(self.programSectionsDepth):
-                        SEQ_NAM_LEN += (strlen(self.programSections[i]) + 1)
+                        SEQ_NAM_LEN += (strlen(self.programSections[i]) + 2)        # +2 get extra space to prevent crash
                     SEQ_NAM = <char*>calloc(SEQ_NAM_LEN, sizeof(char))
                     if SEQ_NAM:
                         for i in range(self.programSectionsDepth):
