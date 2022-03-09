@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Mon Mar 07 2022
+# Last Modified: Wed Mar 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -78,7 +78,7 @@ class DutDataReader(QtWidgets.QWidget):
         self.stopFlag = False
         self.show()
         
-        self.test_number_tuple_List = [self.parent.getTestNumTup(ele) for ele in self.parent.completeTestList]
+        self.test_number_tuple_List = [self.parent.getTestTuple(ele) for ele in self.parent.completeTestList]
         self.total = len(self.test_number_tuple_List)
         dutInfo = [self.parent.getDutSummaryOfIndex(i) for i in self.selectedDutIndex]
         # get dut flag info for showing tips
@@ -88,10 +88,10 @@ class DutDataReader(QtWidgets.QWidget):
         dutData = []
         dutStat = []
         testFlagInfo = []
-        for i, (test_num, pmr) in enumerate(self.test_number_tuple_List):
+        for i, testTuple in enumerate(self.test_number_tuple_List):
             if self.stopFlag: return
 
-            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, test_num, pmr)
+            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, testTuple)
             dutData.append(dutData_perTest)
             dutStat.append(stat_perTest)
             testFlagInfo.append(flagInfo_perTest)

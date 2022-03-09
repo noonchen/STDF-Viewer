@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Mar 08 2022
+# Last Modified: Wed Mar 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -150,18 +150,19 @@ def getCanvasDicts(qfigLayout: QtWidgets.QBoxLayout) -> dict:
         mp_test_num = mp_widget.test_num
         mp_pmr = mp_widget.pmr
         mp_site = mp_widget.site
-        canvasIndexDict[(mp_head, mp_test_num, mp_pmr, mp_site)] = index
+        mp_test_name = mp_widget.test_name
+        canvasIndexDict[(mp_head, mp_test_num, mp_pmr, mp_site, mp_test_name)] = index
     return canvasIndexDict
 
-def calculateCanvasIndex(_test_num: int, _head: int, _site: int, _pmr: int, canvasIndexDict: dict):
+def calculateCanvasIndex(_test_num: int, _head: int, _site: int, _pmr: int, _test_name: str, canvasIndexDict: dict):
     '''Given test info (tn, head, site) and calculate the proper index
     to which the new canvas should be inserted'''
     tupleList = list(canvasIndexDict.keys())
-    tupleList.append( (_head, _test_num, _pmr, _site) )
+    tupleList.append( (_head, _test_num, _pmr, _site, _test_name) )
     # sort tuple by element 0 first, then 1, finally 2
-    tupleList_sort = sorted(tupleList, key=itemgetter(0, 1, 2, 3))
+    tupleList_sort = sorted(tupleList, key=itemgetter(0, 1, 2, 3, 4))
     # find the new tuple and get its index
-    newTupleIndex = tupleList_sort.index( (_head, _test_num, _pmr, _site) )
+    newTupleIndex = tupleList_sort.index( (_head, _test_num, _pmr, _site, _test_name) )
     return newTupleIndex
 
 # convert from pixel coords to data coords
@@ -333,6 +334,7 @@ class PlotCanvas(QtWidgets.QWidget):
         self.site = 0
         self.test_num = 0
         self.pmr = 0
+        self.test_name = ""
         self.priority = 0
         if parent:
             self.bindToUI(parent)
@@ -1335,11 +1337,11 @@ class MyWindow(QtWidgets.QMainWindow):
         updateInfoBox = False
         selHeads = []
         selSites = []
-        selTestNumTuples = []
+        selTests = []
         currentMask = np.array([])
 
         if self.ui.infoBox.currentIndex() == 2:              # raw data table activated
-            selTestNumTuples = self.getSelectedNums()
+            selTests = self.getSelectedTests()
             selSites = self.getCheckedSites()
             selHeads = self.getCheckedHeads()
             currentMask = self.getMaskFromHeadsSites(selHeads, selSites)
@@ -1347,10 +1349,10 @@ class MyWindow(QtWidgets.QMainWindow):
             # test num selection changed
             # MPR test will be splited into several items with same test name
             # use (test number, pmr) to determine the changes in test selection
-            tnChanged = (self.preTestSelection != set(selTestNumTuples))
+            testChanged = (self.preTestSelection != set(selTests))
             # dut list changed
             dutChanged = np.any(currentMask != self.getMaskFromHeadsSites(self.preHeadSelection, self.preSiteSelection))
-            if tnChanged or dutChanged:   
+            if testChanged or dutChanged:   
                 updateInfoBox = True
             elif self.tmodel_raw.columnCount() == 0:
                 updateInfoBox = True
@@ -1358,22 +1360,26 @@ class MyWindow(QtWidgets.QMainWindow):
                 # if user switches to the raw table from other tabs or boxes 
                 # tn & dut is unchanged, but previous raw table content might be different than current selection
                 # we also need to update the table
-                tntupleInTable = set()
+                testsInTable = set()
                 for col in range(2, self.tmodel_raw.columnCount()):     # raw col count == 0 or >= 3, thus index=2 is safe
                     tn = int(self.tmodel_raw.item(0, col).text())
+                    colHeader = self.tmodel_raw.horizontalHeaderItem(col).text()
                     if self.testRecTypeDict[tn] == REC.MPR:
                         # if it's MPR, get PMR from its name
-                        tname = self.tmodel_raw.horizontalHeaderItem(col).text()
-                        pmr = int(tname.split("#")[-1])
+                        # colHeader: TestName #pmr
+                        tmpList = colHeader.split(" #")
+                        testName = tmpList[0].strip()
+                        pmr = int(tmpList[-1])
                     else:
+                        testName = colHeader
                         pmr = 0
-                    tntupleInTable.add( (tn, pmr) )
+                    testsInTable.add( (tn, pmr, testName) )
                 
-                if tntupleInTable != set(selTestNumTuples):
+                if testsInTable != set(selTests):
                     updateInfoBox = True
                         
         if updateInfoBox:
-            if not (len(selTestNumTuples) > 0 and np.any(currentMask)):
+            if not (len(selTests) > 0 and np.any(currentMask)):
                 # CLEAR rawDataTable in info tab if:
                 # 1. no test item is selected
                 # 2. no duts selected (mask == all False)
@@ -1415,10 +1421,10 @@ class MyWindow(QtWidgets.QMainWindow):
             
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             # Append Test data
-            for test_num, pmr in selTestNumTuples:
+            for testTuple in selTests:
                 # get test value of selected DUTs
-                testDict = self.getData(test_num, pmr, selHeads, selSites)
-                test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+                testDict = self.getData(testTuple, selHeads, selSites)
+                test_data_list = self.stringifyTestData(testDict, valueFormat)
                 test_data_list.pop(0)   # remove test name
                 test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
                 test_flagInfo_list = [""] * vh_len + self.generateDataFloatTips(testDict=testDict)
@@ -1728,7 +1734,7 @@ class MyWindow(QtWidgets.QMainWindow):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
         
         
-    def updateRuntimeInfoTable(self):
+    def updateGDR_DTR_Table(self):
         # clear
         self.tmodel_datalog.removeRows(0, self.tmodel_datalog.rowCount())
         self.tmodel_datalog.removeColumns(0, self.tmodel_datalog.columnCount())
@@ -1806,9 +1812,10 @@ class MyWindow(QtWidgets.QMainWindow):
         return mask
                 
     
-    def getTestNumTup(self, test_name_string: str, isWaferName: bool = False) -> tuple:
+    def getTestTuple(self, test_name_string: str, isWaferName: bool = False) -> tuple:
         tmpList = test_name_string.split("\t", 2)     # split up to 3 elements
         numString = tmpList[0].strip("#")    # wafer number begins with "#"
+        nameString = tmpList[-1]
         
         if isWaferName:
             pmr = 0
@@ -1820,13 +1827,13 @@ class MyWindow(QtWidgets.QMainWindow):
                 pmr = int(tmpList[1].strip("#")) if self.testRecTypeDict[tn] == REC.MPR else 0
             else:
                 pmr = 0
-        return (tn, pmr)
+        return (tn, pmr, nameString)
     
     
-    def getSelectedNums(self) -> list:
-        """return list of tuple(test number, pmr), for non-MPR, pmr is set to 0"""
+    def getSelectedTests(self) -> list:
+        """return list of tuple(test number, pmr, test name), for non-MPR, pmr is set to 0"""
         selectedIndex = None
-        numList = []
+        testList = []
         
         if self.ui.tabControl.currentIndex() == tab.Wafer:
             inWaferTab = True
@@ -1837,11 +1844,11 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if selectedIndex:
             for ind in selectedIndex:
-                tnTuple = self.getTestNumTup(ind.data(), inWaferTab)
-                numList.append(tnTuple)
-            numList.sort()
+                tnTuple = self.getTestTuple(ind.data(), inWaferTab)
+                testList.append(tnTuple)
+            testList.sort()
         
-        return numList
+        return testList
     
     
     def onSelect(self):
@@ -1865,17 +1872,17 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.ClearButton.setDisabled(False)
         
         if self.dbConnected:
-            itemNumTuples = self.getSelectedNums()
+            selTests = self.getSelectedTests()
             selSites = self.getCheckedSites()
             selHeads = self.getCheckedHeads()
             hsNotChanged = (self.preHeadSelection == set(selHeads) and self.preSiteSelection == set(selSites))
-            tnNotChanged = (self.preTestSelection == set(itemNumTuples))
+            testNotChanged = (self.preTestSelection == set(selTests))
             
             # prepare the data for plot and table, skip in Bin & Wafer tab to save time
-            if (not tnNotChanged) and (not currentTab in [tab.Bin, tab.Wafer]): 
-                # get test_num only
+            if (not testNotChanged) and (not currentTab in [tab.Bin, tab.Wafer]): 
+                # get (test_num, test_name)
                 # pmr is not used, since MPR test preparation contains data for all pmr pins
-                self.prepareData([tup[0] for tup in itemNumTuples])
+                self.prepareData([(tup[0], tup[2]) for tup in selTests])
                         
             # update bin chart only if sites changed and previous tab is not bin chart
             updateTab = False
@@ -1901,7 +1908,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # always update pre selection at last
             self.preHeadSelection = set(selHeads)
             self.preSiteSelection = set(selSites)
-            self.preTestSelection = set(itemNumTuples)
+            self.preTestSelection = set(selTests)
     
     
     def onSiteChecked(self):
@@ -1912,11 +1919,11 @@ class MyWindow(QtWidgets.QMainWindow):
         self.onSelect()
     
     
-    def stringifyTestData(self, test_num: int, testDict: dict, valueFormat: str) -> list:
+    def stringifyTestData(self, testDict: dict, valueFormat: str) -> list:
         '''Stringify data for displaying and saving to reports'''
         recHeader = testDict["recHeader"]
         test_data_list = [testDict["TEST_NAME"], 
-                          "%d" % test_num,
+                          "%d" % testDict["TEST_NUM"],
                           "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
                           "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
                           testDict["Unit"]]
@@ -1939,10 +1946,11 @@ class MyWindow(QtWidgets.QMainWindow):
         return test_data_list
     
     
-    def isTestFail(self, test_num, pmr):        
-        if test_num in self.failCntDict:
+    def isTestFail(self, testTuple):
+        testID = (testTuple[0], testTuple[-1])
+        if testID in self.failCntDict:
             # test synopsis for current test item contains valid fail count
-            failCount = self.failCntDict[test_num]
+            failCount = self.failCntDict[testID]
             if failCount > 0:
                 return "testFailed"
             elif failCount == 0:
@@ -1956,21 +1964,21 @@ class MyWindow(QtWidgets.QMainWindow):
 
             # when need to check Cpk, fail count for this test_num in TSR is invalid, or TSR is not omitted whatsoever
             # read test data from all heads and sites
-            self.prepareData([test_num], cacheData=True)
-            parsedData = self.selData[test_num]
+            self.prepareData([testID], cacheData=True)
+            parsedData = self.selData[testID]
             if not failStateChecked:
                 for stat in map(isPass, parsedData["flagList"]):
                     if stat == False:
-                        self.failCntDict[test_num] = 1
+                        self.failCntDict[testID] = 1
                         return "testFailed"
                     
-            self.failCntDict[test_num] = 0
+            self.failCntDict[testID] = 0
             if self.settingParams.checkCpk:
                 # if all tests passed, check if cpk is lower than the threshold
                 parsedData["dataList"] = np.array(parsedData["dataList"], dtype='float64')
                 for head in self.availableHeads:
                     for site in self.availableSites:
-                        cpk = self.getData(test_num, pmr, [head], [site])["Cpk"]
+                        cpk = self.getData(testTuple, [head], [site])["Cpk"]
                         if not np.isnan(cpk):
                             # check cpk only if it's valid
                             if cpk < self.settingParams.cpkThreshold:
@@ -1989,7 +1997,7 @@ class MyWindow(QtWidgets.QMainWindow):
                        
     def refreshTestList(self):
         if self.settingParams.sortTestList == "Number":
-            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: self.getTestNumTup(x)))
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: self.getTestTuple(x)))
         elif self.settingParams.sortTestList == "Name":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: x.split("\t")[-1]))
         else:
@@ -2026,6 +2034,7 @@ class MyWindow(QtWidgets.QMainWindow):
         result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
         
         testDict["recHeader"] = recHeader
+        testDict["TEST_NUM"] = testInfo["TEST_NUM"]
         testDict["TEST_NAME"] = testInfo["TEST_NAME"]
         testDict["dataList"] = np.array(testDict["dataList"], dtype="float")
         testDict["flagList"] = np.array(testDict["flagList"], dtype=int)
@@ -2041,39 +2050,45 @@ class MyWindow(QtWidgets.QMainWindow):
         return testDict
     
     
-    def getTestValueOfDUTs(self, selDUTs: list, test_num: int, pmr: int) -> tuple:
-        # read data of test num
-        self.prepareData([test_num], cacheData=True)    # must enable cache, otherwise, data of current select will be cleaned
-        testDict = self.getData(test_num, pmr, selectDUTs=selDUTs)
+    def getTestValueOfDUTs(self, selDUTs: list, testTuple:tuple) -> tuple:
+        test_num, pmr, test_name = testTuple
+        # read data of testID
+        testID = (test_num, test_name)
+        self.prepareData([testID], cacheData=True)    # must enable cache, otherwise, data of current select will be cleaned
+        testDict = self.getData(testTuple, selectDUTs=selDUTs)
         valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-        test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+        test_data_list = self.stringifyTestData(testDict, valueFormat)
         test_passFailStat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))
         # data info used in floating tips
         test_dataInfo_list = [""] * 5 + self.generateDataFloatTips(testDict=testDict)
         return (test_data_list, test_passFailStat_list, test_dataInfo_list)
     
                        
-    def prepareData(self, selectItemNums: list, cacheData: bool = False):
+    def prepareData(self, testIDs: list, cacheData: bool = False):
+        '''testID: tuple of test num and test name, for identifying tests'''
         if not cacheData:
-            # remove test_num that are not selected anymore
-            for pre_test_num, _ in self.preTestSelection:
-                if (not pre_test_num in selectItemNums) and (pre_test_num in self.selData):
-                    self.selData.pop(pre_test_num)
+            # remove testID that are not selected anymore
+            for pre_test_num, _, pre_test_name in self.preTestSelection:
+                pre_testID = (pre_test_num, pre_test_name)
+                if (not pre_testID in testIDs) and (pre_testID in self.selData):
+                    self.selData.pop(pre_testID)
                 
-        for test_num in selectItemNums:
-            # skip if test_num has been read
-            if test_num in self.selData:
+        for testID in testIDs:
+            # skip if testID has been read
+            if testID in self.selData:
                 continue
             
             # read the newly selected test num
-            testInfo = self.DatabaseFetcher.getTestInfo_AllDUTs(test_num)
-            self.selData[test_num] = self.getDataFromOffsets(testInfo)
+            testInfo = self.DatabaseFetcher.getTestInfo_AllDUTs(testID)
+            self.selData[testID] = self.getDataFromOffsets(testInfo)
             
             
-    def getData(self, test_num:int, pmr:int, selectHeads:list = [], selectSites:list = [], selectDUTs: list = []):
+    def getData(self, testTuple:tuple, selectHeads:list = [], selectSites:list = [], selectDUTs: list = []):
         # keys in output: TEST_NAME / TEST_NUM / flagList / LL / HL / Unit / dataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
         # pmr is only meanful in MPR, for other records, no use
-        if not test_num in self.selData: raise KeyError(f"{test_num} is not prepared")
+        test_num, pmr, test_name = testTuple
+        testID = (test_num, test_name)
+        if not testID in self.selData: raise KeyError(f"{testID} is not prepared")
         
         outData = {}
         # use heads & sites to generate mask by default, if selectDUTs is available, use instead.
@@ -2085,27 +2100,27 @@ class MyWindow(QtWidgets.QMainWindow):
             for dutIndex in selectDUTs:
                 selMask |= (self.dutArray==dutIndex)
         
-        recHeader = self.selData[test_num]["recHeader"]
+        recHeader = self.selData[testID]["recHeader"]
         outData["recHeader"] = recHeader
-        outData["TEST_NAME"] = self.selData[test_num]["TEST_NAME"]
+        outData["TEST_NAME"] = test_name
         outData["TEST_NUM"] = test_num
-        outData["LL"] = self.selData[test_num]["LL"]
-        outData["HL"] = self.selData[test_num]["HL"]
-        outData["LSpec"] = self.selData[test_num]["LSpec"]
-        outData["HSpec"] = self.selData[test_num]["HSpec"]
-        outData["Unit"] = self.selData[test_num]["Unit"]
-        outData["Scale"] = self.selData[test_num]["Scale"]
+        outData["LL"] = self.selData[testID]["LL"]
+        outData["HL"] = self.selData[testID]["HL"]
+        outData["LSpec"] = self.selData[testID]["LSpec"]
+        outData["HSpec"] = self.selData[testID]["HSpec"]
+        outData["Unit"] = self.selData[testID]["Unit"]
+        outData["Scale"] = self.selData[testID]["Scale"]
         outData["DUTIndex"] = self.dutArray[selMask]
-        outData["flagList"] = self.selData[test_num]["flagList"][selMask]
+        outData["flagList"] = self.selData[testID]["flagList"][selMask]
         
         if recHeader == REC.MPR:
             # append pmr# to test name
             outData["TEST_NAME"] = outData["TEST_NAME"] if pmr==0 else f"{outData['TEST_NAME']} #{pmr}"
             try:
                 # the index of test value is the same as the index of {pmr} in PMR list
-                dataIndex = self.selData[test_num]["PMR_INDX"].index(pmr)
+                dataIndex = self.selData[testID]["PMR_INDX"].index(pmr)
                 # channel name is vary from different sites, get selected (head, site) first
-                channelNameDict = self.selData[test_num]["CHAN_NAM"]
+                channelNameDict = self.selData[testID]["CHAN_NAM"]
                 pinNameKeys = set()
                 if len(selectDUTs) == 0:
                     # get from heads & sites
@@ -2130,10 +2145,10 @@ class MyWindow(QtWidgets.QMainWindow):
                             ChanNames.append(ChanName)
 
                 outData["CHAN_NAM"] = ";".join(ChanNames)
-                outData["LOG_NAM"] = self.selData[test_num]["LOG_NAM"][dataIndex]
-                outData["PHY_NAM"] = self.selData[test_num]["PHY_NAM"][dataIndex]
-                outData["dataList"] = self.selData[test_num]["dataList"][dataIndex][selMask]
-                outData["statesList"] = self.selData[test_num]["statesList"][dataIndex][selMask]
+                outData["LOG_NAM"] = self.selData[testID]["LOG_NAM"][dataIndex]
+                outData["PHY_NAM"] = self.selData[testID]["PHY_NAM"][dataIndex]
+                outData["dataList"] = self.selData[testID]["dataList"][dataIndex][selMask]
+                outData["statesList"] = self.selData[testID]["statesList"][dataIndex][selMask]
             except (ValueError, IndexError) as e:
                 outData["CHAN_NAM"] = ""
                 outData["LOG_NAM"] = ""
@@ -2141,15 +2156,15 @@ class MyWindow(QtWidgets.QMainWindow):
                 outData["dataList"] = np.array([])
                 outData["statesList"] = np.array([])
                 if isinstance(e, IndexError):
-                    self.updateStatus(f"Cannot found test data for PMR {pmr} in MPR test {test_num}")
+                    self.updateStatus(f"Cannot found test data for PMR {pmr} in MPR test {testID}")
                 else:
                     if pmr != 0:
                         # pmr != 0 indicates a valid pmr
-                        self.updateStatus(f"PMR {pmr} is not found in {test_num}'s PMR list")
+                        self.updateStatus(f"PMR {pmr} is not found in {testID}'s PMR list")
         else:
-            outData["dataList"] = self.selData[test_num]["dataList"][selMask]
+            outData["dataList"] = self.selData[testID]["dataList"][selMask]
             if recHeader == REC.FTR:
-                outData["VECT_NAM"] = self.selData[test_num]["VECT_NAM"]
+                outData["VECT_NAM"] = self.selData[testID]["VECT_NAM"]
         
         # get statistics
         if outData["dataList"].size > 0 and not np.all(np.isnan(outData["dataList"])):
@@ -2180,7 +2195,7 @@ class MyWindow(QtWidgets.QMainWindow):
         reDrawTab = tabChanged and (self.preTab != tab.Wafer) and (tabType != tab.Wafer)
         
         self.preTab = tabType       # save tab index everytime tab updates
-        selTestNumTups = self.getSelectedNums()    # test num in trend/histo, wafer index in wafer
+        selTests = self.getSelectedTests()    # (test_num, test_name) in trend/histo, (wafer_index, wafer_name) in wafer
         selSites = self.getCheckedSites()
         selHeads = self.getCheckedHeads()
         
@@ -2241,16 +2256,16 @@ class MyWindow(QtWidgets.QMainWindow):
             canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}
             # must delete from large index, invert dict to loop from large index
             for index in sorted(canvasIndexDict_reverse.keys(), reverse=True):
-                (mp_head, mp_test_num, mp_pmr, mp_site) = canvasIndexDict_reverse[index]
+                (mp_head, mp_test_num, mp_pmr, mp_site, mp_test_name) = canvasIndexDict_reverse[index]
                 # if not in Bin tab: no test item selected/ test item is unselected, remove
                 # if sites are unselected, remove
-                if (tabType != tab.Bin and (len(selTestNumTups) == 0 or not (mp_test_num, mp_pmr) in selTestNumTups)) or (not mp_site in selSites) or (not mp_head in selHeads):
+                if (tabType != tab.Bin and (len(selTests) == 0 or not (mp_test_num, mp_pmr, mp_test_name) in selTests)) or (not mp_site in selSites) or (not mp_head in selHeads):
                     # bin don't care about testNum
                     deleteWidget(qfigLayout.itemAt(index).widget())
                     if tabType == tab.Trend:
-                        matchString = f"trend_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}"
+                        matchString = f"trend_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}_{mp_test_name}"
                     elif tabType == tab.Histo:
-                        matchString = f"histo_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}"
+                        matchString = f"histo_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}_{mp_test_name}"
                     elif tabType == tab.Bin:
                         matchString = f"bin_{mp_head}_{mp_test_num}_{mp_site}"
                     else:
@@ -2264,7 +2279,7 @@ class MyWindow(QtWidgets.QMainWindow):
             canvasIndexDict = getCanvasDicts(qfigLayout)    # update after deleting some images
                     
         # generate drawings in trend , histo and bin, but bin doesn't require test items selection
-        if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and len(selTestNumTups) > 0):
+        if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and len(selTests) > 0):
             if tabType == tab.Bin:
                 # bin chart is independent of test items
                 for site in selSites[::-1]:
@@ -2272,20 +2287,20 @@ class MyWindow(QtWidgets.QMainWindow):
                         if (head, 0, 0, site) in canvasIndexDict:
                             # no need to draw image for a existed testnum and site
                             continue
-                        calIndex = calculateCanvasIndex(0, head, site, 0, canvasIndexDict)
+                        calIndex = calculateCanvasIndex(0, head, site, 0, "", canvasIndexDict)
                         # draw
-                        self.genPlot(head, site, 0, 0, tabType, updateTab=True, insertIndex=calIndex)
+                        self.genPlot(head, site, (0, 0, ""), tabType, updateTab=True, insertIndex=calIndex)
             else:
                 # trend, histo, wafer
-                for test_num, pmr in selTestNumTups[::-1]:
+                for test_num, pmr, test_name in selTests[::-1]:
                     for site in selSites[::-1]:
                         for head in selHeads[::-1]:
-                            if (head, test_num, pmr, site) in canvasIndexDict:
+                            if (head, test_num, pmr, site, test_name) in canvasIndexDict:
                                 # no need to draw image for a existed testnum and site
                                 continue
-                            calIndex = calculateCanvasIndex(test_num, head, site, pmr, canvasIndexDict)
+                            calIndex = calculateCanvasIndex(test_num, head, site, pmr, test_name, canvasIndexDict)
                             # draw
-                            self.genPlot(head, site, test_num, pmr, tabType, updateTab=True, insertIndex=calIndex)
+                            self.genPlot(head, site, (test_num, pmr, test_name), tabType, updateTab=True, insertIndex=calIndex)
         # remaining cases are: no test items in tab trend, histo, wafer
         else:
             # when no test item is selected, clear trend, histo & wafer tab content
@@ -2311,11 +2326,12 @@ class MyWindow(QtWidgets.QMainWindow):
             site = kargs["site"]
             test_num = kargs["test_num"]
             pmr = kargs["pmr"]
+            test_name = kargs["test_name"]
             testRecTypes = kargs["testRecTypes"]    # used for determining the format of output list
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
 
             # return data for statistic table
-            testDict = self.getData(test_num, pmr, [head], [site])
+            testDict = self.getData((test_num, pmr, test_name), [head], [site])
             if testDict:
                 # basic PTR stats
                 CpkString = "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"])
@@ -2326,7 +2342,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 MaxString = valueFormat % testDict["Max"]
                 
                 rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
-                        testDict["TEST_NAME"],
+                        test_name,
                         testDict["Unit"],
                         "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
                         "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
@@ -2413,14 +2429,16 @@ class MyWindow(QtWidgets.QMainWindow):
         result = []
         
         if ("test_num" in kargs and isinstance(kargs["test_num"], int) and 
-            "pmr" in kargs and isinstance(kargs["pmr"], int)):
+            "pmr" in kargs and isinstance(kargs["pmr"], int) and
+            "test_name" in kargs and isinstance(kargs["test_name"], str)):
             # return test data of the given test_num
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             test_num = kargs["test_num"]
             pmr = kargs["pmr"]
+            test_name = kargs["test_name"]
             # get test value of selected DUTs
-            testDict = self.getData(test_num, pmr, selHeads, selSites)
-            test_data_list = self.stringifyTestData(test_num, testDict, valueFormat)
+            testDict = self.getData((test_num, pmr, test_name), selHeads, selSites)
+            test_data_list = self.stringifyTestData(testDict, valueFormat)
             test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
             result = [test_data_list, test_stat_list]
         
@@ -2473,7 +2491,7 @@ class MyWindow(QtWidgets.QMainWindow):
         tabType = self.ui.tabControl.currentIndex()
         # clear table
         self.tmodel.removeRows(0, self.tmodel.rowCount())
-        selTestNumTuples = self.getSelectedNums()
+        selTests = self.getSelectedTests()
         verticalHeader = self.ui.dataTable.verticalHeader()
         
         if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
@@ -2482,7 +2500,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             self.tr("Fail Num"), "Cpk", self.tr("Average"), self.tr("Median"), 
                             self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
             # Customize header for MPR & FTR
-            testRecTypes = set([self.testRecTypeDict[tn] for tn, _ in selTestNumTuples])
+            testRecTypes = set([self.testRecTypeDict[tn] for tn, _, _ in selTests])
             if REC.FTR in testRecTypes:
                 headerLabels[1:1] = [self.tr("Pattern Name")]
             if REC.MPR in testRecTypes:
@@ -2494,13 +2512,13 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dataTable.horizontalHeader().setVisible(True)
             verticalHeader.setDefaultSectionSize(25)
  
-            if selTestNumTuples:
+            if selTests:
                 # update data
                 rowHeader = []
-                for test_num, pmr in selTestNumTuples:
+                for test_num, pmr, test_name in selTests:
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
-                            rowList = self.prepareStatTableContent(tabType, head=head, site=site, test_num=test_num, pmr=pmr, testRecTypes=testRecTypes)
+                            rowList = self.prepareStatTableContent(tabType, head=head, site=site, test_num=test_num, pmr=pmr, test_name=test_name, testRecTypes=testRecTypes)
                             # create QStandardItem and set TextAlignment
                             qitemList = []
                             rowHeader.append(rowList.pop(0))    # pop the 1st item as row header
@@ -2549,7 +2567,7 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 # wafer tab, only cares sbin
                 color_dict = self.settingParams.sbinColor
-                for waferIndex, _ in selTestNumTuples:
+                for waferIndex, _, _ in selTests:
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
                             rowList = self.prepareStatTableContent(tabType, waferIndex=waferIndex, head=head, site=site)
@@ -2583,7 +2601,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
-    def genPlot(self, head:int, site:int, test_num:int, pmr:int, tabType:tab, **kargs):
+    def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
+        '''testTuple: (test_num, pmr, test_name)'''
         exportImg: bool = ("exportImg" in kargs) and (kargs["exportImg"] == True)
         # create fig & canvas
         figsize = (10, 4)
@@ -2591,16 +2610,16 @@ class MyWindow(QtWidgets.QMainWindow):
         fig.set_tight_layout(True)
                 
         if tabType == tab.Trend:   # Trend
-            ax, trendLines = self.genTrendPlot(fig, head, site, test_num, pmr)
+            ax, trendLines = self.genTrendPlot(fig, head, site, testTuple)
             
         elif tabType == tab.Histo:   # Histogram
-            ax, recGroups = self.genHistoPlot(fig, head, site, test_num, pmr)
+            ax, recGroups = self.genHistoPlot(fig, head, site, testTuple)
             
         elif tabType == tab.Bin:   # Bin Chart
             axs, recGroups = self.genBinPlot(fig, head, site)
             
         elif tabType == tab.Wafer:   # Wafermap
-            ax = self.genWaferPlot(fig, head, site, test_num)
+            ax = self.genWaferPlot(fig, head, site, testTuple[0])
             
         if exportImg:
             imgData = io.BytesIO()
@@ -2608,6 +2627,7 @@ class MyWindow(QtWidgets.QMainWindow):
             return imgData
         else:
             # put figure in a canvas and display in pyqt widgets
+            test_num, pmr, test_name = testTuple
             canvas = PlotCanvas(fig)
             # binds to widget
             if "updateTab" in kargs and kargs["updateTab"] and "insertIndex" in kargs:
@@ -2619,7 +2639,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 canvas.site = site
                 canvas.test_num = test_num
                 canvas.pmr = pmr
-                canvas.priority = head + test_num + pmr+ site
+                canvas.test_name = test_name
+                canvas.priority = head + test_num + pmr + site
                 # place the fig and toolbar in the layout
                 index = kargs["insertIndex"]
                 qfigLayout.insertWidget(index, canvas)
@@ -2638,14 +2659,14 @@ class MyWindow(QtWidgets.QMainWindow):
             if tabType == tab.Trend and len(trendLines) > 0:
                 # connect magnet cursor
                 for i, trendLine in enumerate(trendLines):
-                    cursorKey = "trend_%d_%d_%d_%d_%d"%(head, test_num, pmr, site, i)
+                    cursorKey = "trend_%d_%d_%d_%d_%s_%d"%(head, test_num, pmr, site, test_name, i)
                     self.cursorDict[cursorKey] = MagCursor(line=trendLine,
                                                            mainGUI=self)
                     connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
                     
             elif tabType == tab.Histo and len(recGroups) > 0:
                 for i, recGroup in enumerate(recGroups):
-                    cursorKey = "histo_%d_%d_%d_%d_%d"%(head, test_num, pmr, site, i)
+                    cursorKey = "histo_%d_%d_%d_%d_%s_%d"%(head, test_num, pmr, site, test_name, i)
                     self.cursorDict[cursorKey] = MagCursor(histo=recGroup,
                                                            mainGUI=self)
                     connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
@@ -2669,11 +2690,12 @@ class MyWindow(QtWidgets.QMainWindow):
                 connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
             
             
-    def genTrendPlot(self, fig:plt.Figure, head:int, site:int, test_num:int, pmr:int):
-        selData = self.getData(test_num, pmr, [head], [site])
+    def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
+        test_num, pmr, test_name = testTuple
+        selData = self.getData(testTuple, [head], [site])
         ax = fig.add_subplot(111)
         trendLines = []
-        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
+        ax.set_title("%d %s - %s - %s"%(test_num, test_name, "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
         dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
         dataInvalid = np.all(np.isnan(y_raw))
@@ -2683,7 +2705,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # show a warning text in figure
             # For PTR and FTR, any invalid would trigger this case
             # For MPR, dataInvalid and testInvalid both meet can it enter this case
-            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (selData["TEST_NAME"], head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (test_name, head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:
             if selData["recHeader"] == REC.MPR and dataInvalid:
                 # MPR contains only test flag but no data, replace y_raw with test flags
@@ -2789,11 +2811,12 @@ class MyWindow(QtWidgets.QMainWindow):
         return ax, trendLines
     
     
-    def genHistoPlot(self, fig:plt.Figure, head:int, site:int, test_num:int, pmr:int):
-        selData = self.getData(test_num, pmr, [head], [site])
+    def genHistoPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
+        test_num, pmr, test_name = testTuple
+        selData = self.getData(testTuple, [head], [site])
         ax = fig.add_subplot(111)
         recGroups = []
-        ax.set_title("%d %s - %s - %s"%(test_num, selData["TEST_NAME"], "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
+        ax.set_title("%d %s - %s - %s"%(test_num, test_name, "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
         y_raw = selData["dataList"]
         dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
         dataInvalid = np.all(np.isnan(selData["dataList"]))
@@ -2801,7 +2824,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
         if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or (selData["recHeader"] != REC.MPR and (dataInvalid or testInvalid)):
             # show a warning text in figure
-            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (selData["TEST_NAME"], head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
+            ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (test_name, head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
         else:
             if selData["recHeader"] == REC.MPR and dataInvalid:
                 # MPR contains only test flag but no data, replace y_raw with test flags
@@ -3233,7 +3256,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateFileHeader()
             setByteSwap(self.needByteSwap)   # specify the parse endian
             self.updateDutSummaryTable()
-            self.updateRuntimeInfoTable()
+            self.updateGDR_DTR_Table()
             self.updateStatTableContent()
             self.updateTabContent(forceUpdate=True)
             

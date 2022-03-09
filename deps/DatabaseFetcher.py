@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Jan 29 2022
+# Last Modified: Wed Mar 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -288,14 +288,14 @@ class DatabaseFetcher:
         return statsDict
     
     
-    def getTestInfo_AllDUTs(self, testNum:int) -> dict:
+    def getTestInfo_AllDUTs(self, testID: tuple) -> dict:
         # return test info of all duts in the database, including offsets and length in stdf file.
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         testInfo = {}
         sqlResult = None
         # get test item's additional info
-        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=?", [testNum])
+        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?", testID)
         col = [tup[0] for tup in self.cursor.description]
         val = self.cursor.fetchone()
         testInfo.update(zip(col, val))
@@ -309,7 +309,8 @@ class DatabaseFetcher:
         sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
             WHERE TEST_NUM=? AND DUTIndex in (SELECT DUTIndex FROM Dut_Info) \
             ORDER by DUTIndex"
-        sqlResult = self.cursor.execute(sql, [testNum])
+        # TODO: add test name in test_offsets
+        sqlResult = self.cursor.execute(sql, [testID[0]])
         
         # fill in the sql result in a dict where key=dutIndex, value= offset & length        
         for ind, oft, biL in sqlResult:
