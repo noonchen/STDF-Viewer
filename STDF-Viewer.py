@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Feb 05 2022
+# Last Modified: Tue Mar 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1103,7 +1103,7 @@ class MyWindow(QtWidgets.QMainWindow):
             f, _typ = QFileDialog.getOpenFileName(self, 
                                                   caption=self.tr("Select a STD File To Open"), 
                                                   directory=self.settingParams.recentFolder,
-                                                  filter=self.tr("All Supported Files (*.std *.stdf *.std* *.gz *.bz2 *.zip);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2 *.zip)"),)
+                                                  filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
         else:
             f = os.path.normpath(f)
             

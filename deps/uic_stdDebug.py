@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Thu Dec 16 2021
+# Last Modified: Tue Mar 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -83,7 +83,7 @@ class stdDebugPanel(QtWidgets.QDialog):
         f, _typ = QFileDialog.getOpenFileName(self,
                                               caption=self.tr("Select a STD File To Analyze"),
                                               directory=self.parent.settingParams.recentFolder,
-                                              filter=self.tr("All Supported Files (*.std *.stdf *.std* *.gz *.bz2);;STDF (*.std *.stdf);;Compressed STDF (*.gz *.bz2)"),)
+                                              filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
             
         if os.path.isfile(f):
             # store folder path
