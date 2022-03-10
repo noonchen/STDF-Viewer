@@ -950,7 +950,7 @@ cdef class stdfSummarizer:
                                                                 HSpec REAL,
                                                                 VECT_NAM TEXT,
                                                                 SEQ_NAME TEXT,
-                                                                PRIMARY KEY (TEST_NUM, TEST_NAME)) WITHOUT ROWID);
+                                                                PRIMARY KEY (TEST_NUM, TEST_NAME)) WITHOUT ROWID;
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
@@ -1806,7 +1806,7 @@ cdef class stdfSummarizer:
             testID = insertTestItem(self.idMap, TEST_NUM, TEST_TXT)
             if testID < 0:
                 err = testID
-                sprintf(self.detailErrorMsg, "Error when storing testID for TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
+                sprintf(self.detailErrorMsg, "Error when storing testID for TestNumber:%d Head:%d Site:%d", TEST_NUM, HEAD_NUM, SITE_NUM)
 
         if not err:
             # insert or replace Test_Offsets
@@ -2316,28 +2316,28 @@ cdef class stdfSummarizer:
         cdef:
             int err = 0
             uint32_t TEST_NUM, FAIL_CNT, tmpCount
-            char* TEST_TXT = NULL
+            char* TEST_NAM = NULL
         # for fast find failed test number globally
         # don't care about head number nor site number
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         TEST_NUM = (<TSR*>self.pRec).TEST_NUM
-        TEST_TXT = (<TSR*>self.pRec).TEST_TXT
+        TEST_NAM = (<TSR*>self.pRec).TEST_NAM
         FAIL_CNT = (<TSR*>self.pRec).FAIL_CNT
 
-        if TEST_TXT == NULL:
-            TEST_TXT = ""
+        if TEST_NAM == NULL:
+            TEST_NAM = ""
 
-        testID = getTestID(self.idMap, TEST_NUM, TEST_TXT)
+        testID = getTestID(self.idMap, TEST_NUM, TEST_NAM)
         if testID < 0:
             err = TESTIDMAP_MISSING
-            sprintf(self.detailErrorMsg, "Error TEST_NUM %d key in TSR", TEST_NUM)
+            sprintf(self.detailErrorMsg, "Error no testID for TEST_NUM %d, TEST_NAM %s key in TSR", TEST_NUM, TEST_NAM)
 
         if FAIL_CNT != <uint32_t>0xFFFFFFFF:          # 2**32-1 invalid number for FAIL_CNT
             if hashmap_contains(self.TestFailCount, testID):
                 # get previous count and add up
                 if (MAP_OK != hashmap_get(self.TestFailCount, testID, &tmpCount)):
                     err = MAP_MISSING
-                    sprintf(self.detailErrorMsg, "Error TEST_NUM %d key in TSR", TEST_NUM)
+                    sprintf(self.detailErrorMsg, "Error getting count from TSR dict")
                     return err
 
                 tmpCount += FAIL_CNT
