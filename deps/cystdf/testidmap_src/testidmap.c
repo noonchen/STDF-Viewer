@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: March 10th 2022
  * -----
- * Last Modified: Thu Mar 10 2022
+ * Last Modified: Fri Mar 11 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2022 noonchen
@@ -103,8 +103,8 @@ int insertTestItem(testIDMap* map, uint32_t TEST_NUM, const char* TEST_NAME)
         // expand capacity
         int newCapacity = map->capacity + (map->capacity / 2);
 
-        testItem* tmp_tests = (testItem*)realloc(map->tests, newCapacity);
-        int* tmp_id = (int*)realloc(map->id, newCapacity);
+        testItem* tmp_tests = (testItem*)realloc(map->tests, newCapacity * sizeof(testItem));
+        int* tmp_id = (int*)realloc(map->id, newCapacity * sizeof(int));
 
         if (tmp_tests != NULL && tmp_id != NULL)
         {
