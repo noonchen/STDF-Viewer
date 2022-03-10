@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Mar 09 2022
+# Last Modified: Thu Mar 10 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -2324,15 +2324,14 @@ class MyWindow(QtWidgets.QMainWindow):
         if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
             head = kargs["head"]
             site = kargs["site"]
-            test_num = kargs["test_num"]
-            pmr = kargs["pmr"]
-            test_name = kargs["test_name"]
+            testTuple = kargs["testTuple"]
             testRecTypes = kargs["testRecTypes"]    # used for determining the format of output list
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
 
             # return data for statistic table
-            testDict = self.getData((test_num, pmr, test_name), [head], [site])
+            testDict = self.getData(testTuple, [head], [site])
             if testDict:
+                test_num, pmr, test_name = testTuple
                 # basic PTR stats
                 CpkString = "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"])
                 MeanString = valueFormat % testDict["Mean"]
@@ -2428,21 +2427,17 @@ class MyWindow(QtWidgets.QMainWindow):
         '''This method is for providing data for report generator'''
         result = []
         
-        if ("test_num" in kargs and isinstance(kargs["test_num"], int) and 
-            "pmr" in kargs and isinstance(kargs["pmr"], int) and
-            "test_name" in kargs and isinstance(kargs["test_name"], str)):
+        if ("testTuple" in kargs and isinstance(kargs["testTuple"], tuple)):
             # return test data of the given test_num
             valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-            test_num = kargs["test_num"]
-            pmr = kargs["pmr"]
-            test_name = kargs["test_name"]
+            testTuple = kargs["testTuple"]
             # get test value of selected DUTs
-            testDict = self.getData((test_num, pmr, test_name), selHeads, selSites)
+            testDict = self.getData(testTuple, selHeads, selSites)
             test_data_list = self.stringifyTestData(testDict, valueFormat)
             test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
             result = [test_data_list, test_stat_list]
         
-        elif "test_num" not in kargs:
+        elif "testTuple" not in kargs:
             # return dut info
             currentMask = self.getMaskFromHeadsSites(selHeads, selSites)
             selectedDUTs = self.dutArray[currentMask]
@@ -2515,10 +2510,10 @@ class MyWindow(QtWidgets.QMainWindow):
             if selTests:
                 # update data
                 rowHeader = []
-                for test_num, pmr, test_name in selTests:
+                for testTuple in selTests:
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
-                            rowList = self.prepareStatTableContent(tabType, head=head, site=site, test_num=test_num, pmr=pmr, test_name=test_name, testRecTypes=testRecTypes)
+                            rowList = self.prepareStatTableContent(tabType, head=head, site=site, testTuple=testTuple, testRecTypes=testRecTypes)
                             # create QStandardItem and set TextAlignment
                             qitemList = []
                             rowHeader.append(rowList.pop(0))    # pop the 1st item as row header
