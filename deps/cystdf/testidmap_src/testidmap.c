@@ -134,5 +134,5 @@ int insertTestItem(testIDMap* map, uint32_t TEST_NUM, const char* TEST_NAME)
     map->mapSize += 1;
 
     // return the id of inserted test item
-    return (map->id)[map->mapSize];
+    return (map->mapSize) - 1;
 }
