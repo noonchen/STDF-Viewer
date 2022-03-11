@@ -2329,10 +2329,11 @@ cdef class stdfSummarizer:
 
         testID = getTestID(self.idMap, TEST_NUM, TEST_NAM)
         if testID < 0:
-            err = TESTIDMAP_MISSING
+            # err = TESTIDMAP_MISSING
+            printf("Error no testID for TEST_NUM %d, TEST_NAM %s key in TSR\n", TEST_NUM, TEST_NAM)
             sprintf(self.detailErrorMsg, "Error no testID for TEST_NUM %d, TEST_NAM %s key in TSR", TEST_NUM, TEST_NAM)
 
-        if FAIL_CNT != <uint32_t>0xFFFFFFFF:          # 2**32-1 invalid number for FAIL_CNT
+        if testID >= 0 and FAIL_CNT != <uint32_t>0xFFFFFFFF:          # 2**32-1 invalid number for FAIL_CNT
             if hashmap_contains(self.TestFailCount, testID):
                 # get previous count and add up
                 if (MAP_OK != hashmap_get(self.TestFailCount, testID, &tmpCount)):
