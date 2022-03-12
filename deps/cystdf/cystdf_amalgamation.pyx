@@ -989,7 +989,8 @@ cdef class stdfSummarizer:
                                         CREATE TABLE IF NOT EXISTS TestPin_Map (
                                                                 TEST_ID INTEGER, 
                                                                 PMR_INDX INTEGER,
-                                                                PIN_TYPE TEXT);
+                                                                PIN_TYPE TEXT,
+                                                                PRIMARY KEY (TEST_ID, PMR_INDX, PIN_TYPE));
                                         
                                         CREATE TABLE IF NOT EXISTS Dynamic_Limits (
                                                                 DUTIndex INTEGER,
@@ -1039,7 +1040,7 @@ cdef class stdfSummarizer:
             const char* insertPinInfo = '''INSERT OR REPLACE INTO Pin_Info VALUES (:P_PG_INDX, (SELECT GRP_NAM FROM Pin_Info WHERE P_PG_INDX=:P_PG_INDX), 
                                                                         :GRP_MODE, :GRP_RADX, 
                                                                         :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);'''
-            const char* insertTestPin = '''INSERT INTO TestPin_Map VALUES (:TEST_ID, :PMR_INDX, :PIN_TYPE);'''
+            const char* insertTestPin = '''INSERT OR IGNORE INTO TestPin_Map VALUES (:TEST_ID, :PMR_INDX, :PIN_TYPE);'''
             const char* insertDynamicLimit = '''INSERT OR REPLACE INTO Dynamic_Limits VALUES (:DUTIndex, :TEST_ID, :LLimit ,:HLimit);'''
             const char* insertDatalog = '''INSERT INTO Datalog VALUES (:RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);'''
 

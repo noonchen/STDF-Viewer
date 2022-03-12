@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Mar 10 2022
+# Last Modified: Sat Mar 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1241,12 +1241,13 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def generateDataFloatTips(self, testDict: dict) -> list:
         '''testDict should be return by self.getData()'''
-        test_num = testDict["TEST_NUM"]
         validRTNStatList = False
         # data info used in floating tips
         dataTips = []
         test_flagInfo_list = list(map(self.test_flag_parser, testDict["flagList"]))
-        if self.testRecTypeDict[test_num] == REC.MPR:
+        # test name of MPR test is different from orignal after getData(), must use orignal name here
+        testID = (testDict["TEST_NUM"], testDict["TEST_NAME_ORIG"])
+        if self.testRecTypeDict[testID] == REC.MPR:
             # for MPR tests, add description of RTN_STAT and flag
             statInfo_list = list(map(self.return_state_parser, testDict["statesList"]))
             # length of STAT should be the same as flagList, unless MPR doesn't contain any RTN_STAT
@@ -1364,8 +1365,10 @@ class MyWindow(QtWidgets.QMainWindow):
                 for col in range(2, self.tmodel_raw.columnCount()):     # raw col count == 0 or >= 3, thus index=2 is safe
                     tn = int(self.tmodel_raw.item(0, col).text())
                     colHeader = self.tmodel_raw.horizontalHeaderItem(col).text()
-                    if self.testRecTypeDict[tn] == REC.MPR:
-                        # if it's MPR, get PMR from its name
+                    if (tn, colHeader) not in self.testRecTypeDict:
+                        # I append pmr to the testname if it's MPR, 
+                        # colheader is not likely a valid test name
+                        # only MPR will hit this case
                         # colHeader: TestName #pmr
                         tmpList = colHeader.split(" #")
                         testName = tmpList[0].strip()
@@ -1824,7 +1827,8 @@ class MyWindow(QtWidgets.QMainWindow):
             tn = int(numString)
             if len(tmpList) > 2:
                 # a possible MPR test, e.g. [test num, #PMR, test name]
-                pmr = int(tmpList[1].strip("#")) if self.testRecTypeDict[tn] == REC.MPR else 0
+                # if it's not a MPR, pmr is set to 0
+                pmr = int(tmpList[1].strip("#")) if self.testRecTypeDict.get((tn, nameString), 0) == REC.MPR else 0
             else:
                 pmr = 0
         return (tn, pmr, nameString)
@@ -2013,7 +2017,8 @@ class MyWindow(QtWidgets.QMainWindow):
             pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
             rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
             testDict = stdf_MPR_Parser(recHeader, pinCount, rsltCount, sel_offset, sel_length, self.std_handle)
-            pinInfoDict = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], "RTN")
+            pinInfoDict = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
+            #TODO if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
             testDict["PMR_INDX"] = pinInfoDict["PMR"]
             testDict["LOG_NAM"] = pinInfoDict["LOG_NAM"]
             testDict["PHY_NAM"] = pinInfoDict["PHY_NAM"]
@@ -2102,6 +2107,8 @@ class MyWindow(QtWidgets.QMainWindow):
         
         recHeader = self.selData[testID]["recHeader"]
         outData["recHeader"] = recHeader
+        # store original for testID-lookup, I'll append pmr to MPR test name for displaying
+        outData["TEST_NAME_ORIG"] = test_name
         outData["TEST_NAME"] = test_name
         outData["TEST_NUM"] = test_num
         outData["LL"] = self.selData[testID]["LL"]
@@ -2115,7 +2122,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if recHeader == REC.MPR:
             # append pmr# to test name
-            outData["TEST_NAME"] = outData["TEST_NAME"] if pmr==0 else f"{outData['TEST_NAME']} #{pmr}"
+            if pmr > 0: outData["TEST_NAME"] = f"{test_name} #{pmr}"
             try:
                 # the index of test value is the same as the index of {pmr} in PMR list
                 dataIndex = self.selData[testID]["PMR_INDX"].index(pmr)
@@ -2495,7 +2502,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             self.tr("Fail Num"), "Cpk", self.tr("Average"), self.tr("Median"), 
                             self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
             # Customize header for MPR & FTR
-            testRecTypes = set([self.testRecTypeDict[tn] for tn, _, _ in selTests])
+            testRecTypes = set([self.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in selTests])
             if REC.FTR in testRecTypes:
                 headerLabels[1:1] = [self.tr("Pattern Name")]
             if REC.MPR in testRecTypes:
@@ -2686,7 +2693,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             
     def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
-        test_num, pmr, test_name = testTuple
+        test_num, _, test_name = testTuple
         selData = self.getData(testTuple, [head], [site])
         ax = fig.add_subplot(111)
         trendLines = []
@@ -2744,7 +2751,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             if self.settingParams.showHL_trend or self.settingParams.showMean_trend: 
                 # try to get dynamic limits only if one of limits is enabled
-                hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits = self.DatabaseFetcher.getDynamicLimits(test_num, x_arr, LL, HL, selData["Scale"])
+                hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits = self.DatabaseFetcher.getDynamicLimits(test_num, test_name, x_arr, LL, HL, selData["Scale"])
             # when hasDynamic is true, the limit is definitely not np.nan
             limit_max = max(HL, np.max(dyHLimits)) if hasDynamicHigh else HL
             limit_min = min(LL, np.min(dyLLimits)) if hasDynamicLow else LL
@@ -2807,7 +2814,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def genHistoPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
-        test_num, pmr, test_name = testTuple
+        test_num, _, test_name = testTuple
         selData = self.getData(testTuple, [head], [site])
         ax = fig.add_subplot(111)
         recGroups = []
