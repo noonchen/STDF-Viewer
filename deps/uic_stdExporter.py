@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Mar 10 2022
+# Last Modified: Sun Mar 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1008,7 +1008,7 @@ class stdfExporter(QtWidgets.QDialog):
     
     def start(self):
         self.numTupL = self.getExportTestTuples()
-        self.testRecTypes = set([self.parent.testRecTypeDict[tn] for tn, _, _ in self.numTupL])    # determine the header elements
+        self.testRecTypes = set([self.parent.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in self.numTupL])    # determine the header elements
         self.headL, self.siteL = self.getHeads_Sites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()

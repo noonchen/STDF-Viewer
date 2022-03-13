@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Mar 12 2022
+# Last Modified: Sun Mar 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -2018,7 +2018,7 @@ class MyWindow(QtWidgets.QMainWindow):
             rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
             testDict = stdf_MPR_Parser(recHeader, pinCount, rsltCount, sel_offset, sel_length, self.std_handle)
             pinInfoDict = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
-            #TODO if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
+            # if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
             testDict["PMR_INDX"] = pinInfoDict["PMR"]
             testDict["LOG_NAM"] = pinInfoDict["LOG_NAM"]
             testDict["PHY_NAM"] = pinInfoDict["PHY_NAM"]
@@ -2711,7 +2711,7 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             if selData["recHeader"] == REC.MPR and dataInvalid:
                 # MPR contains only test flag but no data, replace y_raw with test flags
-                y_raw = selData["flagList"]
+                y_raw = selData["flagList"].astype(float)
                 # replace -1 (invalid test flag) with nan
                 y_raw[y_raw < 0] = np.nan
             
@@ -2787,20 +2787,24 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.axhline(y = LSpec, linewidth=3, color='navy', zorder = -10, label="Low Spec")
             # add med and avg text at the right edge of the plot
             m_obj = None
+            m_valid = False
             a_obj = None
-            if self.settingParams.showMed_trend:
+            a_valid = False
+            if self.settingParams.showMed_trend and ~np.isnan(med):
+                m_valid = True
                 med_text = ("$x̃ = %.3f $\n" if med > avg else "\n$x̃ = %.3f $") % med
                 m_obj = ax.text(x=0.99, y=med, s=med_text, color='k', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
                 ax.axhline(y = med, linewidth=1, color='k', zorder = 1, label="Median")
-            if self.settingParams.showMean_trend:
+            if self.settingParams.showMean_trend and ~np.isnan(avg):
+                a_valid = True
                 avg_text = ("\n$x̅ = %.3f $" if med > avg else "$x̅ = %.3f $\n") % avg
                 a_obj = ax.text(x=0.99, y=avg, s=avg_text, color='orange', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
                 ax.axhline(y = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
                 
-            if self.settingParams.showMed_trend or self.settingParams.showMean_trend:
+            if m_valid or a_valid:
                 if len(x_arr) != 1:
                     # get the length of median text in axes coords
-                    text_object = m_obj if m_obj else a_obj     # get the non-None text object
+                    text_object = m_obj if m_valid else a_obj     # get the non-None text object
                     if self.textRender is None:
                         self.textRender = RendererAgg(*fig.get_size_inches(), fig.dpi)
                     bb_pixel = text_object.get_window_extent(renderer=self.textRender)
@@ -2830,7 +2834,7 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             if selData["recHeader"] == REC.MPR and dataInvalid:
                 # MPR contains only test flag but no data, replace y_raw with test flags
-                y_raw = selData["flagList"]
+                y_raw = selData["flagList"].astype(float)
                 # replace -1 (invalid test flag) with nan
                 y_raw[y_raw < 0] = np.nan
             
@@ -2848,7 +2852,11 @@ class MyWindow(QtWidgets.QMainWindow):
             # we use a filter to remove the data that's beyond 9 sigma
             # otherwise we cannot to see the detailed distribution of the main data set
             #TODO filter data beyond 9σ
-            dataFilter = np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))
+            if np.isnan(avg) or np.isnan(sd):
+                # no filter
+                dataFilter = np.full(shape=dataList.shape, fill_value=True, dtype=bool)
+            else:
+                dataFilter = np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))
             filteredDataList = dataList[dataFilter]
             filteredDutList = dutListNoNAN[dataFilter]
             
@@ -2887,7 +2895,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 ax.axvline(x = LSpec, linewidth=3, color='navy', zorder = -10, label="Lo Spec")
 
             # set xlimit and draw fitting curve only when standard deviation is not 0
-            if sd != 0:
+            if sd != 0 and ~np.isnan(avg) and ~np.isnan(sd):
                 if self.settingParams.showGaus_histo:
                     # gauss fitting
                     g_x = np.linspace(avg - sd * 10, avg + sd * 10, 1000)
@@ -2902,8 +2910,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 
             # blended transformation
             transXdYa = matplotlib.transforms.blended_transform_factory(ax.transData, ax.transAxes)
-            # vertical lines for n * σ
-            sigmaList = [] if self.settingParams.showSigma == "" else [int(i) for i in self.settingParams.showSigma.split(",")]
+            # vertical lines for n * σ, disable if avg and sd is invalid
+            sigmaList = [] if self.settingParams.showSigma == "" or np.isnan(avg) or np.isnan(sd) else [int(i) for i in self.settingParams.showSigma.split(",")]
             for n in sigmaList:
                 position_pos = avg + sd * n
                 position_neg = avg - sd * n
@@ -2914,10 +2922,10 @@ class MyWindow(QtWidgets.QMainWindow):
             # med avg text labels / lines
             med_text = ("\n $x̃ = %.3f $") % med
             avg_text = ("\n $x̅ = %.3f $") % avg
-            if self.settingParams.showMed_histo:
+            if self.settingParams.showMed_histo and ~np.isnan(med):
                 ax.text(x=med, y=1, s=med_text, color='k', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left" if med>avg else "right", va="center", transform=transXdYa)
                 ax.axvline(x = med, linewidth=1, color='black', zorder = 1, label="Median")
-            if self.settingParams.showMean_histo:
+            if self.settingParams.showMean_histo and ~np.isnan(avg):
                 ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
                 ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
             # ax.ticklabel_format(useOffset=False)    # prevent + sign
