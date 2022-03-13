@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Jan 29 2022
+# Last Modified: Sat Mar 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -64,7 +64,7 @@ class DatabaseFetcher:
         
     
     def containsWafer(self):
-        # return True if db contains wafer info
+        '''return True if db contains wafer info'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         self.cursor.execute("SELECT count(*) FROM Wafer_Info")
@@ -76,14 +76,14 @@ class DatabaseFetcher:
     
     
     def getTestItemsList(self):
-        # return test_num + testname list in db, keep original order here, do not ordered by test_num
+        '''return test_num + (pmr) + testname list in db in original order here'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         TestList = []
         for TEST_NUM, TEST_NAME, PMR_INDX in self.cursor.execute("SELECT Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX \
                                                                  FROM Test_Info \
-                                                                 LEFT JOIN TestPin_Map on Test_Info.TEST_NUM = TestPin_Map.TEST_NUM\
-                                                                 ORDER by Test_Info.ROWID, TestPin_Map.ROWID"):
+                                                                 LEFT JOIN TestPin_Map on Test_Info.TEST_ID = TestPin_Map.TEST_ID\
+                                                                 ORDER by Test_Info.TEST_ID, TestPin_Map.ROWID"):
             if isinstance(PMR_INDX, int):
                 # Create test items for each pin in MPR data
                 TestList.append(f"{TEST_NUM}\t#{PMR_INDX}\t{TEST_NAME}")
@@ -93,17 +93,17 @@ class DatabaseFetcher:
     
     
     def getTestRecordTypeDict(self):
-        # return MPR test numbers
+        '''return dict of (test_num, test_name) -> RecordType'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         recTypeDict = {}
-        for TEST_NUM, recHeader in self.cursor.execute("SELECT TEST_NUM, recHeader FROM Test_Info"):
-            recTypeDict[TEST_NUM] = recHeader
+        for TEST_NUM, TEST_NAME, recHeader in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, recHeader FROM Test_Info"):
+            recTypeDict[(TEST_NUM, TEST_NAME)] = recHeader
         return recTypeDict
     
     
     def getWaferList(self):
-        # return waferIndex + waferID list in db ordered by waferIndex
+        '''return waferIndex + waferID list in db ordered by waferIndex'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         WaferList = ["-\tStacked Wafer Map"]
@@ -113,7 +113,7 @@ class DatabaseFetcher:
     
     
     def getSiteList(self):
-        # return a set of sites in db
+        '''return a set of sites in db'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         SiteList = set()
@@ -123,7 +123,7 @@ class DatabaseFetcher:
 
     
     def getHeadList(self):
-        # return a set of heads in db
+        '''return a set of heads in db'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         HeadList = set()
@@ -132,18 +132,19 @@ class DatabaseFetcher:
         return HeadList
     
     
-    def getPinNames(self, testNum:int, pinType:str = "RTN"):
-        # return a list of dicts contains bin info
+    def getPinNames(self, testNum:int, testName:str, pinType:str = "RTN"):
+        '''return dict of pmr info'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         # note: channel name is head-site dependent
         pinNameDict = {"PMR": [], "LOG_NAM": [], "PHY_NAM": [], "CHAN_NAM": {}}
         # must keep orignal order of PMR index, it's related to the order of values
         sql = "SELECT A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM FROM \
-            (SELECT  PMR_INDX FROM TestPin_Map WHERE TEST_NUM=? AND PIN_TYPE=? ORDER by ROWID) as A \
+            ((SELECT PMR_INDX FROM TestPin_Map WHERE PIN_TYPE=? AND TEST_ID in \
+                (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) ORDER by ROWID) as A \
             INNER JOIN \
-            Pin_Map on A.PMR_INDX = Pin_Map.PMR_INDX"
-        sqlResult = self.cursor.execute(sql, [testNum, pinType])
+            Pin_Map on A.PMR_INDX = Pin_Map.PMR_INDX)"
+        sqlResult = self.cursor.execute(sql, [pinType, testNum, testName])
         for pmr_index, physical_name, logic_name, HEAD_NUM, SITE_NUM, channel_name in sqlResult:
             LOG_NAM = "" if logic_name is None else logic_name
             PHY_NAM = "" if physical_name is None else physical_name
@@ -166,7 +167,7 @@ class DatabaseFetcher:
     
     
     def getBinInfo(self, bin="HBIN"):
-        # return a list of dicts contains bin info
+        '''return a list of dicts contains bin info'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         if bin == "HBIN" or bin == "SBIN":
@@ -179,7 +180,7 @@ class DatabaseFetcher:
         
     
     def getBinStats(self, head, site, bin="HBIN"):
-        # return (bin num, count) list
+        '''return (bin num, count) list'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         BinStats = {}
@@ -199,7 +200,7 @@ class DatabaseFetcher:
     
     
     def getFileInfo(self):
-        # return MIR & WCR field-value dict
+        '''return MIR & WCR & ATR & RDR field-value dict'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         MIR_Info = {}
@@ -209,16 +210,17 @@ class DatabaseFetcher:
     
     
     def getTestFailCnt(self):
+        '''return dict of (test num, test name) -> fail count'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         TestFailCnt = {}
-        for TEST_NUM, FailCount in self.cursor.execute("SELECT TEST_NUM, FailCount FROM Test_Info"):
-            TestFailCnt[TEST_NUM] = FailCount
+        for TEST_NUM, TEST_NAME, FailCount in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, FailCount FROM Test_Info"):
+            TestFailCnt[(TEST_NUM, TEST_NAME)] = FailCount
         return TestFailCnt
     
     
     def getDUT_SiteInfo(self):
-        # get <dutIndex> to <site> dictionary and complete dut list for masking
+        '''get <dutIndex> to <site> dictionary and complete dut list for masking'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         allHeads = self.getHeadList()
@@ -245,7 +247,7 @@ class DatabaseFetcher:
     
     
     def getDUT_Summary(self):
-        # return a complete dut info dict where key=dutIndex and value=
+        '''return a complete dut info dict where key=dutIndex and value='''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         dutInfoDict = {}
@@ -275,7 +277,7 @@ class DatabaseFetcher:
     
     
     def getDUTStats(self):
-        # return number of total, passed, failed 
+        '''return number of total, passed, failed'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         statsDict = {"Total": 0, "Pass": 0, "Failed": 0, "Unknown": 0}
@@ -288,14 +290,14 @@ class DatabaseFetcher:
         return statsDict
     
     
-    def getTestInfo_AllDUTs(self, testNum:int) -> dict:
-        # return test info of all duts in the database, including offsets and length in stdf file.
+    def getTestInfo_AllDUTs(self, testID: tuple) -> dict:
+        '''return test info of all duts in the database, including offsets and length in stdf file'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         testInfo = {}
         sqlResult = None
         # get test item's additional info
-        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=?", [testNum])
+        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?", testID)
         col = [tup[0] for tup in self.cursor.description]
         val = self.cursor.fetchone()
         testInfo.update(zip(col, val))
@@ -307,9 +309,10 @@ class DatabaseFetcher:
         # get offset & length, insert -1 if testNum is not presented in a DUT
         tmpContainer = dict(zip( self.completeDutArray, [[-1, -1]]*(self.completeDutArray.size) ))
         sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
-            WHERE TEST_NUM=? AND DUTIndex in (SELECT DUTIndex FROM Dut_Info) \
+            WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) AND \
+                    DUTIndex in (SELECT DUTIndex FROM Dut_Info) \
             ORDER by DUTIndex"
-        sqlResult = self.cursor.execute(sql, [testNum])
+        sqlResult = self.cursor.execute(sql, testID)
         
         # fill in the sql result in a dict where key=dutIndex, value= offset & length        
         for ind, oft, biL in sqlResult:
@@ -425,7 +428,7 @@ class DatabaseFetcher:
         return dutIndexList
     
     
-    def getDynamicLimits(self, test_num:int, dutList:np.ndarray, LLimit:float, HLimit:float, limitScale:int):
+    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, LLimit:float, HLimit:float, limitScale:int):
         if self.cursor is None: raise RuntimeError("No database is connected")
         hasValidLow = False
         hasValidHigh = False
@@ -440,8 +443,10 @@ class DatabaseFetcher:
                 dyLLimits = np.full(dutList.size, LLimit, np.float32)
             if hasValidHigh:
                 dyHLimits = np.full(dutList.size, HLimit, np.float32)
-            sql = "SELECT DUTIndex, LLimit, HLimit FROM Dynamic_Limits WHERE TEST_NUM=? AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join([str(i) for i in dutList]))
-            sql_param = [test_num]
+            sql = "SELECT DUTIndex, LLimit, HLimit FROM Dynamic_Limits \
+                WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) \
+                    AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join([str(i) for i in dutList]))
+            sql_param = [test_num, test_name]
                 
             for dutIndex, dyLL, dyHL in self.cursor.execute(sql, sql_param):
                 # replace the limit in the list of the same index as the dutIndex in dutList

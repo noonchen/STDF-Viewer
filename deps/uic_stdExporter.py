@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sat Feb 05 2022
+# Last Modified: Sun Mar 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -157,11 +157,11 @@ class signals(QtCore.QObject):
     # get close signal
     closeSignal = Signal(bool)
     # signals from report generation thread for requesting data
-    prepareDataSignal = Signal(int)    # test_num
-    retrieveImageSignal = Signal(int, int, int, int, int)     # head, site, test_num, pmr, chartType
-    retrieveDataListSignal = Signal(int, dict)      # chartType, {site, test_num} / {site, bin} / {site, test_num, RawData}
+    prepareDataSignal = Signal(tuple)    # testID
+    retrieveImageSignal = Signal(int, int, tuple, int)     # head, site, testTuple, chartType
+    retrieveDataListSignal = Signal(int, dict)      # chartType, {site, testTuple} / {site, bin}
     retrieveTableDataSignal = Signal(int)           # FileInfo table
-    retrieveDutSummarySignal = Signal(list, list, dict)   # selected heads, selected sites, {test_num}, get dut info or dut test data
+    retrieveDutSummarySignal = Signal(list, list, dict)   # selected heads, selected sites, {testTuple}, get dut info or dut test data
     
     
     
@@ -186,10 +186,10 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
         
     
-    def waitForImage(self, head, site, test_num, pmr, chartType) -> io.BytesIO:
+    def waitForImage(self, head, site, testTuple, chartType) -> io.BytesIO:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveImageSignal.emit(head, site, test_num, pmr, chartType)
+        self.retrieveImageSignal.emit(head, site, testTuple, chartType)
         self.condWait.wait(self.mutex)      # self.mutex is unlocked here
         self.mutex.unlock()
         # by the time the thread is waked, the data is already published in imageChannel in mainthread
@@ -383,7 +383,7 @@ class reportGenerator(QtCore.QObject):
                     for site in self.siteL:
                         if self.forceQuit: return
                         # get bin image from GUI thread and insert to the sheet
-                        image_io = self.waitForImage(head=head, site=site, test_num=0, pmr=0, chartType=tab.Bin)
+                        image_io = self.waitForImage(head=head, site=site, testTuple=(0, 0, ""), chartType=tab.Bin)
                         image_width, image_height = get_png_size(image_io)
                         # rescale the width of the image to 12 inches
                         bin_scale = 12 / (image_width / 200)  # inches = pixel / dpi
@@ -413,7 +413,7 @@ class reportGenerator(QtCore.QObject):
                     for head in self.headL:
                         for site in self.siteL:
                             if self.forceQuit: return
-                            image_io = self.waitForImage(head=head, site=site, test_num=wafer, pmr=0, chartType=tab.Wafer)
+                            image_io = self.waitForImage(head=head, site=site, testTuple=(wafer, 0, ""), chartType=tab.Wafer)
                             image_width, image_height = get_png_size(image_io)
                             # rescale the width of the image to 12 inches
                             wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
@@ -430,16 +430,16 @@ class reportGenerator(QtCore.QObject):
             stat_col_width = [len(s) for s in header_stat]
             hasStatHeader = False
             
-            for test_num, pmr in self.numTupL:
+            for testTuple in self.numTupL:
                 # prepare data (all sites all heads)
-                self.prepareDataSignal.emit(test_num)
+                self.prepareDataSignal.emit( (testTuple[0], testTuple[-1]) )
                 
                 # if dut summary is selected
                 if tab.DUT in self.contL:
                     DutSheet:Worksheet = sheetDict[tab.DUT]
                     #append test raw data to the last column
                     max_width = 0
-                    test_data_list, test_stat_list = self.waitForDutSummary(self.headL, self.siteL, {"test_num": test_num, "pmr": pmr})
+                    test_data_list, test_stat_list = self.waitForDutSummary(self.headL, self.siteL, {"testTuple": testTuple})
                     data_style_list = [centerStyle if stat else failedStyle for stat in test_stat_list]
                     write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
                     max_width = max([len(s) for s in test_data_list])
@@ -458,11 +458,11 @@ class reportGenerator(QtCore.QObject):
                             # Sheet for trend plot and test data
                             TrendSheet:Worksheet = sheetDict[tab.Trend]
                             # get image and stat from main thread
-                            image_io = self.waitForImage(head, site, test_num, pmr, tab.Trend)
+                            image_io = self.waitForImage(head, site, testTuple, tab.Trend)
                             image_width, image_height = get_png_size(image_io)
                             # rescale the width of the image to 12 inches
                             trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num, "pmr": pmr, "testRecTypes": self.testRecTypes})
+                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
                             # insert into the work sheet
                             TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
                             sv.trendRow += ceil((image_height / 200) * trend_scale / 0.21)
@@ -480,8 +480,8 @@ class reportGenerator(QtCore.QObject):
                             # Sheet for histogram plot and test data
                             HistoSheet:Worksheet = sheetDict[tab.Histo]
                             #
-                            image_io = self.waitForImage(head, site, test_num, pmr, tab.Histo)
-                            dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "test_num": test_num, "pmr": pmr, "testRecTypes": self.testRecTypes})
+                            image_io = self.waitForImage(head, site, testTuple, tab.Histo)
+                            dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
                             #
                             image_width, image_height = get_png_size(image_io)
                             # rescale the width of the image to 12 inches
@@ -506,7 +506,7 @@ class reportGenerator(QtCore.QObject):
                                 sv.statRow += 1
                                 hasStatHeader = True    # avoid duplicated header
                                 
-                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "test_num": test_num, "pmr": pmr, "testRecTypes": self.testRecTypes})
+                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
                             write_row_col(StatSheet, sv.statRow, 0, dataList, centerStyle, writeRow=True)
                             stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
                             sv.statRow += 1
@@ -613,14 +613,14 @@ class progressDisplayer(QtWidgets.QDialog):
             self.close()
 
 
-    @Slot(int)
-    def prepareData(self, test_num):
+    @Slot(tuple)
+    def prepareData(self, testID):
         # print_thread("prepareData")
-        self.parent().parent.prepareData([test_num])
+        self.parent().parent.prepareData([testID])
     
     
-    @Slot(int, int, int, int, int)
-    def getImageFromParentMethod(self, head, site, test_num, pmr, chartType):
+    @Slot(int, int, tuple, int)
+    def getImageFromParentMethod(self, head, site, testTuple, chartType):
         '''
         Lessons:
         1. Never access GUI objects from another thread, it will raise a segfault which is nearly not debuggable.
@@ -628,7 +628,7 @@ class progressDisplayer(QtWidgets.QDialog):
         the data immediately, because the executaion of slot is not determinable. Use a shared class instead.
         3. the mutex.lock() is used for preventing wakeAll() is called before wait().
         '''
-        self.channel.imageChannel = self.parent().parent.genPlot(head, site, test_num, pmr, chartType, exportImg=True)
+        self.channel.imageChannel = self.parent().parent.genPlot(head, site, testTuple, chartType, exportImg=True)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
@@ -890,8 +890,8 @@ class stdfExporter(QtWidgets.QDialog):
         return selectedContents
     
     
-    def getExportTestNumTups(self):
-        return [self.parent.getTestNumTup(item) for item in self.exportTestItems]
+    def getExportTestTuples(self):
+        return [self.parent.getTestTuple(item) for item in self.exportTestItems]
     
     
     def getOutPath(self):
@@ -985,7 +985,7 @@ class stdfExporter(QtWidgets.QDialog):
         
         elif currentPage == 1:
             # test page
-            testCount = len(self.getExportTestNumTups())
+            testCount = len(self.getExportTestTuples())
             if testCount > 0 or (testCount == 0 and len(set(self.getSelectedContents()) & {tab.Trend, tab.Histo, tab.Stat}) == 0):
                 # go to site page
                 self.previousPageIndex = 1
@@ -1007,8 +1007,8 @@ class stdfExporter(QtWidgets.QDialog):
     
     
     def start(self):
-        self.numTupL = self.getExportTestNumTups()
-        self.testRecTypes = set([self.parent.testRecTypeDict[tn] for tn, _ in self.numTupL])    # determine the header elements
+        self.numTupL = self.getExportTestTuples()
+        self.testRecTypes = set([self.parent.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in self.numTupL])    # determine the header elements
         self.headL, self.siteL = self.getHeads_Sites()
         self.contL = self.getSelectedContents()
         self.path = self.getOutPath()

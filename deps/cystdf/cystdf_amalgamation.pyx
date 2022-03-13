@@ -7,7 +7,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: July 12th 2020
 # -----
-# Last Modified: Tue Mar 08 2022
+# Last Modified: Fri Mar 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -43,6 +43,7 @@ from hashmap_src.hashmap_libc cimport *
 from sqlite3_src.sqlite3_libc cimport *
 from stdf4_src.stdf4_libc cimport *
 from tsqueue_src.tsqueue_libc cimport *
+from testidmap_src.testidmap_libc cimport *
 
 from libc.time cimport time_t, strftime, tm, gmtime, localtime
 from libc.stdint cimport *
@@ -834,6 +835,7 @@ cdef class stdfSummarizer:
         sqlite3_stmt *insertTestPin_stmt
         sqlite3_stmt *insertDynamicLimit_stmt
         sqlite3_stmt *insertDatalog_stmt
+        testIDMap   *idMap
         map_t   defaultLLimit
         map_t   defaultHLimit
         map_t   TestFailCount
@@ -864,6 +866,7 @@ cdef class stdfSummarizer:
         self.insertDynamicLimit_stmt= NULL
         self.insertDatalog_stmt     = NULL
         self.pRec                   = NULL
+        self.idMap                  = NULL
         self.defaultLLimit          = NULL
         self.defaultHLimit          = NULL        
         self.TestFailCount          = NULL
@@ -931,7 +934,8 @@ cdef class stdfSummarizer:
                                                                 FUNC_CNT INTEGER);
 
                                         CREATE TABLE IF NOT EXISTS Test_Info (
-                                                                TEST_NUM INTEGER PRIMARY KEY DESC, /* break rowid alias */
+                                                                TEST_ID INTEGER,
+                                                                TEST_NUM INTEGER,
                                                                 recHeader INTEGER,
                                                                 TEST_NAME TEXT,
                                                                 RES_SCAL INTEGER,
@@ -945,14 +949,15 @@ cdef class stdfSummarizer:
                                                                 LSpec REAL,
                                                                 HSpec REAL,
                                                                 VECT_NAM TEXT,
-                                                                SEQ_NAME TEXT);
+                                                                SEQ_NAME TEXT,
+                                                                PRIMARY KEY (TEST_NUM, TEST_NAME)) WITHOUT ROWID;
                                                                 
                                         CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                                 DUTIndex INTEGER,
-                                                                TEST_NUM INTEGER, 
+                                                                TEST_ID INTEGER, 
                                                                 Offset INTEGER,
                                                                 BinaryLen INTEGER,
-                                                                PRIMARY KEY (DUTIndex, TEST_NUM)) WITHOUT ROWID;
+                                                                PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
                                                                 
                                         CREATE TABLE IF NOT EXISTS Bin_Info (
                                                                 BIN_TYPE TEXT,
@@ -982,16 +987,17 @@ cdef class stdfSummarizer:
                                                                 RTN_CHAL TEXT);
 
                                         CREATE TABLE IF NOT EXISTS TestPin_Map (
-                                                                TEST_NUM INTEGER, 
+                                                                TEST_ID INTEGER, 
                                                                 PMR_INDX INTEGER,
-                                                                PIN_TYPE TEXT);
+                                                                PIN_TYPE TEXT,
+                                                                PRIMARY KEY (TEST_ID, PMR_INDX, PIN_TYPE));
                                         
                                         CREATE TABLE IF NOT EXISTS Dynamic_Limits (
                                                                 DUTIndex INTEGER,
-                                                                TEST_NUM INTEGER, 
+                                                                TEST_ID INTEGER, 
                                                                 LLimit REAL,
                                                                 HLimit REAL,
-                                                                PRIMARY KEY (DUTIndex, TEST_NUM));
+                                                                PRIMARY KEY (DUTIndex, TEST_ID));
                                         
                                         CREATE TABLE IF NOT EXISTS Datalog (
                                                                 RecordType TEXT,
@@ -1010,12 +1016,10 @@ cdef class stdfSummarizer:
                                                             HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
                                                             WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD 
                                                             WHERE DUTIndex=:DUTIndex; COMMIT; BEGIN;'''     # commit and start another transaction in PRR
-            const char* insertTR = '''INSERT OR REPLACE INTO Test_Offsets VALUES (:DUTIndex, :TEST_NUM, :Offset ,:BinaryLen);'''
-            # update TR is not required since 'REPLACE' can replace it, and we can save memory to stop tracking test_num and dutIndex, hooray~~
-            # const char* updateTR = '''UPDATE Test_Offsets SET Offset=:Offset , BinaryLen=:BinaryLen WHERE DUTIndex=:DUTIndex AND TEST_NUM=:TEST_NUM;'''
+            const char* insertTR = '''INSERT OR REPLACE INTO Test_Offsets VALUES (:DUTIndex, :TEST_ID, :Offset ,:BinaryLen);'''
 
             # I am not adding IGNORE below, since tracking seen test_nums can skip a huge amount of codes
-            const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_NUM, :recHeader, :TEST_NAME, 
+            const char* insertTestInfo = '''INSERT INTO Test_Info VALUES (:TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
                                                                         :RES_SCAL, :LLimit, :HLimit, 
                                                                         :Unit, :OPT_FLAG, :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, :HSpec, :VECT_NAM, :SEQ_NAME);'''
             const char* insertHBIN = '''INSERT OR REPLACE INTO Bin_Info VALUES ("H", :HBIN_NUM, :HBIN_NAME, :PF);'''
@@ -1036,8 +1040,8 @@ cdef class stdfSummarizer:
             const char* insertPinInfo = '''INSERT OR REPLACE INTO Pin_Info VALUES (:P_PG_INDX, (SELECT GRP_NAM FROM Pin_Info WHERE P_PG_INDX=:P_PG_INDX), 
                                                                         :GRP_MODE, :GRP_RADX, 
                                                                         :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);'''
-            const char* insertTestPin = '''INSERT INTO TestPin_Map VALUES (:TEST_NUM, :PMR_INDX, :PIN_TYPE);'''
-            const char* insertDynamicLimit = '''INSERT OR REPLACE INTO Dynamic_Limits VALUES (:DUTIndex, :TEST_NUM, :LLimit ,:HLimit);'''
+            const char* insertTestPin = '''INSERT OR IGNORE INTO TestPin_Map VALUES (:TEST_ID, :PMR_INDX, :PIN_TYPE);'''
+            const char* insertDynamicLimit = '''INSERT OR REPLACE INTO Dynamic_Limits VALUES (:DUTIndex, :TEST_ID, :LLimit ,:HLimit);'''
             const char* insertDatalog = '''INSERT INTO Datalog VALUES (:RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);'''
 
         # init sqlite3 database api
@@ -1103,13 +1107,15 @@ cdef class stdfSummarizer:
         self.isLittleEndian = True
         self.stopFlag = False
         # used for recording TR, TestNum, HBR, SBR that have been seen
-        self.defaultLLimit          = hashmap_new(1024)   # key: test number, value: Low limit in first PTR
-        self.defaultHLimit          = hashmap_new(1024)   # key: test number, value: high limit in first PTR
-        self.TestFailCount          = hashmap_new(1024)   # key: test number, value: fail count
+        self.idMap                  = createTestIDMap()
+        self.defaultLLimit          = hashmap_new(1024)   # key: testID, value: Low limit in first PTR
+        self.defaultHLimit          = hashmap_new(1024)   # key: testID, value: high limit in first PTR
+        self.TestFailCount          = hashmap_new(1024)   # key: testID, value: fail count
         self.head_site_dutIndex     = hashmap_new(8)      # key: head numb << 8 | site num, value: dutIndex, a tmp dict used to retrieve dut index by head/site info, required by multi head stdf files
         self.head_waferIndex        = hashmap_new(8)      # similar to head_site_dutIndex, but one head per wafer
         
-        if self.defaultLLimit == NULL or self.defaultHLimit == NULL or self.TestFailCount == NULL or self.head_site_dutIndex == NULL or self.head_waferIndex == NULL:
+        if self.idMap == NULL or self.defaultLLimit == NULL or self.defaultHLimit == NULL or self.TestFailCount == NULL or self.head_site_dutIndex == NULL or self.head_waferIndex == NULL:
+            destoryTestIDMap(self.idMap)
             hashmap_free(self.defaultLLimit)
             hashmap_free(self.defaultHLimit)
             hashmap_free(self.TestFailCount)
@@ -1235,9 +1241,7 @@ cdef class stdfSummarizer:
         
         
     def after_complete(self):
-        cdef:
-            uint32_t TEST_NUM, count
-            int errorCode
+        cdef int errorCode = 0
 
         self.reading = False
         # check if all BPSs are closed
@@ -1250,7 +1254,7 @@ cdef class stdfSummarizer:
             self.programSections = NULL
             self.programSectionsDepth = 0
         # update failcount
-        cdef const char* updateFailCount = '''UPDATE Test_Info SET FailCount=:count WHERE TEST_NUM=:TEST_NUM'''
+        cdef const char* updateFailCount = '''UPDATE Test_Info SET FailCount=:count WHERE TEST_ID=:TEST_ID'''
         cdef sqlite3_stmt* updateFailCount_stmt
         csqlite3_prepare_v2(self.db_ptr, updateFailCount, &updateFailCount_stmt)
 
@@ -1298,7 +1302,9 @@ cdef class stdfSummarizer:
         hashmap_free(self.TestFailCount)
         hashmap_free(self.head_site_dutIndex)
         hashmap_free(self.head_waferIndex)            
-        
+        # clean testidmap
+        destoryTestIDMap(self.idMap)
+
         if self.QSignal: 
             self.pb_thread.join()
             # update once again when finished, ensure the progress bar hits 100%
@@ -1755,6 +1761,7 @@ cdef class stdfSummarizer:
     
     cdef int onTR(self, uint16_t recHeader, uint16_t binaryLen, unsigned char* rawData) nogil:
         cdef:
+            int testID = 0
             uint32_t TEST_NUM, currentDutIndex, _1stLLimit, _1stHLimit
             uint8_t HEAD_NUM, SITE_NUM, OPT_FLAG
             uint16_t RTN_ICNT = 0, RSLT_PGM_CNT = 0     # For FTR & MPR
@@ -1774,25 +1781,38 @@ cdef class stdfSummarizer:
         # read testNum headNum and siteNum
         if recHeader == REC_PTR:
             TEST_NUM = (<PTR*>self.pRec).TEST_NUM
+            TEST_TXT = (<PTR*>self.pRec).TEST_TXT
             HEAD_NUM = (<PTR*>self.pRec).HEAD_NUM
             SITE_NUM = (<PTR*>self.pRec).SITE_NUM
         elif recHeader == REC_FTR:
             TEST_NUM = (<FTR*>self.pRec).TEST_NUM
+            TEST_TXT = (<FTR*>self.pRec).TEST_TXT
             HEAD_NUM = (<FTR*>self.pRec).HEAD_NUM
             SITE_NUM = (<FTR*>self.pRec).SITE_NUM
         else:
             TEST_NUM = (<MPR*>self.pRec).TEST_NUM
+            TEST_TXT = (<MPR*>self.pRec).TEST_TXT
             HEAD_NUM = (<MPR*>self.pRec).HEAD_NUM
             SITE_NUM = (<MPR*>self.pRec).SITE_NUM
+
+        if TEST_TXT == NULL:
+            TEST_TXT = ""
 
         if (MAP_OK != hashmap_get(self.head_site_dutIndex, HEAD_NUM<<8 | SITE_NUM, &currentDutIndex)):
             err = MAP_MISSING
             sprintf(self.detailErrorMsg, "Error key in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
 
+        testID = getTestID(self.idMap, TEST_NUM, TEST_TXT)
+        if testID < 0:
+            testID = insertTestItem(self.idMap, TEST_NUM, TEST_TXT)
+            if testID < 0:
+                err = testID
+                sprintf(self.detailErrorMsg, "Error when storing testID for TestNumber:%d Head:%d Site:%d", TEST_NUM, HEAD_NUM, SITE_NUM)
+
         if not err:
             # insert or replace Test_Offsets
             sqlite3_bind_int(self.insertTR_stmt, 1, currentDutIndex)                # DUTIndex
-            sqlite3_bind_int(self.insertTR_stmt, 2, TEST_NUM)                       # TEST_NUM
+            sqlite3_bind_int(self.insertTR_stmt, 2, testID)                         # TEST_ID
             sqlite3_bind_int64(self.insertTR_stmt, 3, <sqlite3_int64>self.offset)   # offset
             sqlite3_bind_int(self.insertTR_stmt, 4, binaryLen)                      # BinaryLen
             err = csqlite3_step(self.insertTR_stmt)
@@ -1801,10 +1821,9 @@ cdef class stdfSummarizer:
         # MUST pre-read and cache OPT_FLAG, RES_SCAL, LLM_SCAL, HLM_SCAL of a test item from the first record
         # as it may be omitted in the later record, causing typeError when user directly selects sites where 
         # no such field value is available in the data preparation.
-        if (not err) and (not hashmap_contains(self.defaultLLimit, TEST_NUM)):
+        if (not err) and (not hashmap_contains(self.defaultLLimit, testID)):
             if recHeader == REC_FTR: # FTR
                 No_RES_SCAL = No_LLimit = No_HLimit = No_LSpec = No_HSpec = True
-                TEST_TXT    = (<FTR*>self.pRec).TEST_TXT
                 OPT_FLAG    = (<FTR*>self.pRec).OPT_FLAG
                 Unit        = ""
                 RTN_ICNT    = (<FTR*>self.pRec).RTN_ICNT
@@ -1814,7 +1833,6 @@ cdef class stdfSummarizer:
                 VECT_NAM    = (<FTR*>self.pRec).VECT_NAM
 
             elif recHeader == REC_PTR:
-                TEST_TXT    = (<PTR*>self.pRec).TEST_TXT
                 RES_SCAL    = (<PTR*>self.pRec).RES_SCAL
                 LLimit      = (<PTR*>self.pRec).LO_LIMIT
                 HLimit      = (<PTR*>self.pRec).HI_LIMIT
@@ -1829,7 +1847,6 @@ cdef class stdfSummarizer:
                 No_HSpec    = (OPT_FLAG & 0x08 == 0x08)
 
             else:
-                TEST_TXT    = (<MPR*>self.pRec).TEST_TXT
                 RES_SCAL    = (<MPR*>self.pRec).RES_SCAL
                 LLimit      = (<MPR*>self.pRec).LO_LIMIT
                 HLimit      = (<MPR*>self.pRec).HI_LIMIT
@@ -1847,37 +1864,36 @@ cdef class stdfSummarizer:
                 No_HSpec    = (OPT_FLAG & 0x08 == 0x08)
 
             # put the first Low Limit and High Limit in the dictionary, 
-            # also used to check if the test_num has been seen
-            if (MAP_OK != hashmap_put(self.defaultLLimit, TEST_NUM, (<uint32_t*>&LLimit)[0]) or 
-                MAP_OK != hashmap_put(self.defaultHLimit, TEST_NUM, (<uint32_t*>&HLimit)[0])):  # convert float bits to uint bits
+            if (MAP_OK != hashmap_put(self.defaultLLimit, testID, (<uint32_t*>&LLimit)[0]) or 
+                MAP_OK != hashmap_put(self.defaultHLimit, testID, (<uint32_t*>&HLimit)[0])):  # convert float bits to uint bits
                 err = MAP_OMEM
                 sprintf(self.detailErrorMsg, "Error when storing limits in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
 
-            if TEST_TXT == NULL: TEST_TXT = ""
             if Unit == NULL: Unit = ""
             if not err:
-                sqlite3_bind_int(self.insertTestInfo_stmt, 1, TEST_NUM)                 # TEST_NUM
-                sqlite3_bind_int(self.insertTestInfo_stmt, 2, recHeader)                # recHeader
-                sqlite3_bind_text(self.insertTestInfo_stmt, 3, TEST_TXT, -1, NULL)      # TEST_NAME
+                sqlite3_bind_int(self.insertTestInfo_stmt, 1, testID)                   # TEST_ID
+                sqlite3_bind_int(self.insertTestInfo_stmt, 2, TEST_NUM)                 # TEST_NUM
+                sqlite3_bind_int(self.insertTestInfo_stmt, 3, recHeader)                # recHeader
+                sqlite3_bind_text(self.insertTestInfo_stmt, 4, TEST_TXT, -1, NULL)      # TEST_NAME
                 if not No_RES_SCAL:
-                    sqlite3_bind_int(self.insertTestInfo_stmt, 4, RES_SCAL)             # RES_SCAL
+                    sqlite3_bind_int(self.insertTestInfo_stmt, 5, RES_SCAL)             # RES_SCAL
                 if not No_LLimit:
-                    sqlite3_bind_double(self.insertTestInfo_stmt, 5, LLimit)            # LLimit
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 6, LLimit)            # LLimit
                 if not No_HLimit:
-                    sqlite3_bind_double(self.insertTestInfo_stmt, 6, HLimit)            # HLimit
-                sqlite3_bind_text(self.insertTestInfo_stmt, 7, Unit, -1, NULL)          # Unit
-                sqlite3_bind_int(self.insertTestInfo_stmt, 8, OPT_FLAG)                 # OPT_FLAG
-                sqlite3_bind_int(self.insertTestInfo_stmt, 9, -1)                       # FailCnt, default -1
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 7, HLimit)            # HLimit
+                sqlite3_bind_text(self.insertTestInfo_stmt, 8, Unit, -1, NULL)          # Unit
+                sqlite3_bind_int(self.insertTestInfo_stmt, 9, OPT_FLAG)                 # OPT_FLAG
+                sqlite3_bind_int(self.insertTestInfo_stmt, 10, -1)                      # FailCnt, default -1
                 if RTN_ICNT > 0:
-                    sqlite3_bind_int(self.insertTestInfo_stmt, 10, RTN_ICNT)            # RTN_ICNT for FTR & MPR
+                    sqlite3_bind_int(self.insertTestInfo_stmt, 11, RTN_ICNT)            # RTN_ICNT for FTR & MPR
                 if RSLT_PGM_CNT > 0:
-                    sqlite3_bind_int(self.insertTestInfo_stmt, 11, RSLT_PGM_CNT)        # RSLT or PGM for MPR or FTR
+                    sqlite3_bind_int(self.insertTestInfo_stmt, 12, RSLT_PGM_CNT)        # RSLT or PGM for MPR or FTR
                 if not No_LSpec:
-                    sqlite3_bind_double(self.insertTestInfo_stmt, 12, LSpec)            # LSpec
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 13, LSpec)            # LSpec
                 if not No_HSpec:
-                    sqlite3_bind_double(self.insertTestInfo_stmt, 13, HSpec)            # LSpec
+                    sqlite3_bind_double(self.insertTestInfo_stmt, 14, HSpec)            # LSpec
                 if not VECT_NAM == NULL:
-                    sqlite3_bind_text(self.insertTestInfo_stmt, 14, VECT_NAM, -1, NULL) # VECT_NAM
+                    sqlite3_bind_text(self.insertTestInfo_stmt, 15, VECT_NAM, -1, NULL) # VECT_NAM
                 if self.programSectionsDepth > 0:
                     for i in range(self.programSectionsDepth):
                         SEQ_NAM_LEN += (strlen(self.programSections[i]) + 2)        # +2 get extra space to prevent crash
@@ -1886,7 +1902,7 @@ cdef class stdfSummarizer:
                         for i in range(self.programSectionsDepth):
                             sprintf(SEQ_NAM + strlen(SEQ_NAM), "%s;", self.programSections[i])
                         SEQ_NAM[strlen(SEQ_NAM)-1] = 0x00
-                        sqlite3_bind_text(self.insertTestInfo_stmt, 15, SEQ_NAM, -1, NULL) # SEQ_NAM
+                        sqlite3_bind_text(self.insertTestInfo_stmt, 16, SEQ_NAM, -1, NULL) # SEQ_NAM
                     else:
                         return NO_MEMORY
                     
@@ -1898,14 +1914,14 @@ cdef class stdfSummarizer:
             if not err and recHeader != REC_PTR:
                 if RTN_ICNT > 0 and pRTN_INDX != NULL:
                     for i in range(RTN_ICNT):
-                        sqlite3_bind_int(self.insertTestPin_stmt, 1, TEST_NUM)
+                        sqlite3_bind_int(self.insertTestPin_stmt, 1, testID)
                         sqlite3_bind_int(self.insertTestPin_stmt, 2, pRTN_INDX[i])
                         sqlite3_bind_text(self.insertTestPin_stmt, 3, "RTN", -1, NULL)
                         err = csqlite3_step(self.insertTestPin_stmt)
 
                 if RSLT_PGM_CNT > 0 and pPGM_INDX != NULL:
                     for i in range(RTN_ICNT):
-                        sqlite3_bind_int(self.insertTestPin_stmt, 1, TEST_NUM)
+                        sqlite3_bind_int(self.insertTestPin_stmt, 1, testID)
                         sqlite3_bind_int(self.insertTestPin_stmt, 2, pPGM_INDX[i])
                         sqlite3_bind_text(self.insertTestPin_stmt, 3, "PGM", -1, NULL)
                         err = csqlite3_step(self.insertTestPin_stmt)
@@ -1926,7 +1942,7 @@ cdef class stdfSummarizer:
                     if not No_LLimit:
                         # low limit is available
                         # get default low limit from dictionary
-                        if (MAP_OK != hashmap_get(self.defaultLLimit, TEST_NUM, &_1stLLimit)): 
+                        if (MAP_OK != hashmap_get(self.defaultLLimit, testID, &_1stLLimit)): 
                             err = MAP_MISSING
                             sprintf(self.detailErrorMsg, "Error getting default low limit in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
                         # check if it's changed
@@ -1934,7 +1950,7 @@ cdef class stdfSummarizer:
                         
                     if not No_HLimit:
                         # high limit is available
-                        if (MAP_OK != hashmap_get(self.defaultHLimit, TEST_NUM, &_1stHLimit)): 
+                        if (MAP_OK != hashmap_get(self.defaultHLimit, testID, &_1stHLimit)): 
                             err = MAP_MISSING
                             sprintf(self.detailErrorMsg, "Error getting default high limit in XTR %d, TestNumber:%d Head:%d Site:%d", recHeader, TEST_NUM, HEAD_NUM, SITE_NUM)
                         if (_1stHLimit != (<uint32_t*>&HLimit)[0]): HLimitChanged = True
@@ -1942,7 +1958,7 @@ cdef class stdfSummarizer:
                     if (not err) and (LLimitChanged or HLimitChanged):
                         # any limit changed, write into db
                         sqlite3_bind_int(self.insertDynamicLimit_stmt, 1, currentDutIndex)         # dutIndex 
-                        sqlite3_bind_int(self.insertDynamicLimit_stmt, 2, TEST_NUM)                # TEST_NUM
+                        sqlite3_bind_int(self.insertDynamicLimit_stmt, 2, testID)                  # TEST_ID
                         if LLimitChanged:
                             sqlite3_bind_double(self.insertDynamicLimit_stmt, 3, LLimit)            # LLimit
                         if HLimitChanged:
@@ -2301,27 +2317,38 @@ cdef class stdfSummarizer:
         cdef:
             int err = 0
             uint32_t TEST_NUM, FAIL_CNT, tmpCount
+            char* TEST_NAM = NULL
         # for fast find failed test number globally
         # don't care about head number nor site number
         parse_record(&self.pRec, recHeader, rawData, binaryLen)
         TEST_NUM = (<TSR*>self.pRec).TEST_NUM
+        TEST_NAM = (<TSR*>self.pRec).TEST_NAM
         FAIL_CNT = (<TSR*>self.pRec).FAIL_CNT
 
-        if FAIL_CNT != <uint32_t>0xFFFFFFFF:          # 2**32-1 invalid number for FAIL_CNT
-            if hashmap_contains(self.TestFailCount, TEST_NUM):
+        if TEST_NAM == NULL:
+            TEST_NAM = ""
+
+        testID = getTestID(self.idMap, TEST_NUM, TEST_NAM)
+        if testID < 0:
+            # err = TESTIDMAP_MISSING
+            printf("Error no testID for TEST_NUM %d, TEST_NAM %s key in TSR\n", TEST_NUM, TEST_NAM)
+            sprintf(self.detailErrorMsg, "Error no testID for TEST_NUM %d, TEST_NAM %s key in TSR", TEST_NUM, TEST_NAM)
+
+        if testID >= 0 and FAIL_CNT != <uint32_t>0xFFFFFFFF:          # 2**32-1 invalid number for FAIL_CNT
+            if hashmap_contains(self.TestFailCount, testID):
                 # get previous count and add up
-                if (MAP_OK != hashmap_get(self.TestFailCount, TEST_NUM, &tmpCount)):
+                if (MAP_OK != hashmap_get(self.TestFailCount, testID, &tmpCount)):
                     err = MAP_MISSING
-                    sprintf(self.detailErrorMsg, "Error TEST_NUM %d key in TSR", TEST_NUM)
+                    sprintf(self.detailErrorMsg, "Error getting count from TSR dict")
                     return err
 
                 tmpCount += FAIL_CNT
-                if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, tmpCount)):
+                if (MAP_OK != hashmap_put(self.TestFailCount, testID, tmpCount)):
                     err = MAP_OMEM
                     sprintf(self.detailErrorMsg, "Error in TSR when storing count for TEST_NUM %d", TEST_NUM)
             else:
                 # save current count
-                if (MAP_OK != hashmap_put(self.TestFailCount, TEST_NUM, FAIL_CNT)):
+                if (MAP_OK != hashmap_put(self.TestFailCount, testID, FAIL_CNT)):
                     err = MAP_OMEM
                     sprintf(self.detailErrorMsg, "Error in TSR when storing count for TEST_NUM %d", TEST_NUM)
         free_record(recHeader, self.pRec)
