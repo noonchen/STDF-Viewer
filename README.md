@@ -6,6 +6,8 @@ STDF Viewer is a free, fast and powerful GUI tool to visualize STDF (semiconduct
 
 Devloped by Noon Chen <chennoon233@foxmail.com>
 
+| [中文版](README_CN.md) |
+
 <img src="screenshots/mainUI.png">
 
 ## Table of Content
@@ -13,6 +15,7 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
   - [Open a STDF file](#open-a-stdf-file)
   - [Find failed test items](#find-failed-test-items)
   - [Looking for DUTs' info](#looking-for-duts-info)
+  - [Display GDRs & DTRs info](#display-gdrs--dtrs-info)
   - [Analyzing test data](#analyzing-test-data)
       - [Test data](#test-data)
       - [Trend chart](#trend-chart)
@@ -26,8 +29,9 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
       - [From `Histogram`](#from-histogram)
       - [From `Bin Summary`](#from-bin-summary)
       - [From `Wafer Map`](#from-wafer-map)
-  - [Generating a STDF report](#generating-a-stdf-report)
+  - [Generating an Excel report](#generating-an-excel-report)
   - [Settings](#settings)
+      - [Change fonts](#change-fonts)
 - [**Having issues?**](#having-issues)
 - [**Acknowledgements**](#acknowledgements)
 - [**License**](#license)
@@ -39,13 +43,18 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 
 ### **Open a STDF file**
 
-STDF Viewer supports files under [STDF Version 4 Specification](http://www.kanwoda.com/wp-content/uploads/2015/05/std-spec.pdf), GZ and BZIP compressed STDF files can also be opened without decompression.
+STDF Viewer supports files under [STDF Version 4 Specification](http://www.kanwoda.com/wp-content/uploads/2015/05/std-spec.pdf), ZIP*, GZ and BZIP compressed STDF files can also be opened without decompression.
 
 STDF files can be opened in 3 ways:
 
 1. Select a STDF file in a file dialog by clicking `open` button on the toolbar.
 2. Right click on a STDF file and select STDF Viewer to open.
 3. Drag a STDF file into the GUI to open.
+
+***Note**: ZIP format support is limited, works only if:*
+- *ZIP file is not password protected.*
+- *Contains only 1 file per ZIP.*
+- *ZIP file is created using `DEFLATE` compression method, which is the default on popular OSs' native zip tool.*
 
 <br>
 
@@ -68,6 +77,18 @@ If STDF files contain multiple heads and/or sites, you may also filter out the D
 DUTs' info can be sorted by any columns. For instance, the screenshot below showing the result of sorting the DUTs by flags.
 
 <img src="screenshots/dut summary sorting.png">
+
+<br>
+
+### **Display GDRs & DTRs info**
+
+All the GDR (Generic Data Record) and DTR (Datalog Text Record) will be listed in `Detailed Info` -> `GDR & DTR Summary`. The precise location of GDR & DTR is hard to trace, the relative location compared to PIR/PRR is given instead.
+
+For GDR, each line in the `Value` column represents a V1 data, which is displayed in the format of `{V1 index} {V1 data type}: {V1 data}`.
+
+*Note: Data of `Bn` & `Dn` type is shown in HEX string.*
+
+<img src="screenshots/GDR DTR summary.png">
 
 <br>
 
@@ -110,7 +131,7 @@ Display histograms of dut counts of each hardware bin and software bin in select
 <br>
 
 ### **Viewing wafer maps**
-If STDF files contain wafer information (WIR, WRR records), the `Wafer Map` tab will be enabled. 
+If STDF files contain wafer information (WCR, WIR, WRR records), the `Wafer Map` tab will be enabled. 
 
 There is a stacked wafer map at the top of `Wafer Selection` that summarizes the total count of fail dut in each (X, Y) coordinates of all wafermaps in the current file.
 
@@ -159,7 +180,7 @@ Click on the die(s), press `Enter` will show you duts in the selected (X, Y).
 
 <br>
 
-### **Generating a STDF report**
+### **Generating an Excel report**
 Almost all information displayed on STDF Viewer can be exported to a Excel report.
 
 <img src="screenshots/report content selection.png">
@@ -168,13 +189,14 @@ Almost all information displayed on STDF Viewer can be exported to a Excel repor
 
 Each checkbox in `Report Content Selection` will be saved in a individual sheet in the report. 
 
-- `File Info`: File properties and MIR + MRR inifo.
+- `File Info`: File properties, MIR, MRR, ATR, RDR and SDR inifo.
 - `DUT Summary`: Content in DUT Summary table, test data will be added if test items are selected.
 - `Trend Chart`: Trend Plot + Statistics.
 - `Histogram`: Histogram Plot + Statistics.
 - `Bin Chart`: Bin Plot + bin summary.
 - `Wafer Map`: All Wafermap Plots.
 - `Test Statistics`: Statistics of all selected test items.
+- `GDR & DTR Summary`: All GDR and DTR info.
 
 The numbers of figures/data in the report are based on numbers of tests in `Export Tests` and selected Heads and Sites.
 
@@ -187,6 +209,25 @@ The description should be self-explanatory, feel free to play it around.
 
 <img src="screenshots/setting.png">
 
+#### **Change fonts**
+Users can change the default fonts for UI display and data plots.
+
+Rename a TrueType Font (.ttf) file to apply the font for a certain language:
+- Chinese: prefix `cn_`
+- English: prefix `en_`
+
+For example, we want to use a font file named `testfontforchinese.ttf` as the default Chinese font, it should be renamed to `cn_testfontforchinese.ttf`, it will be the default font for Chinese language, other languages will not be affected.
+
+Copy the renamed font file to `/fonts` folder, it is located at:
+- Windows: next to the `.EXE`
+- macOS: `STDF Viewer.app/Contents/Resources/fonts`
+- Ubuntu: `/usr/local/bin/STDF-Viewer/fonts`
+
+Relaunch STDF Viewer to apply the changes.
+
+<img src="screenshots/change fonts.png">
+
+<br>
 
 ## Having issues?
 If you have encountered any error, follow these steps to create a report:
@@ -200,6 +241,7 @@ If you have encountered any error, follow these steps to create a report:
 
 STDF Viewer uses code from the following open sources, much thanks to their authors.
  - [zlib](https://zlib.net/)
+ - [minizip](https://www.winimage.com/zLibDll/minizip.html)
  - [bzip2](https://www.sourceware.org/bzip2/)
  - [sqlite3](https://www.sqlite.org/)
  - [hashmap](https://gist.github.com/warmwaffles/6fb6786be7c86ed51fce)
