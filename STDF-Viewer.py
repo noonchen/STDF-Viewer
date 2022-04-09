@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Mar 13 2022
+# Last Modified: Sat Apr 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -3170,7 +3170,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.stdHandleList = [self.std_handle]
             self.DatabaseFetcher.closeDB()
             databasePath = os.path.join(sys.rootFolder, "logs", "tmp.db")
-            os.rename(os.path.join(sys.rootFolder, "logs", "tmp_new.db"), databasePath)
+            os.replace(os.path.join(sys.rootFolder, "logs", "tmp_new.db"), databasePath)
             self.DatabaseFetcher.connectDB(databasePath)
             self.dbConnected = True
             
