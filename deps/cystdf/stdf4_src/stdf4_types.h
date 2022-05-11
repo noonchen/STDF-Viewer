@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: April 27th 2021
  * -----
- * Last Modified: Tue Jan 25 2022
+ * Last Modified: Wed May 11 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -47,6 +47,7 @@ typedef enum {
 typedef enum {
 	REC_SUB_FAR   = 10, // File Attributes Record
 	REC_SUB_ATR   = 20, // Audit Trail Record
+    REC_SUB_VUR   = 30, // Version Update Record
 	REC_SUB_MIR   = 10, // Master Information Record
 	REC_SUB_MRR   = 20, // Master Result Record
 	REC_SUB_PCR   = 30, // Part Count Record
@@ -57,6 +58,11 @@ typedef enum {
 	REC_SUB_PLR   = 63, // Pin List Record
 	REC_SUB_RDR   = 70, // Reset Data Record
 	REC_SUB_SDR   = 80, // Site Description Record
+    REC_SUB_PSR   = 90, // Pattern Sequence Record
+    REC_SUB_NMR   = 91, // Name Map Record
+    REC_SUB_CNR   = 92, // Cell Name Record
+    REC_SUB_SSR   = 93, // Scan Structure Record
+    REC_SUB_CDR   = 94, // Chain Description Record
 	REC_SUB_WIR   = 10, // Wafer Information Record
 	REC_SUB_WRR   = 20, // Wafer Result Record
 	REC_SUB_WCR   = 30, // Wafer Configuration Record
@@ -66,6 +72,7 @@ typedef enum {
 	REC_SUB_PTR   = 10, // Parametric Test Record
 	REC_SUB_MPR   = 15, // Multiple-Result Parametric Record
 	REC_SUB_FTR   = 20, // Functional Test Record
+    REC_SUB_STR   = 30, // Scan Test Record
 	REC_SUB_BPS   = 10, // Begin Program Section Record
 	REC_SUB_EPS   = 20, // End Program Section Record
 	REC_SUB_GDR   = 10, // Generic Data Record
@@ -75,6 +82,7 @@ typedef enum {
 
 #define REC_FAR (REC_TYP_INFO      <<8 | REC_SUB_FAR)    // FAR
 #define REC_ATR (REC_TYP_INFO      <<8 | REC_SUB_ATR)    // ATR
+#define REC_ATR (REC_TYP_INFO      <<8 | REC_SUB_VUR)    // VUR
 #define REC_MIR (REC_TYP_PER_LOT   <<8 | REC_SUB_MIR)    // MIR
 #define REC_MRR (REC_TYP_PER_LOT   <<8 | REC_SUB_MRR)    // MRR
 #define REC_PCR (REC_TYP_PER_LOT   <<8 | REC_SUB_PCR)    // PCR
@@ -85,6 +93,11 @@ typedef enum {
 #define REC_PLR (REC_TYP_PER_LOT   <<8 | REC_SUB_PLR)    // PLR
 #define REC_RDR (REC_TYP_PER_LOT   <<8 | REC_SUB_RDR)    // RDR
 #define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_SDR)    // SDR
+#define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_PSR)    // PSR
+#define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_NMR)    // NMR
+#define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_CNR)    // CNR
+#define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_SSR)    // SSR
+#define REC_SDR (REC_TYP_PER_LOT   <<8 | REC_SUB_CDR)    // CDR
 #define REC_WIR (REC_TYP_PER_WAFER <<8 | REC_SUB_WIR)    // WIR
 #define REC_WRR (REC_TYP_PER_WAFER <<8 | REC_SUB_WRR)    // WRR
 #define REC_WCR (REC_TYP_PER_WAFER <<8 | REC_SUB_WCR)    // WCR
@@ -94,6 +107,7 @@ typedef enum {
 #define REC_PTR (REC_TYP_PER_EXEC  <<8 | REC_SUB_PTR)    // PTR
 #define REC_MPR (REC_TYP_PER_EXEC  <<8 | REC_SUB_MPR)    // MPR
 #define REC_FTR (REC_TYP_PER_EXEC  <<8 | REC_SUB_FTR)    // FTR
+#define REC_FTR (REC_TYP_PER_EXEC  <<8 | REC_SUB_STR)    // STR
 #define REC_BPS (REC_TYP_PER_PROG  <<8 | REC_SUB_BPS)    // BPS
 #define REC_EPS (REC_TYP_PER_PROG  <<8 | REC_SUB_EPS)    // EPS
 #define REC_GDR (REC_TYP_GENERIC   <<8 | REC_SUB_GDR)    // GDR
@@ -106,6 +120,7 @@ typedef	char			C1;
 typedef	uint8_t			U1;
 typedef	uint16_t		U2;
 typedef	uint32_t		U4;
+typedef uint64_t        U8;
 typedef	int8_t			I1; 
 typedef	int16_t			I2;
 typedef	int32_t			I4;
@@ -116,6 +131,9 @@ typedef	double			R8;
 // 	C1 	data[255U];
 // } Cn;	//first byte = unsigned count of bytes to follow (maximum of 255 bytes)
 typedef char*           Cn;
+
+// first two bytes = unsigned count of bytes to follow (maximum of 65535 bytes)
+typedef char*           Sn;
 
 // typedef	struct {
 // 	U1 	count;
@@ -137,8 +155,13 @@ typedef U1              Dn[8192U];
 // } N1;	//(Nibble = 4 bits of a byte).First item in low 4 bits, second item in high 4 bits.
 
 typedef	Cn*				kxCn;
+typedef Sn*             kxSn;
+typedef Cn*             kxCf;
 typedef	U1*				kxU1;
 typedef	U2*				kxU2;
+typedef U4*             kxU4;
+typedef void*           kxUf;
+typedef U8*             kxU8;
 typedef	R4*				kxR4;
 typedef	U1*				kxN1;
 
@@ -178,6 +201,10 @@ typedef struct ATR {
     U4   MOD_TIM ; //Date and time of STDF file modification
     Cn   CMD_LINE; //Command line of program
 } ATR;
+
+typedef struct VUR {
+    Cn   UPD_NAM; //Update Version Name
+} VUR;
 
 typedef struct MIR {
     U4  SETUP_T  ; // Date and time of job setup
@@ -310,6 +337,58 @@ typedef struct SDR {
     Cn    EXTR_TYP ; // Extra equipment type field
     Cn    EXTR_ID  ; // Extra equipment ID
 } SDR;
+
+typedef struct PSR {
+    B1      CONT_FLG ; // Continuation PSR record exist
+    U2      PSR_INDX ; // PSR Record Index (used by STR records)
+    Cn      PSR_NAM  ; // Symbolic name of PSR record
+    B1      OPT_FLG ; // Contains PAT_LBL, FILE_UID, ATPG_DSC, and SRC_ID field missing flag bits and flag for start index for first cycle number.
+    U2      TOTP_CNT ; // Count of total pattern file information sets in the complete PSR data set
+    U2      LOCP_CNT ; // Count (k) of pattern file information sets in this record
+    kxU8    PAT_BGN ; // Array of Cycle #’s patterns begins on
+    kxU8    PAT_END ; // Array of Cycle #’s patterns stops at
+    kxCn    PAT_FILE ; // Array of Pattern File Names
+    kxCn    PAT_LBL ; // Optional pattern symbolic name
+    kxCn    FILE_UID ; // Optional array of file identifier code
+    kxCn    ATPG_DSC ; // Optional array of ATPG information
+    kxCn    SRC_ID ; // Optional array of PatternInSrcFileID
+} PSR;
+
+typedef struct NMR {
+    B1      CONT_FLG ; // Continuation NMR record follows if not 0
+    U2      TOTM_CNT ; // Count of PMR indexes and ATPG_NAM entries
+    U2      LOCM_CNT ; // Count of (k) PMR indexes and ATPG_NAM entries in this record
+    kxU2    PMR_INDX ; // Array of PMR indexes
+    kxCn    ATPG_NAM ; // Array of ATPG signal names
+} NMR;
+
+typedef struct CNR {
+    U2  CHN_NUM ; // Chain number. Referenced by the CHN_NUM array in an STR record
+    U4  BIT_POS ; // Bit position in the chain
+    Sn  CELL_NAM ; // Scan Cell Name
+} CNR;
+
+typedef struct SSR {
+    Cn      SSR_NAM ; // Name of the STIL Scan Structure for reference
+    U2      CHN_CNT ; // Count (k) of number of Chains listed in CHN_LIST
+    kxU2    CHN_LIST ; // Array of CDR Indexes
+} SSR;
+
+typedef struct CDR {
+    B1      CONT_FLG ; // Continuation CDR record follows if not 0
+    U2      CDR_INDX ; // SCR Index
+    Cn      CHN_NAM ; // Chain Name
+    U4      CHN_LEN ; // Chain Length (# of scan cells in chain)
+    U2      SIN_PIN ; // PMR index of the chain's Scan In Signal
+    U2      SOUT_PIN ; // PMR index of the chain's Scan Out Signal
+    U1      MSTR_CNT ; // Count (m) of master clock pins specified for this scan chain
+    kxU2    M_CLKS ; // Array of PMR indexes for the master clocks assigned to this chain
+    U1      SLAV_CNT ; // Count (n) of slave clock pins specified for this scan chain
+    kxU2    S_CLKS ; // Array of PMR indexes for the slave clocks assigned to this chain
+    U1      INV_VAL ; // 0: No Inversion, 1: Inversion
+    U2      LST_CNT ; // Count (k) of scan cells listed in this record
+    kxSn    CELL_LST; // Array of Scan Cell Names
+} CDR;
 
 typedef struct WIR {
     U1  HEAD_NUM ; // Test head number
@@ -469,6 +548,68 @@ typedef struct FTR {
     U1      PATG_NUM ; // Pattern generator number
     Dn      SPIN_MAP ; // Bit map of enabled comparators
 } FTR;
+
+typedef struct STR {
+    B1      CONT_FLG ; // Continuation STR follows if not 0
+    U4      TEST_NUM ; // Test number
+    U1      HEAD_NUM ; // Test head number
+    U1      SITE_NUM ; // Test site number
+    U2      PSR_REF ; // PSR Index (Pattern Sequence Record)
+    B1      TEST_FLG ; // Test flags (fail, alarm, etc.)
+    Cn      LOG_TYP ; // User defined description of datalog
+    Cn      TEST_TXT ; // Descriptive text or label
+    Cn      ALARM_ID ; // Name of alarm
+    Cn      PROG_TXT ; // Additional Programmed information
+    Cn      RSLT_TXT ; // Additional result information
+    U1      Z_VAL ; // Z Handling Flag
+    B1      FMU_FLG ; // MASK_MAP & FAL_MAP field status & Pattern Changed flag
+    Dn      MASK_MAP ; // Bit map of Globally Masked Pins
+    Dn      FAL_MAP ; // Bit map of failures after buffer full
+    U8      CYC_CNT ; // Total cycles executed in test
+    U4      TOTF_CNT ; // Total failures (pin x cycle) detected in test execution
+    U4      TOTL_CNT ; // Total fails logged across the complete STR data set
+    U8      CYC_BASE ; // Cycle offset to apply for the values in the CYCL_NUM array
+    U4      BIT_BASE ; // Offset to apply for the values in the BIT_POS array
+    U2      COND_CNT ; // Count (g) of Test Conditions and optional data specifications in present record
+    U2      LIM_CNT ; // Count (j) of LIM Arrays in present record, 1 for global specification
+    U1      CYC_SIZE ; // Size (f) of data (1,2,4, or 8 byes) in CYC_OFST field
+    U1      PMR_SIZE ; // Size (f) of data (1 or 2 bytes) in PMR_INDX field
+    U1      CHN_SIZE ; // Size (f) of data (1, 2 or 4 bytes) in CHN_NUM field
+    U1      PAT_SIZE ; // Size (f) of data (1,2, or 4 bytes) in PAT_NUM field
+    U1      BIT_SIZE ; // Size (f) of data (1,2, or 4 bytes) in BIT_POS field
+    U1      U1_SIZE ; // Size (f) of data (1,2,4 or 8 bytes) in USR1 field
+    U1      U2_SIZE ; // Size (f) of data (1,2,4 or 8 bytes) in USR2 field
+    U1      U3_SIZE ; // Size (f) of data (1,2,4 or 8 bytes) in USR3 field
+    U1      UTX_SIZE ; // Size (f) of each string entry in USER_TXT array
+    U2      CAP_BGN ; // Offset added to BIT_POS value to indicate capture cycles
+    kxU2    LIM_INDX ; // Array of PMR indexes that require unique limit specifications
+    kxU4    LIM_SPEC ; // Array of fail datalogging limits for the PMRs listed in LIM_INDX
+    kxCn    COND_LST ; // Array of test condition (Name=value) pairs
+    U2      CYC_CNT ; // Count (k) of entries in CYC_OFST array
+    kxUf    CYC_OFST; // Array of cycle numbers relative to CYC_BASE
+    U2      PMR_CNT ; // Count (k) of entries in the PMR_INDX array
+    kxUf    PMR_INDX ; // Array of PMR Indexes (All Formats)
+    U2      CHN_CNT ; // Count (k) of entries in the CHN_NUM array
+    kxUf    CHN_NUM ; // Array of Chain No for FF Name Mapping
+    U2      EXP_CNT ; // Count (k) of EXP_DATA array entries
+    kxU1    EXP_DATA ; // Array of expected vector data
+    U2      CAP_CNT ; // Count (k) of CAP_DATA array entries
+    kxU1    CAP_DATA ; // Array of captured data
+    U2      NEW_CNT ; // Count (k) of NEW_DATA array entries
+    kxU1    NEW_DATA ; // Array of new vector data
+    U2      PAT_CNT ; // Count (k) of PAT_NUM array entries
+    kxUf    PAT_NUM ; // Array of pattern # (Ptn/Chn/Bit format)
+    U2      BPOS_CNT ; // Count (k) of BIT_POS array entries
+    kxUf    BIT_POS ; // Array of chain bit positions (Ptn/Chn/Bit format)
+    U2      USR1_CNT ; // Count (k) of USR1 array entries
+    kxUf    USR1 ; // Array of user defined data for each logged fail
+    U2      USR2_CNT ; // Count (k) of USR2 array entries
+    kxUf    USR2 ; // Array of user defined data for each logged fail
+    U2      USR3_CNT ; // Count (k) of USR3 array entries
+    kxUf    USR3 ; // Array of user defined data for each logged fail
+    U2      TXT_CNT ; // Count (k) of USER_TXT array entries
+    kxCf    USER_TXT ; // Array of user defined fixed length strings for each logged fail
+} STR;
 
 typedef struct BPS {
     Cn  SEQ_NAME ; // Program section (or sequencer) name length byte = 0
