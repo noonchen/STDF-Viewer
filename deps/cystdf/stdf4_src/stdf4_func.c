@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 11th 2021
  * -----
- * Last Modified: Wed Jan 26 2022
+ * Last Modified: Mon May 16 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -113,6 +113,21 @@ void read_U4(U4* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
     };
 }
 
+void read_U8(U8* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if ((*pos + sizeof(U8)) <= binaryLen) {
+        // ensure there are enough bytes for convertion
+        memcpy(desptr, &rawData[*pos], sizeof(U8));
+        (*pos) += sizeof(U8);
+
+        if (needByteSwap) {
+            SwapBytes(desptr, sizeof(U8));
+        } 
+
+    } else {
+        *desptr = 0;
+    };
+}
+
 void read_I1(I1* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
     if (*pos < binaryLen) {
         memcpy(desptr, &rawData[*pos], sizeof(I1));
@@ -206,6 +221,45 @@ void read_Cn(Cn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint1
     };
 }
 
+void read_Sn(Sn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    U2 count = 0;
+    if (*pos + sizeof(U2) <= binaryLen) {
+        // read count
+        memcpy(&count, &rawData[*pos], sizeof(U2));
+        if (needByteSwap) {
+            SwapBytes(&count, sizeof(U2));
+        }
+        
+        (*pos) += sizeof(U2);
+
+        if (count) {
+            // read string if count is not 0
+            *desptr = (Sn)malloc(count+1);
+            memcpy(*desptr, &rawData[*pos], count);
+            (*desptr)[count] = '\0';
+            (*pos) += count;
+        } else {
+            *desptr = NULL;
+        }
+
+    } else {
+        // omitted
+        *desptr = NULL;
+    };
+}
+
+void read_Cf(uint8_t f, Cf* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (f) {
+        // read string if f is not 0
+        *desptr = (Cf)malloc(f+1);
+        memcpy(*desptr, &rawData[*pos], f);
+        (*desptr)[f] = '\0';
+        (*pos) += f;
+    } else {
+        *desptr = NULL;
+    }
+}
+
 void read_Bn(Bn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos, uint16_t* byteCnt) {
     U1 count = 0;
     // clear contents
@@ -276,6 +330,44 @@ void read_kxCn(uint16_t k, kxCn* desptr, const unsigned char* rawData, uint16_t 
     }
 }
 
+void read_kxSn(uint16_t k, kxSn* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (k == 0) {
+        *desptr = NULL;
+        
+    } else {
+        *desptr = (kxSn)malloc(k * sizeof(Sn));   // memory for k pointers to char*
+        if (*desptr == NULL) {
+            free(*desptr);
+
+        } else {
+            int i;
+            for (i=0; i<k; i++) {
+                // *desptr points to the first char*
+                read_Sn(*desptr+i, rawData, binaryLen, pos);
+            }
+        }
+    }
+}
+
+void read_kxCf(uint16_t k, uint8_t f, kxCf* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (k == 0) {
+        *desptr = NULL;
+        
+    } else {
+        *desptr = (kxCf)malloc(k * sizeof(Cf));   // memory for k pointers to char*
+        if (*desptr == NULL) {
+            free(*desptr);
+
+        } else {
+            int i;
+            for (i=0; i<k; i++) {
+                // *desptr points to the first char*
+                read_Cf(f, *desptr+i, rawData, binaryLen, pos);
+            }
+        }
+    }
+}
+
 void read_kxU1(uint16_t k, kxU1* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
     if (k == 0) {
         *desptr = NULL;
@@ -308,6 +400,68 @@ void read_kxU2(uint16_t k, kxU2* desptr, const unsigned char* rawData, uint16_t 
             for (i=0; i<k; i++) {
                 read_U2(*desptr+i, rawData, binaryLen, pos);
             }
+        }
+    }
+}
+
+void read_kxU4(uint16_t k, kxU4* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (k == 0) {
+        *desptr = NULL;
+        
+    } else {
+        *desptr = (kxU4)malloc(k * sizeof(U4));
+        if (*desptr == NULL) {
+            free(*desptr);
+
+        } else {
+            int i;
+            for (i=0; i<k; i++) {
+                read_U4(*desptr+i, rawData, binaryLen, pos);
+            }
+        }
+    }
+}
+
+void read_kxU8(uint16_t k, kxU8* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (k == 0) {
+        *desptr = NULL;
+        
+    } else {
+        *desptr = (kxU8)malloc(k * sizeof(U8));
+        if (*desptr == NULL) {
+            free(*desptr);
+
+        } else {
+            int i;
+            for (i=0; i<k; i++) {
+                read_U8(*desptr+i, rawData, binaryLen, pos);
+            }
+        }
+    }
+}
+
+void read_kxUf(uint16_t k, uint8_t f, kxUf* desptr, const unsigned char* rawData, uint16_t binaryLen, uint16_t* pos) {
+    if (k == 0) {
+        *desptr = NULL;
+        
+    } else {
+        switch (f)
+        {
+        case 1:
+            read_kxU1(k, (kxU1*)desptr, rawData, binaryLen, pos);
+            break;
+        case 2:
+            read_kxU2(k, (kxU2*)desptr, rawData, binaryLen, pos);
+            break;
+        case 4:
+            read_kxU4(k, (kxU4*)desptr, rawData, binaryLen, pos);
+            break;
+        case 8:
+            read_kxU8(k, (kxU8*)desptr, rawData, binaryLen, pos);
+            break;
+        default:
+            *desptr = NULL;
+            break;
         }
     }
 }

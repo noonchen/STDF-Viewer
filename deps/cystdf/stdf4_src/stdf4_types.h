@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: April 27th 2021
  * -----
- * Last Modified: Wed May 11 2022
+ * Last Modified: Mon May 16 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -132,6 +132,9 @@ typedef	double			R8;
 // } Cn;	//first byte = unsigned count of bytes to follow (maximum of 255 bytes)
 typedef char*           Cn;
 
+// Variable length character string, string length is stored in another field
+typedef char*           Cf;
+
 // first two bytes = unsigned count of bytes to follow (maximum of 65535 bytes)
 typedef char*           Sn;
 
@@ -156,7 +159,7 @@ typedef U1              Dn[8192U];
 
 typedef	Cn*				kxCn;
 typedef Sn*             kxSn;
-typedef Cn*             kxCf;
+typedef Cf*             kxCf;
 typedef	U1*				kxU1;
 typedef	U2*				kxU2;
 typedef U4*             kxU4;
