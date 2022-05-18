@@ -4,7 +4,7 @@
  * Author: noonchen - chennoon233@foxmail.com
  * Created Date: May 11th 2021
  * -----
- * Last Modified: Mon May 16 2022
+ * Last Modified: Wed May 18 2022
  * Modified By: noonchen
  * -----
  * Copyright (c) 2021 noonchen
@@ -660,6 +660,20 @@ void parse_ATR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     *pRec = record;
 }
 
+void parse_VUR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
+    VUR* record = (VUR*)malloc(sizeof(VUR));
+    if (record == NULL) {
+        free(record);
+        *pRec = NULL;
+        return;
+    }
+    uint16_t pos = 0;
+
+    read_Cn(&record->UPD_NAM, rawData, binaryLen, &pos);
+
+    *pRec = record;
+}
+
 void parse_MIR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     MIR* record = (MIR*)malloc(sizeof(MIR));
     if (record == NULL) {
@@ -900,6 +914,43 @@ void parse_SDR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
 
     *pRec = record;
 }
+
+void parse_PSR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
+    PSR* record = (PSR*)malloc(sizeof(PSR));
+    if (record == NULL) {
+        free(record);
+        *pRec = NULL;
+        return;
+    }
+    uint16_t pos = 0;
+
+    read_B1(&record->CONT_FLG, rawData, binaryLen, &pos);
+    read_U2(&record->PSR_INDX, rawData, binaryLen, &pos);
+    read_Cn(&record->PSR_NAM, rawData, binaryLen, &pos);
+    read_B1(&record->OPT_FLG, rawData, binaryLen, &pos);
+    read_U2(&record->TOTP_CNT, rawData, binaryLen, &pos);
+    read_U2(&record->LOCP_CNT, rawData, binaryLen, &pos);
+    read_kxU8(record->LOCP_CNT, &record->PAT_BGN, rawData, binaryLen, &pos);
+    read_kxU8(record->LOCP_CNT, &record->PAT_END, rawData, binaryLen, &pos);
+    read_kxCn(record->LOCP_CNT, &record->PAT_FILE, rawData, binaryLen, &pos);
+    read_kxCn(record->LOCP_CNT, &record->PAT_LBL, rawData, binaryLen, &pos);
+    read_kxCn(record->LOCP_CNT, &record->FILE_UID, rawData, binaryLen, &pos);
+    read_kxCn(record->LOCP_CNT, &record->ATPG_DSC, rawData, binaryLen, &pos);
+    read_kxCn(record->LOCP_CNT, &record->SRC_ID, rawData, binaryLen, &pos);
+
+    *pRec = record;
+}
+
+
+// NMR
+
+
+// CNR
+
+// SSR
+
+// CDR
+
 
 void parse_WIR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     WIR* record = (WIR*)malloc(sizeof(WIR));
@@ -1146,6 +1197,78 @@ void parse_FTR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
     read_Cn(&record->RSLT_TXT, rawData, binaryLen, &pos);
     read_U1(&record->PATG_NUM, rawData, binaryLen, &pos);
     read_Dn(&record->SPIN_MAP, rawData, binaryLen, &pos, NULL);
+
+    *pRec = record;
+}
+
+void parse_STR(void** pRec, const unsigned char* rawData, uint16_t binaryLen) {
+    STR* record = (STR*)malloc(sizeof(STR));
+    if (record == NULL) {
+        free(record);
+        *pRec = NULL;
+        return;
+    }
+    uint16_t pos = 0;
+
+    read_B1(&record->CONT_FLG, rawData, binaryLen, &pos);
+    read_U4(&record->TEST_NUM, rawData, binaryLen, &pos);
+    read_U1(&record->HEAD_NUM, rawData, binaryLen, &pos);
+    read_U1(&record->SITE_NUM, rawData, binaryLen, &pos);
+    read_U2(&record->PSR_REF, rawData, binaryLen, &pos);
+    read_B1(&record->TEST_FLG, rawData, binaryLen, &pos);
+    read_Cn(&record->LOG_TYP, rawData, binaryLen, &pos);
+    read_Cn(&record->TEST_TXT, rawData, binaryLen, &pos);
+    read_Cn(&record->ALARM_ID, rawData, binaryLen, &pos);
+    read_Cn(&record->PROG_TXT, rawData, binaryLen, &pos);
+    read_Cn(&record->RSLT_TXT, rawData, binaryLen, &pos);
+    read_U1(&record->Z_VAL, rawData, binaryLen, &pos);
+    read_B1(&record->FMU_FLG, rawData, binaryLen, &pos);
+    read_Dn(&record->MASK_MAP, rawData, binaryLen, &pos, NULL);
+    read_Dn(&record->FAL_MAP, rawData, binaryLen, &pos, NULL);
+    read_U8(&record->CYC_CNT, rawData, binaryLen, &pos);
+    read_U4(&record->TOTF_CNT, rawData, binaryLen, &pos);
+    read_U4(&record->TOTL_CNT, rawData, binaryLen, &pos);
+    read_U8(&record->CYC_BASE, rawData, binaryLen, &pos);
+    read_U4(&record->BIT_BASE, rawData, binaryLen, &pos);
+    read_U2(&record->COND_CNT, rawData, binaryLen, &pos);
+    read_U2(&record->LIM_CNT, rawData, binaryLen, &pos);
+    read_U1(&record->CYC_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->PMR_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->CHN_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->PAT_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->BIT_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->U1_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->U2_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->U3_SIZE, rawData, binaryLen, &pos);
+    read_U1(&record->UTX_SIZE, rawData, binaryLen, &pos);
+    read_U2(&record->CAP_BGN, rawData, binaryLen, &pos);
+    read_kxU2(record->LIM_CNT, &record->LIM_INDX, rawData, binaryLen, &pos);
+    read_kxU4(record->LIM_CNT, &record->LIM_SPEC, rawData, binaryLen, &pos);
+    read_kxCn(record->COND_CNT, &record->COND_LST, rawData, binaryLen, &pos);
+    read_U2(&record->CYC_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->CYC_CNT, record->CYC_SIZE, &record->CYC_OFST, rawData, binaryLen, &pos);
+    read_U2(&record->PMR_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->PMR_CNT, record->PMR_SIZE, &record->PMR_INDX, rawData, binaryLen, &pos);
+    read_U2(&record->CHN_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->CHN_CNT, record->CHN_SIZE, &record->CHN_NUM, rawData, binaryLen, &pos);
+    read_U2(&record->EXP_CNT, rawData, binaryLen, &pos);
+    read_kxU1(record->EXP_CNT, &record->EXP_DATA, rawData, binaryLen, &pos);
+    read_U2(&record->CAP_CNT, rawData, binaryLen, &pos);
+    read_kxU1(record->CAP_CNT, &record->CAP_DATA, rawData, binaryLen, &pos);
+    read_U2(&record->NEW_CNT, rawData, binaryLen, &pos);
+    read_kxU1(record->NEW_CNT, &record->NEW_DATA, rawData, binaryLen, &pos);
+    read_U2(&record->PAT_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->PAT_CNT, record->PAT_SIZE, &record->PAT_NUM, rawData, binaryLen, &pos);
+    read_U2(&record->BPOS_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->BPOS_CNT, record->BIT_SIZE, &record->BIT_POS, rawData, binaryLen, &pos);
+    read_U2(&record->USR1_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->USR1_CNT, record->U1_SIZE, &record->USR1, rawData, binaryLen, &pos);
+    read_U2(&record->USR2_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->USR2_CNT, record->U2_SIZE, &record->USR2, rawData, binaryLen, &pos);
+    read_U2(&record->USR3_CNT, rawData, binaryLen, &pos);
+    read_kxUf(record->USR3_CNT, record->U3_SIZE, &record->USR3, rawData, binaryLen, &pos);
+    read_U2(&record->TXT_CNT, rawData, binaryLen, &pos);
+    read_kxCf(record->TXT_CNT, record->UTX_SIZE, &record->USER_TXT, rawData, binaryLen, &pos);
 
     *pRec = record;
 }
