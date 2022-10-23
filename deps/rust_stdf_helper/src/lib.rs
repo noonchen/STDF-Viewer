@@ -263,9 +263,11 @@ fn parse_mpr_from_raw<'py>(
     let lens = lens.as_array();
     let rec_cnt = lens.dim();
     // create Array for storing results
-    // row: pin, col: dutIndex
-    let mut data_list = Array2::from_elem((rslt_cnt, rec_cnt), f32::NAN);
-    let mut state_list = Array2::from_elem((pin_cnt, rec_cnt), 16i32);
+    // contiguous is required in order to get slice from ndarray, 
+    // must iter by row...
+    // row: dutIndex, col: pin
+    let mut data_list = Array2::from_elem((rec_cnt, rslt_cnt), f32::NAN);
+    let mut state_list = Array2::from_elem((rec_cnt, pin_cnt), 16i32);
     let mut flag_list = Array1::from_elem(rec_cnt, -1i32);
 
     #[allow(clippy::too_many_arguments)]
@@ -311,8 +313,8 @@ fn parse_mpr_from_raw<'py>(
     // parallel parse data
     Zip::from(raw.rows())
         .and(&lens)
-        .and(data_list.columns_mut())
-        .and(state_list.columns_mut())
+        .and(data_list.rows_mut())
+        .and(state_list.rows_mut())
         .and(&mut flag_list)
         .par_for_each(|r, l, d, s, f| {
             inner_parse(
@@ -326,8 +328,10 @@ fn parse_mpr_from_raw<'py>(
                 f,
             )
         });
-    let data_list = data_list.into_pyarray(py);
-    let state_list = state_list.into_pyarray(py);
+    // previous order: row: dutIndex, col: pin
+    // python expected: row: pin, col: dutIndex
+    let data_list = data_list.reversed_axes().into_pyarray(py);
+    let state_list = state_list.reversed_axes().into_pyarray(py);
     let flag_list = flag_list.into_pyarray(py);
     let dict = PyDict::new(py);
     dict.set_item("dataList", data_list)?;
