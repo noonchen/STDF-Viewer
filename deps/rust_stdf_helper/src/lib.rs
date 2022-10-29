@@ -1,55 +1,43 @@
 use numpy::ndarray::{Array1, Array2, Zip};
 use numpy::{IntoPyArray, PyReadonlyArray1, PyReadonlyArray2};
-use pyo3::{exceptions::PyOSError, prelude::*, types::PyDict};
+use pyo3::{
+    exceptions::{PyException, PyOSError},
+    prelude::*,
+    types::PyDict,
+};
+use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, ByteOrder, StdfRecord};
+use std::convert::From;
+use std::sync::mpsc;
+use std::thread;
 
-fn get_rec_name_from_code(rec_type: u64) -> &'static str {
-    match rec_type {
-        // rec type 15
-        REC_PTR => "PTR",
-        REC_MPR => "MPR",
-        REC_FTR => "FTR",
-        REC_STR => "STR",
-        // rec type 5
-        REC_PIR => "PIR",
-        REC_PRR => "PRR",
-        // rec type 2
-        REC_WIR => "WIR",
-        REC_WRR => "WRR",
-        REC_WCR => "WCR",
-        // rec type 50
-        REC_GDR => "GDR",
-        REC_DTR => "DTR",
-        // rec type 0
-        REC_FAR => "FAR",
-        REC_ATR => "ATR",
-        REC_VUR => "VUR",
-        // rec type 1
-        REC_MIR => "MIR",
-        REC_MRR => "MRR",
-        REC_PCR => "PCR",
-        REC_HBR => "HBR",
-        REC_SBR => "SBR",
-        REC_PMR => "PMR",
-        REC_PGR => "PGR",
-        REC_PLR => "PLR",
-        REC_RDR => "RDR",
-        REC_SDR => "SDR",
-        REC_PSR => "PSR",
-        REC_NMR => "NMR",
-        REC_CNR => "CNR",
-        REC_SSR => "SSR",
-        REC_CDR => "CDR",
-        // rec type 10
-        REC_TSR => "TSR",
-        // rec type 20
-        REC_BPS => "BPS",
-        REC_EPS => "EPS",
-        // rec type 180: Reserved
-        // rec type 181: Reserved
-        REC_RESERVE => "ReservedRec",
-        // not matched
-        _ => "InvalidRec",
+mod database_context;
+mod rust_functions;
+use database_context::DataBaseCtx;
+use rust_functions::{process_incoming_record, RecordTracker};
+
+// impl std::convert::From<rusqlite::Error> for PyErr {
+//     fn from(err: Error) -> Self {
+//         pyo3::exceptions::PyException::new_err(err.to_string())
+//     }
+// }
+
+#[derive(Debug)]
+pub struct StdfHelperError {
+    pub msg: String,
+}
+
+impl From<Error> for StdfHelperError {
+    fn from(err: Error) -> Self {
+        StdfHelperError {
+            msg: format!("{}", err.to_string()),
+        }
+    }
+}
+
+impl From<StdfHelperError> for PyErr {
+    fn from(err: StdfHelperError) -> Self {
+        PyException::new_err(err.msg)
     }
 }
 
@@ -200,7 +188,9 @@ fn parse_ptr_ftr_from_raw<'py>(
         let raw_data = &raw_data[..length];
         if is_ptr {
             // parse PTR
-            let ptr_rec = rust_stdf::PTR::new().read_from_bytes(raw_data, order);
+            let mut ptr_rec = rust_stdf::PTR::new();
+            ptr_rec.read_from_bytes(raw_data, order);
+
             *result = if f32::is_finite(ptr_rec.result) {
                 ptr_rec.result
             } else if f32::is_sign_positive(ptr_rec.result) {
@@ -213,7 +203,8 @@ fn parse_ptr_ftr_from_raw<'py>(
             *flag = ptr_rec.test_flg[0].into();
         } else {
             // parse FTR
-            let ftr_rec = rust_stdf::FTR::new().read_from_bytes(raw_data, order);
+            let mut ftr_rec = rust_stdf::FTR::new();
+            ftr_rec.read_from_bytes(raw_data, order);
             *result = ftr_rec.test_flg[0].into();
             *flag = ftr_rec.test_flg[0].into();
         };
@@ -263,7 +254,7 @@ fn parse_mpr_from_raw<'py>(
     let lens = lens.as_array();
     let rec_cnt = lens.dim();
     // create Array for storing results
-    // contiguous is required in order to get slice from ndarray, 
+    // contiguous is required in order to get slice from ndarray,
     // must iter by row...
     // row: dutIndex, col: pin
     let mut data_list = Array2::from_elem((rec_cnt, rslt_cnt), f32::NAN);
@@ -290,7 +281,8 @@ fn parse_mpr_from_raw<'py>(
         let length = length as usize;
         let raw_data = &raw_data[..length];
         // parse MPR
-        let mpr_rec = rust_stdf::MPR::new().read_from_bytes(raw_data, order);
+        let mut mpr_rec = rust_stdf::MPR::new();
+        mpr_rec.read_from_bytes(raw_data, order);
         // update result
         for (&rslt, ind) in mpr_rec.rtn_rslt.iter().zip(0..rslt_cnt) {
             result_slice[ind] = if f32::is_finite(rslt) {
@@ -340,11 +332,64 @@ fn parse_mpr_from_raw<'py>(
     Ok(dict)
 }
 
+/// create sqlite3 database for given stdf files
+#[pyfunction]
+#[pyo3(name = "generate_database")]
+fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
+    // do nothing if no file
+    if stdf_paths.len() == 0 {
+        return Ok(());
+    }
+    // initiate sqlite3 database
+    let conn = match Connection::open(&dbpath) {
+        Ok(conn) => conn,
+        Err(e) => return Err(PyOSError::new_err(e.to_string())),
+    };
+    let db_ctx = DataBaseCtx::new(&conn)?;
+
+    // prepare channel for multithreading communication
+    let (tx, rx) = mpsc::channel();
+    let mut thread_handles = vec![];
+
+    // one thread per file, use raw data record because we need to store offset and such.
+    for (fid, fpath) in stdf_paths.into_iter().enumerate() {
+        let thread_tx = tx.clone();
+
+        let handle = thread::spawn(move || {
+            let mut stdf_reader = StdfReader::new(fpath).unwrap();
+            for raw_rec in stdf_reader.get_rawdata_iter() {
+                thread_tx.send((fid, raw_rec)).unwrap();
+            }
+        });
+        thread_handles.push(handle);
+    }
+
+    let record_tracker = RecordTracker::new();
+    // process and write database in main thread
+    for (fid, raw_rec) in rx {
+        let rec_info = (
+            fid,
+            raw_rec.byte_order,
+            raw_rec.offset,
+            raw_rec.raw_data.len(),
+            StdfRecord::from(raw_rec),
+        );
+        process_incoming_record(&db_ctx, &record_tracker, rec_info)?;
+    }
+
+    // finalize database and join threads
+    for handle in thread_handles {
+        handle.join().unwrap();
+    }
+    Ok(())
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_stdf_file, m)?)?;
     m.add_function(wrap_pyfunction!(parse_ptr_ftr_from_raw, m)?)?;
     m.add_function(wrap_pyfunction!(parse_mpr_from_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_database, m)?)?;
     Ok(())
 }
