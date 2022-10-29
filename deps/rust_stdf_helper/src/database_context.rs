@@ -10,7 +10,7 @@
 //
 
 use crate::StdfHelperError;
-use rusqlite::{params, Connection, Statement};
+use rusqlite::{Connection, Statement, ToSql};
 
 static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                 DROP TABLE IF EXISTS Dut_Info;
@@ -28,6 +28,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
 
                                 BEGIN;
                                 CREATE TABLE IF NOT EXISTS File_Info (
+                                                        Fid INTEGER,
                                                         Field TEXT, 
                                                         Value TEXT);
                                                         
@@ -142,16 +143,17 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         isBeforePRR INTEGER);
                                                         
                                 DROP INDEX IF EXISTS dutKey;
+                                COMMIT;
+                                
                                 PRAGMA synchronous = OFF;
                                 PRAGMA journal_mode = WAL;
 
-                                COMMIT;
                                 BEGIN;";
 
 static INSERT_FILE_INFO: &str = "INSERT INTO 
                                     File_Info 
                                 VALUES 
-                                    (?,?)";
+                                    (?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
                                 Dut_Info (HEAD_NUM, SITE_NUM, DUTIndex) 
@@ -248,64 +250,101 @@ static INSERT_DATALOG: &str = "INSERT INTO
                                 VALUES 
                                     (:RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);";
 
+static CREATE_INDEX_AND_COMMIT: &str = "CREATE INDEX 
+                                            dutKey 
+                                        ON 
+                                            Dut_Info (
+                                                HEAD_NUM    ASC,
+                                                SITE_NUM    ASC);
+                                                
+                                        COMMIT;";
+
 pub struct DataBaseCtx<'con> {
     db: &'con Connection,
-    insert_file_info: Statement<'con>,
-    insert_dut: Statement<'con>,
-    update_dut: Statement<'con>,
-    insert_test_rec: Statement<'con>,
-    insert_test_info: Statement<'con>,
-    insert_hbin: Statement<'con>,
-    insert_sbin: Statement<'con>,
-    insert_dut_cnt: Statement<'con>,
-    insert_wafer: Statement<'con>,
-    insert_pin_map: Statement<'con>,
-    update_from_grp: Statement<'con>,
-    insert_grp_name: Statement<'con>,
-    insert_pin_info: Statement<'con>,
-    insert_test_pin: Statement<'con>,
-    insert_dynamic_limit: Statement<'con>,
-    insert_datalog_rec: Statement<'con>,
+    insert_file_info_stmt: Statement<'con>,
+    insert_dut_stmt: Statement<'con>,
+    update_dut_stmt: Statement<'con>,
+    insert_test_rec_stmt: Statement<'con>,
+    insert_test_info_stmt: Statement<'con>,
+    insert_hbin_stmt: Statement<'con>,
+    insert_sbin_stmt: Statement<'con>,
+    insert_dut_cnt_stmt: Statement<'con>,
+    insert_wafer_stmt: Statement<'con>,
+    insert_pin_map_stmt: Statement<'con>,
+    update_from_grp_stmt: Statement<'con>,
+    insert_grp_name_stmt: Statement<'con>,
+    insert_pin_info_stmt: Statement<'con>,
+    insert_test_pin_stmt: Statement<'con>,
+    insert_dynamic_limit_stmt: Statement<'con>,
+    insert_datalog_rec_stmt: Statement<'con>,
 }
 
 impl<'con> DataBaseCtx<'con> {
     pub fn new(conn: &'con Connection) -> Result<Self, StdfHelperError> {
         conn.execute_batch(CREATE_TABLE_SQL)?;
-        let insert_file_info = conn.prepare(INSERT_FILE_INFO)?;
-        let insert_dut = conn.prepare(INSERT_DUT)?;
-        let update_dut = conn.prepare(UPDATE_DUT)?;
-        let insert_test_rec = conn.prepare(INSERT_TEST_REC)?;
-        let insert_test_info = conn.prepare(INSERT_TEST_INFO)?;
-        let insert_hbin = conn.prepare(INSERT_HBIN)?;
-        let insert_sbin = conn.prepare(INSERT_SBIN)?;
-        let insert_dut_cnt = conn.prepare(INSERT_DUT_COUNT)?;
-        let insert_wafer = conn.prepare(INSERT_WAFER)?;
-        let insert_pin_map = conn.prepare(INSERT_PIN_MAP)?;
-        let update_from_grp = conn.prepare(UPDATE_FROM_GRP)?;
-        let insert_grp_name = conn.prepare(INSERT_GRP_NAM)?;
-        let insert_pin_info = conn.prepare(INSERT_PIN_INFO)?;
-        let insert_test_pin = conn.prepare(INSERT_TEST_PIN)?;
-        let insert_dynamic_limit = conn.prepare(INSERT_DYNAMIC_LIMIT)?;
-        let insert_datalog_rec = conn.prepare(INSERT_DATALOG)?;
+        let insert_file_info_stmt = conn.prepare(INSERT_FILE_INFO)?;
+        let insert_dut_stmt = conn.prepare(INSERT_DUT)?;
+        let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
+        let insert_test_rec_stmt = conn.prepare(INSERT_TEST_REC)?;
+        let insert_test_info_stmt = conn.prepare(INSERT_TEST_INFO)?;
+        let insert_hbin_stmt = conn.prepare(INSERT_HBIN)?;
+        let insert_sbin_stmt = conn.prepare(INSERT_SBIN)?;
+        let insert_dut_cnt_stmt = conn.prepare(INSERT_DUT_COUNT)?;
+        let insert_wafer_stmt = conn.prepare(INSERT_WAFER)?;
+        let insert_pin_map_stmt = conn.prepare(INSERT_PIN_MAP)?;
+        let update_from_grp_stmt = conn.prepare(UPDATE_FROM_GRP)?;
+        let insert_grp_name_stmt = conn.prepare(INSERT_GRP_NAM)?;
+        let insert_pin_info_stmt = conn.prepare(INSERT_PIN_INFO)?;
+        let insert_test_pin_stmt = conn.prepare(INSERT_TEST_PIN)?;
+        let insert_dynamic_limit_stmt = conn.prepare(INSERT_DYNAMIC_LIMIT)?;
+        let insert_datalog_rec_stmt = conn.prepare(INSERT_DATALOG)?;
 
         Ok(DataBaseCtx {
             db: conn,
-            insert_file_info,
-            insert_dut,
-            update_dut,
-            insert_test_rec,
-            insert_test_info,
-            insert_hbin,
-            insert_sbin,
-            insert_dut_cnt,
-            insert_wafer,
-            insert_pin_map,
-            update_from_grp,
-            insert_grp_name,
-            insert_pin_info,
-            insert_test_pin,
-            insert_dynamic_limit,
-            insert_datalog_rec,
+            insert_file_info_stmt,
+            insert_dut_stmt,
+            update_dut_stmt,
+            insert_test_rec_stmt,
+            insert_test_info_stmt,
+            insert_hbin_stmt,
+            insert_sbin_stmt,
+            insert_dut_cnt_stmt,
+            insert_wafer_stmt,
+            insert_pin_map_stmt,
+            update_from_grp_stmt,
+            insert_grp_name_stmt,
+            insert_pin_info_stmt,
+            insert_test_pin_stmt,
+            insert_dynamic_limit_stmt,
+            insert_datalog_rec_stmt,
         })
+    }
+
+    pub fn insert_file_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_file_info_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn finalize(mut self) -> Result<(), StdfHelperError> {
+        self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
+
+        self.insert_file_info_stmt.finalize()?;
+        self.insert_dut_stmt.finalize()?;
+        self.update_dut_stmt.finalize()?;
+        self.insert_test_rec_stmt.finalize()?;
+        self.insert_test_info_stmt.finalize()?;
+        self.insert_hbin_stmt.finalize()?;
+        self.insert_sbin_stmt.finalize()?;
+        self.insert_dut_cnt_stmt.finalize()?;
+        self.insert_wafer_stmt.finalize()?;
+        self.insert_pin_map_stmt.finalize()?;
+        self.update_from_grp_stmt.finalize()?;
+        self.insert_grp_name_stmt.finalize()?;
+        self.insert_pin_info_stmt.finalize()?;
+        self.insert_test_pin_stmt.finalize()?;
+        self.insert_dynamic_limit_stmt.finalize()?;
+        self.insert_datalog_rec_stmt.finalize()?;
+
+        Ok(())
     }
 }

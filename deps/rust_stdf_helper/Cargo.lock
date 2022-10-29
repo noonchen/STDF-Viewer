@@ -638,6 +638,7 @@ dependencies = [
 name = "rust_stdf_helper"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ndarray",
  "numpy",
  "pyo3",

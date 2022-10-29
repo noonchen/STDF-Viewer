@@ -337,7 +337,8 @@ fn parse_mpr_from_raw<'py>(
 #[pyo3(name = "generate_database")]
 fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
     // do nothing if no file
-    if stdf_paths.len() == 0 {
+    let num_files = stdf_paths.len();
+    if num_files == 0 {
         return Ok(());
     }
     // initiate sqlite3 database
@@ -345,16 +346,26 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
         Ok(conn) => conn,
         Err(e) => return Err(PyOSError::new_err(e.to_string())),
     };
-    let db_ctx = DataBaseCtx::new(&conn)?;
+    let mut db_ctx = DataBaseCtx::new(&conn)?;
 
     // prepare channel for multithreading communication
     let (tx, rx) = mpsc::channel();
     let mut thread_handles = vec![];
+    let mut thread_txes = Vec::with_capacity(num_files);
+
+    // clone {num_files-1} sender
+    (0..num_files - 1)
+        .map(|_| thread_txes.push(tx.clone()))
+        .count();
+    // push the last tx into vector
+    thread_txes.push(tx);
 
     // one thread per file, use raw data record because we need to store offset and such.
-    for (fid, fpath) in stdf_paths.into_iter().enumerate() {
-        let thread_tx = tx.clone();
-
+    for (fid, (fpath, thread_tx)) in stdf_paths
+        .into_iter()
+        .zip(thread_txes.into_iter())
+        .enumerate()
+    {
         let handle = thread::spawn(move || {
             let mut stdf_reader = StdfReader::new(fpath).unwrap();
             for raw_rec in stdf_reader.get_rawdata_iter() {
@@ -364,7 +375,7 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
         thread_handles.push(handle);
     }
 
-    let record_tracker = RecordTracker::new();
+    let mut record_tracker = RecordTracker::new();
     // process and write database in main thread
     for (fid, raw_rec) in rx {
         let rec_info = (
@@ -374,12 +385,17 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
             raw_rec.raw_data.len(),
             StdfRecord::from(raw_rec),
         );
-        process_incoming_record(&db_ctx, &record_tracker, rec_info)?;
+        process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
     }
 
-    // finalize database and join threads
+    // join threads
     for handle in thread_handles {
         handle.join().unwrap();
+    }
+    // finalize database
+    db_ctx.finalize()?;
+    if let Err((_, err)) = conn.close() {
+        return Err(StdfHelperError::from(err))?;
     }
     Ok(())
 }
