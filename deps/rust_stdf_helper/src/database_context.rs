@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sat Oct 29 2022
+// Last Modified: Sun Oct 30 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -150,7 +150,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
 
                                 BEGIN;";
 
-static INSERT_FILE_INFO: &str = "INSERT INTO 
+static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
                                     (?,?,?)";
@@ -322,6 +322,25 @@ impl<'con> DataBaseCtx<'con> {
 
     pub fn insert_file_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_file_info_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_pin_map(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_pin_map_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_grp_name(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_grp_name_stmt.execute(p)?;
+        Ok(())
+    }
+    pub fn update_from_grp(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_from_grp_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_pin_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_pin_info_stmt.execute(p)?;
         Ok(())
     }
 
