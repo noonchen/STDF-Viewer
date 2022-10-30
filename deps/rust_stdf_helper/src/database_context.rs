@@ -374,6 +374,21 @@ impl<'con> DataBaseCtx<'con> {
         Ok(())
     }
 
+    pub fn insert_wafer(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_wafer_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_dut_cnt(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_dut_cnt_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_datalog_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_datalog_rec_stmt.execute(p)?;
+        Ok(())
+    }
+
     pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
 

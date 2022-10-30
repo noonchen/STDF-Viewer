@@ -30,7 +30,7 @@ pub struct StdfHelperError {
 impl From<Error> for StdfHelperError {
     fn from(err: Error) -> Self {
         StdfHelperError {
-            msg: format!("{}", err.to_string()),
+            msg: err.to_string(),
         }
     }
 }
