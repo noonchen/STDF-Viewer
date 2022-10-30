@@ -376,6 +376,7 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
     }
 
     let mut record_tracker = RecordTracker::new();
+    let mut transaction_count_up = 0;
     // process and write database in main thread
     for (fid, raw_rec) in rx {
         let rec_info = (
@@ -386,6 +387,12 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
             StdfRecord::from(raw_rec),
         );
         process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
+        // commit and begin a new transaction after fixed number of records
+        transaction_count_up += 1;
+        if transaction_count_up > 1000_000 {
+            transaction_count_up = 0;
+            db_ctx.start_new_transaction()?;
+        }
     }
 
     // join threads

@@ -72,6 +72,7 @@ impl RecordTracker {
         }
     }
 
+    #[inline(always)]
     pub fn pir_detected(&mut self, file_id: usize, head_num: u8, site_num: u8) -> u64 {
         // indicating any DTR or GDR is before PRR
         self.datalog_pos_tracker.insert(file_id, true);
@@ -95,6 +96,7 @@ impl RecordTracker {
         dut_index
     }
 
+    #[inline(always)]
     pub fn prr_detected(
         &mut self,
         file_id: usize,
@@ -148,6 +150,7 @@ impl RecordTracker {
         Ok((dut_index, wafer_index))
     }
 
+    #[inline(always)]
     pub fn hbr_detected(&mut self, file_id: usize, hbr_rec: &HBR) {
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.hbin_tracker.get_mut(&(file_id, hbr_rec.hbin_num)) {
@@ -165,6 +168,7 @@ impl RecordTracker {
         }
     }
 
+    #[inline(always)]
     pub fn sbr_detected(&mut self, file_id: usize, sbr_rec: &SBR) {
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.sbin_tracker.get_mut(&(file_id, sbr_rec.sbin_num)) {
@@ -182,6 +186,7 @@ impl RecordTracker {
         }
     }
 
+    #[inline(always)]
     pub fn wir_detected(&mut self, file_id: usize, head_num: u8) -> u64 {
         let wafer_index;
 
@@ -206,6 +211,7 @@ impl RecordTracker {
     ///
     /// ## Error
     /// if request dut_index from (file_id, head, site) that never stored in `dut_index_tracker`
+    #[inline(always)]
     pub fn xtr_detected(
         &mut self,
         file_id: usize,
@@ -234,6 +240,7 @@ impl RecordTracker {
     }
 
     /// return `true` if test_id is already in hashmap, no update
+    #[inline(always)]
     pub fn update_default_limits(
         &mut self,
         test_id: usize,
@@ -260,6 +267,7 @@ impl RecordTracker {
     ///
     /// ## Error
     /// if no default limit can be found for test_id
+    #[inline(always)]
     pub fn is_ptr_limits_changed(
         &self,
         test_id: usize,
@@ -290,6 +298,7 @@ impl RecordTracker {
         Ok((llimit_changed, hlimit_changed))
     }
 
+    #[inline(always)]
     pub fn get_program_section(&self, file_id: usize) -> Option<String> {
         // use `;` to join all sections
         self.program_sections
@@ -297,6 +306,7 @@ impl RecordTracker {
             .map(|pg_sec_list| pg_sec_list.join(";"))
     }
 
+    #[inline(always)]
     pub fn get_wafer_index(&self, file_id: usize, head_num: u8) -> Result<u64, StdfHelperError> {
         match self.wafer_index_tracker.get(&(file_id, head_num)) {
             Some(ind) => Ok(*ind),
@@ -309,6 +319,7 @@ impl RecordTracker {
         }
     }
 
+    #[inline(always)]
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
         let test_id =
@@ -336,6 +347,7 @@ impl RecordTracker {
         Ok(())
     }
 
+    #[inline(always)]
     pub fn get_datalog_relative_pos(&self, file_id: usize) -> (u64, bool) {
         let dut_index = match self.dut_total.get(&file_id) {
             Some(ind) => *ind,

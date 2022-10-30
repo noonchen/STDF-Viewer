@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Oct 30 2022
+// Last Modified: Mon Oct 31 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -165,7 +165,7 @@ static UPDATE_DUT: &str = "UPDATE Dut_Info SET
                                 HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
                                 WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD 
                             WHERE 
-                                DUTIndex=:DUTIndex; COMMIT; BEGIN;"; // commit and start another transaction in PRR
+                                DUTIndex=:DUTIndex;";
 
 static INSERT_TEST_REC: &str = "INSERT OR REPLACE INTO 
                                 Test_Offsets 
@@ -259,6 +259,8 @@ static CREATE_INDEX_AND_COMMIT: &str = "CREATE INDEX
                                                 
                                         COMMIT;";
 
+static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
+
 pub struct DataBaseCtx<'con> {
     db: &'con Connection,
     insert_file_info_stmt: Statement<'con>,
@@ -320,75 +322,97 @@ impl<'con> DataBaseCtx<'con> {
         })
     }
 
+    #[inline(always)]
+    pub fn start_new_transaction(&self) -> Result<(), StdfHelperError> {
+        self.db.execute_batch(START_NEW_TRANSACTION)?;
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn insert_file_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_file_info_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_pin_map(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_pin_map_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_grp_name(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_grp_name_stmt.execute(p)?;
         Ok(())
     }
+
+    #[inline(always)]
     pub fn update_from_grp(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.update_from_grp_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_pin_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_pin_info_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_dut(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_dut_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn update_dut(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.update_dut_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_test_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_test_rec_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_test_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_test_info_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_dynamic_limit(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_dynamic_limit_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_test_pin(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_test_pin_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_wafer(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_wafer_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_dut_cnt(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_dut_cnt_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn insert_datalog_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_datalog_rec_stmt.execute(p)?;
         Ok(())
     }
 
+    #[inline(always)]
     pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
 
