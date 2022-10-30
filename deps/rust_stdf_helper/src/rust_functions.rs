@@ -12,19 +12,19 @@
 use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use rust_stdf::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub struct RecordTracker {
-    // file id, test num, test name
-    id_map: HashSet<(usize, u32, String)>,
+    // file id, test num, test name -> unique test id (map size)
+    id_map: HashMap<(usize, u32, String), usize>,
 
-    // file id, test num, test name -> low limit in 1st PTR
-    default_llimit: HashMap<(usize, u32, String), f32>,
-    // file id, test num, test name -> high limit in 1st PTR
-    default_hlimit: HashMap<(usize, u32, String), f32>,
+    // unique test id -> low limit in 1st PTR
+    default_llimit: HashMap<usize, f32>,
+    // unique test id -> high limit in 1st PTR
+    default_hlimit: HashMap<usize, f32>,
 
-    // file id, test num, test name -> fail count
-    test_fail_count: HashMap<(usize, u32, String), u32>,
+    // unique test id -> fail count
+    test_fail_count: HashMap<usize, u32>,
 
     // file id, head, site -> dut index
     dut_index_tracker: HashMap<(usize, u8, u8), u64>,
@@ -33,10 +33,13 @@ pub struct RecordTracker {
     wafer_index_tracker: HashMap<(usize, u8), u64>,
 
     // file id, pin index -> pin name
-    pin_name_map: HashMap<u16, String>,
+    pin_name_map: HashMap<(usize, u16), String>,
 
     // DTR/GDR location tracker, file id -> is_before_PRR?
     datalog_pos_tracker: HashMap<usize, bool>,
+
+    // program section tracker
+    program_sections: HashMap<usize, Vec<String>>,
 
     // for counting
     // file id -> dut count
@@ -48,7 +51,7 @@ pub struct RecordTracker {
 impl RecordTracker {
     pub fn new() -> Self {
         RecordTracker {
-            id_map: HashSet::with_capacity(4096),
+            id_map: HashMap::with_capacity(4096),
             default_llimit: HashMap::with_capacity(4096),
             default_hlimit: HashMap::with_capacity(4096),
             test_fail_count: HashMap::with_capacity(4096),
@@ -56,8 +59,128 @@ impl RecordTracker {
             wafer_index_tracker: HashMap::with_capacity(128),
             pin_name_map: HashMap::with_capacity(128),
             datalog_pos_tracker: HashMap::with_capacity(32),
+            program_sections: HashMap::with_capacity(32),
             dut_total: HashMap::with_capacity(32),
             wafer_total: HashMap::with_capacity(32),
+        }
+    }
+
+    pub fn pir_detected(&mut self, file_id: usize, head_num: u8, site_num: u8) -> u64 {
+        // indicating any DTR or GDR is before PRR
+        self.datalog_pos_tracker.insert(file_id, true);
+        let dut_index;
+
+        if let Some(dut_total) = self.dut_total.get_mut(&file_id) {
+            // increment dut_index by 1
+            *dut_total += 1;
+            // update dut index tracker
+            self.dut_index_tracker
+                .insert((file_id, head_num, site_num), *dut_total);
+            dut_index = *dut_total;
+        } else {
+            // no dut_index was saved for file id, set dut_index to default 1
+            dut_index = 1;
+            // insert dut_index=1 to hashmap
+            self.dut_total.insert(file_id, dut_index);
+            self.dut_index_tracker
+                .insert((file_id, head_num, site_num), dut_index);
+        };
+        dut_index
+    }
+
+    /// return (dut_index, test_id) for [PTR], [FTR], [MPR] or maybe [STR] in the future
+    ///
+    /// ## Error
+    /// if request dut_index from (file_id, head, site) that never stored in `dut_index_tracker`
+    pub fn xtr_detected(
+        &mut self,
+        file_id: usize,
+        head_num: u8,
+        site_num: u8,
+        test_num: u32,
+        test_txt: &str,
+    ) -> Result<(u64, usize), StdfHelperError> {
+        // get dut_index
+        let dut_index = match self.dut_index_tracker.get( &(file_id, head_num, site_num) ) {
+            Some(stored_ind) => Ok(*stored_ind),
+            // if dut_index is None, returns Err
+            None => Err(StdfHelperError { msg: format!("STDF file structure error: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", test_num, head_num, site_num) }),
+        }?;
+        // get test_id
+        let key = (file_id, test_num, test_txt.to_string());
+        let test_id = match self.id_map.get(&key) {
+            Some(id) => *id,
+            None => {
+                let unique_id = self.id_map.len();
+                self.id_map.insert(key, unique_id);
+                unique_id
+            }
+        };
+        Ok((dut_index, test_id))
+    }
+
+    /// return `true` if test_id is already in hashmap, no update
+    pub fn update_default_limits(
+        &mut self,
+        test_id: usize,
+        llimit: Option<f32>,
+        hlimit: Option<f32>,
+    ) -> bool {
+        let llimit_exist = self.default_llimit.contains_key(&test_id);
+        let hlimit_exist = self.default_hlimit.contains_key(&test_id);
+
+        if !llimit_exist {
+            // update llimit
+            self.default_llimit
+                .insert(test_id, llimit.unwrap_or_else(|| f32::NAN));
+        }
+        if !hlimit_exist {
+            // update hlimit
+            self.default_hlimit
+                .insert(test_id, hlimit.unwrap_or_else(|| f32::NAN));
+        }
+        llimit_exist && hlimit_exist
+    }
+
+    /// return (llimit_changed, hlimit_changed) if [PTR] limits is differ from that of 1st PTR
+    ///
+    /// ## Error
+    /// if no default limit can be found for test_id
+    pub fn is_ptr_limits_changed(
+        &self,
+        test_id: usize,
+        llimit: Option<f32>,
+        hlimit: Option<f32>,
+    ) -> Result<(bool, bool), StdfHelperError> {
+        // llimit
+        let llimit_changed = llimit.is_some()
+            && match self.default_llimit.get(&test_id) {
+                Some(dft_ll) => {
+                    // unwrap is safe here, since we have a is_some() precondition
+                    // when the float number difference > epsilon, means limit changed
+                    Ok((llimit.unwrap() - *dft_ll).abs() > f32::EPSILON)
+                }
+                None => Err(StdfHelperError {
+                    msg: format!("Default low limit can not be read...this should never happen"),
+                }),
+            }?;
+        // hlimit
+        let hlimit_changed = hlimit.is_some()
+            && match self.default_hlimit.get(&test_id) {
+                Some(dft_hl) => Ok((hlimit.unwrap() - *dft_hl).abs() > f32::EPSILON),
+                None => Err(StdfHelperError {
+                    msg: format!("Default high limit can not be read...this should never happen"),
+                }),
+            }?;
+        Ok((llimit_changed, hlimit_changed))
+    }
+
+    pub fn get_program_section(&self, file_id: usize) -> Option<String> {
+        if let Some(pg_sec_list) = self.program_sections.get(&file_id) {
+            // use `;` to join all sections
+            Some(pg_sec_list.join(";"))
+        } else {
+            None
         }
     }
 }
@@ -72,12 +195,18 @@ pub fn process_incoming_record(
     let (file_id, order, offset, data_len, rec) = rec_info;
     match rec {
         // // rec type 15
-        // StdfRecord::PTR(ptr_rec) => ptr_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::MPR(mpr_rec) => mpr_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::FTR(ftr_rec) => ftr_rec.read_from_bytes(raw_data, order),
+        StdfRecord::PTR(ptr_rec) => {
+            on_ptr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ptr_rec)?
+        }
+        StdfRecord::MPR(mpr_rec) => {
+            on_mpr_rec(db_ctx, rec_tracker, file_id, offset, data_len, mpr_rec)?
+        }
+        StdfRecord::FTR(ftr_rec) => {
+            on_ftr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ftr_rec)?
+        }
         // StdfRecord::STR(str_rec) => str_rec.read_from_bytes(raw_data, order),
         // // rec type 5
-        // StdfRecord::PIR(pir_rec) => pir_rec.read_from_bytes(raw_data, order),
+        StdfRecord::PIR(pir_rec) => on_pir_rec(db_ctx, rec_tracker, file_id, pir_rec)?,
         // StdfRecord::PRR(prr_rec) => prr_rec.read_from_bytes(raw_data, order),
         // // rec type 2
         // StdfRecord::WIR(wir_rec) => wir_rec.read_from_bytes(raw_data, order),
@@ -576,6 +705,219 @@ fn on_plr_rec(
                 None
             },
         ])?;
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn on_pir_rec(
+    db_ctx: &mut DataBaseCtx,
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    pir_rec: PIR,
+) -> Result<(), StdfHelperError> {
+    // update tracker, get dut_index of current file_id
+    let dut_index = tracker.pir_detected(file_id, pir_rec.head_num, pir_rec.site_num);
+    db_ctx.insert_dut(rusqlite::params![
+        pir_rec.head_num,
+        pir_rec.site_num,
+        dut_index
+    ])?;
+    Ok(())
+}
+
+#[inline(always)]
+fn on_ptr_rec(
+    db_ctx: &mut DataBaseCtx,
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    offset: u64,
+    data_len: usize,
+    ptr_rec: PTR,
+) -> Result<(), StdfHelperError> {
+    // get dut_index of (head, site)
+    // get id map if existed
+    let (dut_index, test_id) = tracker.xtr_detected(
+        file_id,
+        ptr_rec.head_num,
+        ptr_rec.site_num,
+        ptr_rec.test_num,
+        &ptr_rec.test_txt,
+    )?;
+    // insert test offset
+    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+
+    // if test id is not presented in llimit/hlimit hashmap
+    if !tracker.update_default_limits(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit) {
+        // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        db_ctx.insert_test_info(rusqlite::params![
+            test_id,
+            ptr_rec.test_num,
+            10, // PTR sub code
+            ptr_rec.test_txt,
+            ptr_rec.res_scal,
+            ptr_rec.lo_limit,
+            ptr_rec.hi_limit,
+            ptr_rec.units,
+            match ptr_rec.opt_flag {
+                Some(f) => Some(f[0]),
+                None => None,
+            },
+            -1,          // fail cnt, default -1
+            None::<u16>, // RTN_ICNT for FTR & MPR
+            None::<u16>, // RSLT or PGM for MPR or FTR
+            ptr_rec.lo_spec,
+            ptr_rec.hi_spec,
+            None::<String>,                       // VECT_NAM
+            tracker.get_program_section(file_id), // SEQ_NAM
+        ])?;
+    }
+    // if test id is presented in limit hashmap
+    // check if the default limits have been changed
+    else {
+        // only when opt_flag is valid
+        if let Some(opt_flag) = ptr_rec.opt_flag {
+            let (llimit_changed, hlimit_changed) =
+                tracker.is_ptr_limits_changed(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit)?;
+
+            let update_llimit =
+                llimit_changed && (opt_flag[0] & 0x10 == 0) && (opt_flag[0] & 0x40 == 0);
+            let update_hlimit =
+                hlimit_changed && (opt_flag[0] & 0x20 == 0) && (opt_flag[0] & 0x80 == 0);
+
+            if update_llimit || update_hlimit {
+                db_ctx.insert_dynamic_limit(rusqlite::params![
+                    dut_index,
+                    test_id,
+                    if update_llimit {
+                        ptr_rec.lo_limit
+                    } else {
+                        None
+                    },
+                    if update_hlimit {
+                        ptr_rec.hi_limit
+                    } else {
+                        None
+                    },
+                ])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn on_mpr_rec(
+    db_ctx: &mut DataBaseCtx,
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    offset: u64,
+    data_len: usize,
+    mpr_rec: MPR,
+) -> Result<(), StdfHelperError> {
+    // get dut_index of (head, site)
+    // get id map if existed
+    let (dut_index, test_id) = tracker.xtr_detected(
+        file_id,
+        mpr_rec.head_num,
+        mpr_rec.site_num,
+        mpr_rec.test_num,
+        &mpr_rec.test_txt,
+    )?;
+    // insert test offset
+    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+
+    // FTR doesn't have high/low limit, but we can still use this hashmap to check
+    // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
+    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+        // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        db_ctx.insert_test_info(rusqlite::params![
+            test_id,
+            mpr_rec.test_num,
+            15, // MPR sub code
+            mpr_rec.test_txt,
+            mpr_rec.res_scal,
+            mpr_rec.lo_limit,
+            mpr_rec.hi_limit,
+            mpr_rec.units, // unit
+            match mpr_rec.opt_flag {
+                Some(f) => Some(f[0]),
+                None => None,
+            },
+            -1,               // fail cnt, default -1
+            mpr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
+            mpr_rec.rslt_cnt, // RSLT for MPR, or PGM for FTR
+            mpr_rec.lo_spec,
+            mpr_rec.hi_spec,
+            None::<String>,                       // VECT_NAM
+            tracker.get_program_section(file_id), // SEQ_NAM
+        ])?;
+
+        // For MPR, store PMR indexes here
+        if mpr_rec.rtn_icnt > 0 && mpr_rec.rtn_indx.is_some() {
+            for rtn_indx in mpr_rec.rtn_indx.unwrap() {
+                db_ctx.insert_test_pin(rusqlite::params![test_id, rtn_indx, "RTN"])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn on_ftr_rec(
+    db_ctx: &mut DataBaseCtx,
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    offset: u64,
+    data_len: usize,
+    ftr_rec: FTR,
+) -> Result<(), StdfHelperError> {
+    // get dut_index of (head, site)
+    // get id map if existed
+    let (dut_index, test_id) = tracker.xtr_detected(
+        file_id,
+        ftr_rec.head_num,
+        ftr_rec.site_num,
+        ftr_rec.test_num,
+        &ftr_rec.test_txt,
+    )?;
+    // insert test offset
+    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+
+    // FTR doesn't have high/low limit, but we can still use this hashmap to check
+    // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
+    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+        // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        db_ctx.insert_test_info(rusqlite::params![
+            test_id,
+            ftr_rec.test_num,
+            20, // FTR sub code
+            ftr_rec.test_txt,
+            None::<i8>,
+            None::<f32>,
+            None::<f32>,
+            "", // unit
+            ftr_rec.opt_flag,
+            -1,               // fail cnt, default -1
+            ftr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
+            ftr_rec.pgm_icnt, // RSLT for MPR, or PGM for FTR
+            None::<f32>,
+            None::<f32>,
+            ftr_rec.vect_nam,                     // VECT_NAM
+            tracker.get_program_section(file_id), // SEQ_NAM
+        ])?;
+
+        // For FTR & MPR, store PMR indexes here
+        if ftr_rec.rtn_icnt > 0 {
+            for rtn_indx in ftr_rec.rtn_indx {
+                db_ctx.insert_test_pin(rusqlite::params![test_id, rtn_indx, "RTN"])?;
+            }
+        }
+        if ftr_rec.pgm_icnt > 0 {
+            for pgm_indx in ftr_rec.pgm_indx {
+                db_ctx.insert_test_pin(rusqlite::params![test_id, pgm_indx, "PGM"])?;
+            }
+        }
     }
     Ok(())
 }

@@ -344,7 +344,32 @@ impl<'con> DataBaseCtx<'con> {
         Ok(())
     }
 
-    pub fn finalize(mut self) -> Result<(), StdfHelperError> {
+    pub fn insert_dut(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_dut_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_test_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_test_rec_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_test_info(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_test_info_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_dynamic_limit(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_dynamic_limit_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn insert_test_pin(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_test_pin_stmt.execute(p)?;
+        Ok(())
+    }
+
+    pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
 
         self.insert_file_info_stmt.finalize()?;
