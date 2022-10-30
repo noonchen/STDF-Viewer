@@ -32,8 +32,13 @@ pub struct RecordTracker {
     // file id, head -> wafer index
     wafer_index_tracker: HashMap<(usize, u8), u64>,
 
+    // (file id, HBIN) -> (bin name, bin type)
+    hbin_tracker: HashMap<(usize, u16), (String, char)>,
+    // (file id, SBIN) -> (bin name, bin type)
+    sbin_tracker: HashMap<(usize, u16), (String, char)>,
+
     // file id, pin index -> pin name
-    pin_name_map: HashMap<(usize, u16), String>,
+    // pin_name_map: HashMap<(usize, u16), String>,
 
     // DTR/GDR location tracker, file id -> is_before_PRR?
     datalog_pos_tracker: HashMap<usize, bool>,
@@ -51,13 +56,15 @@ pub struct RecordTracker {
 impl RecordTracker {
     pub fn new() -> Self {
         RecordTracker {
-            id_map: HashMap::with_capacity(4096),
-            default_llimit: HashMap::with_capacity(4096),
-            default_hlimit: HashMap::with_capacity(4096),
-            test_fail_count: HashMap::with_capacity(4096),
+            id_map: HashMap::with_capacity(1024),
+            default_llimit: HashMap::with_capacity(1024),
+            default_hlimit: HashMap::with_capacity(1024),
+            test_fail_count: HashMap::with_capacity(1024),
             dut_index_tracker: HashMap::with_capacity(128),
             wafer_index_tracker: HashMap::with_capacity(128),
-            pin_name_map: HashMap::with_capacity(128),
+            hbin_tracker: HashMap::with_capacity(128),
+            sbin_tracker: HashMap::with_capacity(1024),
+            // pin_name_map: HashMap::with_capacity(128),
             datalog_pos_tracker: HashMap::with_capacity(32),
             program_sections: HashMap::with_capacity(32),
             dut_total: HashMap::with_capacity(32),
@@ -88,6 +95,87 @@ impl RecordTracker {
         dut_index
     }
 
+    pub fn prr_detected(&mut self, file_id: usize, prr_rec: &PRR) -> Result<(u64, Option<u64>), StdfHelperError> {
+        // in PRR, all BPS should be closed by EPS
+        if let Some(pg_sec_list) = self.program_sections.get_mut(&file_id) {
+            pg_sec_list.clear();
+        };
+        // set is_before_PRR to false
+        self.datalog_pos_tracker.insert(file_id, false);
+        // infer HBIN/SBIN types, it is helpful 
+        // when file missing HBR/SBR
+        // HBIN
+        if !self.hbin_tracker.contains_key(&(file_id, prr_rec.hard_bin)) {
+            let hbin_type = if prr_rec.part_flg[0] & 0b00011000 == 0 {
+                'P'
+            } else if prr_rec.part_flg[0] & 0b00010000 == 0 {
+                'F'
+            } else {
+                'U'
+            };
+            self.hbin_tracker.insert(
+                (file_id, prr_rec.hard_bin), 
+                (String::new(), hbin_type));
+        };
+        // SBIN
+        if !self.sbin_tracker.contains_key(&(file_id, prr_rec.soft_bin)) {
+            let sbin_type = if prr_rec.part_flg[0] & 0b00011000 == 0 {
+                'P'
+            } else if prr_rec.part_flg[0] & 0b00010000 == 0 {
+                'F'
+            } else {
+                'U'
+            };
+            self.sbin_tracker.insert(
+                (file_id, prr_rec.soft_bin), 
+                (String::new(), sbin_type));
+        };
+        // get dut_index
+        let dut_index = match self.dut_index_tracker.get( &(file_id, prr_rec.head_num, prr_rec.site_num) ) {
+            Some(stored_ind) => Ok(*stored_ind),
+            // if dut_index is None, returns Err
+            None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: PRR Head[{}] Site[{}] showed up before PIR", file_id, prr_rec.head_num, prr_rec.site_num) }),
+        }?;
+        // get wafer_index if WIR is detected
+        let wafer_index = match self.wafer_index_tracker.get( &(file_id, prr_rec.head_num) ) {
+            Some(ind) => Some(*ind),
+            None => None
+        };
+        Ok((dut_index, wafer_index))
+    }
+
+    pub fn hbr_detected(&mut self, file_id: usize, hbr_rec: &HBR) {
+        // since HBR is valid, we can drop the inferred info from PRR
+        if let Some( (name, pf) ) = self.hbin_tracker.get_mut( &(file_id, hbr_rec.hbin_num) ) {
+            // update name & Pass/Fail if exist
+            if hbr_rec.hbin_nam.len() > 0 {
+                *name = hbr_rec.hbin_nam.clone();
+            };
+            *pf = hbr_rec.hbin_pf;
+        } else {
+            // insert if not exist
+            self.hbin_tracker.insert(
+                (file_id, hbr_rec.hbin_num), 
+                (hbr_rec.hbin_nam.clone(), hbr_rec.hbin_pf));
+        }
+    }
+
+    pub fn sbr_detected(&mut self, file_id: usize, sbr_rec: &SBR) {
+        // since HBR is valid, we can drop the inferred info from PRR
+        if let Some( (name, pf) ) = self.sbin_tracker.get_mut( &(file_id, sbr_rec.sbin_num) ) {
+            // update name & Pass/Fail if exist
+            if sbr_rec.sbin_nam.len() > 0 {
+                *name = sbr_rec.sbin_nam.clone();
+            };
+            *pf = sbr_rec.sbin_pf;
+        } else {
+            // insert if not exist
+            self.sbin_tracker.insert(
+                (file_id, sbr_rec.sbin_num), 
+                (sbr_rec.sbin_nam.clone(), sbr_rec.sbin_pf));
+        }
+    }
+
     /// return (dut_index, test_id) for [PTR], [FTR], [MPR] or maybe [STR] in the future
     ///
     /// ## Error
@@ -104,7 +192,7 @@ impl RecordTracker {
         let dut_index = match self.dut_index_tracker.get( &(file_id, head_num, site_num) ) {
             Some(stored_ind) => Ok(*stored_ind),
             // if dut_index is None, returns Err
-            None => Err(StdfHelperError { msg: format!("STDF file structure error: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", test_num, head_num, site_num) }),
+            None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", file_id, test_num, head_num, site_num) }),
         }?;
         // get test_id
         let key = (file_id, test_num, test_txt.to_string());
@@ -207,7 +295,7 @@ pub fn process_incoming_record(
         // StdfRecord::STR(str_rec) => str_rec.read_from_bytes(raw_data, order),
         // // rec type 5
         StdfRecord::PIR(pir_rec) => on_pir_rec(db_ctx, rec_tracker, file_id, pir_rec)?,
-        // StdfRecord::PRR(prr_rec) => prr_rec.read_from_bytes(raw_data, order),
+        StdfRecord::PRR(prr_rec) => on_prr_rec(db_ctx, rec_tracker, file_id, prr_rec)?,
         // // rec type 2
         // StdfRecord::WIR(wir_rec) => wir_rec.read_from_bytes(raw_data, order),
         // StdfRecord::WRR(wrr_rec) => wrr_rec.read_from_bytes(raw_data, order),
@@ -221,8 +309,8 @@ pub fn process_incoming_record(
         StdfRecord::MIR(mir_rec) => on_mir_rec(db_ctx, file_id, mir_rec)?,
         // StdfRecord::MRR(mrr_rec) => mrr_rec.read_from_bytes(raw_data, order),
         // StdfRecord::PCR(pcr_rec) => pcr_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::HBR(hbr_rec) => hbr_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::SBR(sbr_rec) => sbr_rec.read_from_bytes(raw_data, order),
+        StdfRecord::HBR(hbr_rec) => on_hbr_rec(rec_tracker, file_id, hbr_rec)?,
+        StdfRecord::SBR(sbr_rec) => on_sbr_rec(rec_tracker, file_id, sbr_rec)?,
         StdfRecord::PMR(pmr_rec) => on_pmr_rec(db_ctx, file_id, pmr_rec)?,
         StdfRecord::PGR(pgr_rec) => on_pgr_rec(db_ctx, file_id, pgr_rec)?,
         StdfRecord::PLR(plr_rec) => on_plr_rec(db_ctx, file_id, plr_rec)?,
@@ -921,3 +1009,65 @@ fn on_ftr_rec(
     }
     Ok(())
 }
+
+#[inline(always)]
+fn on_prr_rec(
+    db_ctx: &mut DataBaseCtx,
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    prr_rec: PRR,
+) -> Result<(), StdfHelperError> {
+    // in PRR, all BPS should be closed by EPS
+    // set is_before_PRR to false
+    // infer HBIN/SBIN types, it is helpful 
+    // when file missing HBR/SBR
+    // 
+    // get dut_index
+    // get wafer_index if WIR is detected
+    let (dut_index, wafer_index) = tracker.prr_detected(file_id, &prr_rec)?;
+    // update PRR info to database, TODO: maybe use hashmap to avoid updating database?
+    db_ctx.update_dut(rusqlite::params![
+        prr_rec.num_test,
+        prr_rec.test_t,
+        prr_rec.part_id,
+        prr_rec.hard_bin,
+        prr_rec.soft_bin,
+        prr_rec.part_flg[0],
+        wafer_index,
+        match prr_rec.x_coord != -32768 {   // use NULL to replace -32768
+            true => Some(prr_rec.x_coord),  // in order to reduce db size
+            false => None,
+        },
+        match prr_rec.y_coord != -32768 {
+            true => Some(prr_rec.y_coord),
+            false => None,
+        },
+        dut_index
+    ])?;
+    Ok(())
+}
+
+#[inline(always)]
+fn on_hbr_rec(
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    hbr_rec: HBR,
+) -> Result<(), StdfHelperError> {
+    // we do not update database in HBR
+    // modify hashmap in memory instead
+    tracker.hbr_detected(file_id, &hbr_rec);
+    Ok(())
+}
+
+#[inline(always)]
+fn on_sbr_rec(
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    sbr_rec: SBR,
+) -> Result<(), StdfHelperError> {
+    // we do not update database in SBR
+    // modify hashmap in memory instead
+    tracker.sbr_detected(file_id, &sbr_rec);
+    Ok(())
+}
+

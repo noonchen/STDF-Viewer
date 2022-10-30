@@ -349,6 +349,11 @@ impl<'con> DataBaseCtx<'con> {
         Ok(())
     }
 
+    pub fn update_dut(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_dut_stmt.execute(p)?;
+        Ok(())
+    }
+
     pub fn insert_test_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_test_rec_stmt.execute(p)?;
         Ok(())
