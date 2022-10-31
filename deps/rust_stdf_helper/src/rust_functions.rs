@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Mon Oct 31 2022
+// Last Modified: Tue Nov 01 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -37,9 +37,6 @@ pub struct RecordTracker {
     // (file id, SBIN) -> (bin name, bin type)
     sbin_tracker: HashMap<(usize, u16), (String, char)>,
 
-    // file id, pin index -> pin name
-    // pin_name_map: HashMap<(usize, u16), String>,
-
     // DTR/GDR location tracker, file id -> is_before_PRR?
     datalog_pos_tracker: HashMap<usize, bool>,
 
@@ -64,7 +61,6 @@ impl RecordTracker {
             wafer_index_tracker: HashMap::with_capacity(128),
             hbin_tracker: HashMap::with_capacity(128),
             sbin_tracker: HashMap::with_capacity(1024),
-            // pin_name_map: HashMap::with_capacity(128),
             datalog_pos_tracker: HashMap::with_capacity(32),
             program_sections: HashMap::with_capacity(32),
             dut_total: HashMap::with_capacity(32),
@@ -451,11 +447,21 @@ pub fn process_summary_data(
 ) -> Result<(), StdfHelperError> {
     // write HBR
     for (&(file_id, bin_num), (bin_nam, bin_pf)) in rec_tracker.hbin_tracker.iter() {
-        db_ctx.insert_hbin(rusqlite::params![bin_num, bin_nam, &bin_pf.to_string()])?;
+        db_ctx.insert_hbin(rusqlite::params![
+            file_id,
+            bin_num,
+            bin_nam,
+            &bin_pf.to_string()
+        ])?;
     }
     // write SBR
     for (&(file_id, bin_num), (bin_nam, bin_pf)) in rec_tracker.sbin_tracker.iter() {
-        db_ctx.insert_sbin(rusqlite::params![bin_num, bin_nam, &bin_pf.to_string()])?;
+        db_ctx.insert_sbin(rusqlite::params![
+            file_id,
+            bin_num,
+            bin_nam,
+            &bin_pf.to_string()
+        ])?;
     }
     // write TSR
     for (&test_id, &fail_cnt) in rec_tracker.test_fail_count.iter() {
@@ -538,6 +544,15 @@ fn on_mir_rec(
     file_id: usize,
     mir_rec: MIR,
 ) -> Result<(), StdfHelperError> {
+    // update File_List table
+    db_ctx.insert_file_list(rusqlite::params![
+        file_id,
+        &mir_rec.lot_id,
+        &mir_rec.sblot_id,
+        &mir_rec.proc_id,
+        &mir_rec.flow_id
+    ])?;
+    // update File_Info table
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
         "SETUP_T",
@@ -595,245 +610,125 @@ fn on_mir_rec(
             format!("{}", mir_rec.cmod_cod)
         ])?
     };
-    //TODO
+
     if !mir_rec.lot_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "LOT_ID",
-            format!("{}", mir_rec.lot_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "LOT_ID", &mir_rec.lot_id])?
     };
 
     if !mir_rec.part_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "PART_TYP",
-            format!("{}", mir_rec.part_typ)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "PART_TYP", &mir_rec.part_typ])?
     };
 
     if !mir_rec.node_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "NODE_NAM",
-            format!("{}", mir_rec.node_nam)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "NODE_NAM", &mir_rec.node_nam,])?
     };
 
     if !mir_rec.tstr_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "TSTR_TYP",
-            format!("{}", mir_rec.tstr_typ)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "TSTR_TYP", &mir_rec.tstr_typ])?
     };
 
     if !mir_rec.job_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "JOB_NAM",
-            format!("{}", mir_rec.job_nam)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "JOB_NAM", &mir_rec.job_nam])?
     };
 
     if !mir_rec.job_rev.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "JOB_REV",
-            format!("{}", mir_rec.job_rev)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "JOB_REV", &mir_rec.job_rev])?
     };
-    //TODO
+
     if !mir_rec.sblot_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SBLOT_ID",
-            format!("{}", mir_rec.sblot_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SBLOT_ID", &mir_rec.sblot_id])?
     };
 
     if !mir_rec.oper_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "OPER_NAM",
-            format!("{}", mir_rec.oper_nam)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "OPER_NAM", &mir_rec.oper_nam])?
     };
 
     if !mir_rec.exec_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "EXEC_TYP",
-            format!("{}", mir_rec.exec_typ)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "EXEC_TYP", &mir_rec.exec_typ])?
     };
 
     if !mir_rec.exec_ver.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "EXEC_VER",
-            format!("{}", mir_rec.exec_ver)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "EXEC_VER", &mir_rec.exec_ver])?
     };
 
     if !mir_rec.test_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "TEST_COD",
-            format!("{}", mir_rec.test_cod)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "TEST_COD", &mir_rec.test_cod])?
     };
 
     if !mir_rec.tst_temp.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "TST_TEMP",
-            format!("{}", mir_rec.tst_temp)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "TST_TEMP", &mir_rec.tst_temp])?
     };
 
     if !mir_rec.user_txt.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "USER_TXT",
-            format!("{}", mir_rec.user_txt)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "USER_TXT", &mir_rec.user_txt])?
     };
 
     if !mir_rec.aux_file.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "AUX_FILE",
-            format!("{}", mir_rec.aux_file)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "AUX_FILE", &mir_rec.aux_file])?
     };
 
     if !mir_rec.pkg_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "PKG_TYP",
-            format!("{}", mir_rec.pkg_typ)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "PKG_TYP", &mir_rec.pkg_typ])?
     };
 
     if !mir_rec.famly_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "FAMLY_ID",
-            format!("{}", mir_rec.famly_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "FAMLY_ID", &mir_rec.famly_id])?
     };
 
     if !mir_rec.date_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "DATE_COD",
-            format!("{}", mir_rec.date_cod)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "DATE_COD", &mir_rec.date_cod])?
     };
 
     if !mir_rec.facil_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "FACIL_ID",
-            format!("{}", mir_rec.facil_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "FACIL_ID", &mir_rec.facil_id])?
     };
 
     if !mir_rec.floor_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "FLOOR_ID",
-            format!("{}", mir_rec.floor_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "FLOOR_ID", &mir_rec.floor_id])?
     };
 
     if !mir_rec.proc_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "PROC_ID",
-            format!("{}", mir_rec.proc_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "PROC_ID", &mir_rec.proc_id])?
     };
 
     if !mir_rec.oper_frq.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "OPER_FRQ",
-            format!("{}", mir_rec.oper_frq)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "OPER_FRQ", &mir_rec.oper_frq])?
     };
 
     if !mir_rec.spec_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SPEC_NAM",
-            format!("{}", mir_rec.spec_nam)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SPEC_NAM", &mir_rec.spec_nam])?
     };
 
     if !mir_rec.spec_ver.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SPEC_VER",
-            format!("{}", mir_rec.spec_ver)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SPEC_VER", &mir_rec.spec_ver])?
     };
-    //TODO
+
     if !mir_rec.flow_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "FLOW_ID",
-            format!("{}", mir_rec.flow_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "FLOW_ID", &mir_rec.flow_id])?
     };
 
     if !mir_rec.setup_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SETUP_ID",
-            format!("{}", mir_rec.setup_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SETUP_ID", &mir_rec.setup_id])?
     };
 
     if !mir_rec.dsgn_rev.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "DSGN_REV",
-            format!("{}", mir_rec.dsgn_rev)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "DSGN_REV", &mir_rec.dsgn_rev])?
     };
 
     if !mir_rec.eng_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "ENG_ID",
-            format!("{}", mir_rec.eng_id)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "ENG_ID", &mir_rec.eng_id])?
     };
 
     if !mir_rec.rom_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "ROM_COD",
-            format!("{}", mir_rec.rom_cod)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "ROM_COD", &mir_rec.rom_cod])?
     };
 
     if !mir_rec.serl_num.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SERL_NUM",
-            format!("{}", mir_rec.serl_num)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SERL_NUM", &mir_rec.serl_num])?
     };
 
     if !mir_rec.supr_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![
-            file_id,
-            "SUPR_NAM",
-            format!("{}", mir_rec.supr_nam)
-        ])?
+        db_ctx.insert_file_info(rusqlite::params![file_id, "SUPR_NAM", &mir_rec.supr_nam])?
     };
 
     Ok(())
@@ -846,7 +741,7 @@ fn on_pmr_rec(
     pmr_rec: PMR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_pin_map(rusqlite::params![
-        // file_id,
+        file_id,
         pmr_rec.head_num,
         pmr_rec.site_num,
         pmr_rec.pmr_indx,
@@ -881,11 +776,15 @@ fn on_pgr_rec(
 ) -> Result<(), StdfHelperError> {
     // create new data in Pin_Info
     if !pgr_rec.grp_nam.is_empty() {
-        db_ctx.insert_grp_name(rusqlite::params![pgr_rec.grp_indx, pgr_rec.grp_nam])?;
+        db_ctx.insert_grp_name(rusqlite::params![
+            file_id,
+            pgr_rec.grp_indx,
+            pgr_rec.grp_nam
+        ])?;
     }
     // update From_GRP colume in Pin_Map
     for pmr_id in pgr_rec.pmr_indx {
-        db_ctx.update_from_grp(rusqlite::params![pgr_rec.grp_indx, pmr_id])?;
+        db_ctx.update_from_grp(rusqlite::params![pgr_rec.grp_indx, file_id, pmr_id])?;
     }
     Ok(())
 }
@@ -900,6 +799,7 @@ fn on_plr_rec(
     for i in 0..plr_rec.grp_cnt {
         let i = i as usize;
         db_ctx.insert_pin_info(rusqlite::params![
+            file_id,
             plr_rec.grp_indx[i],
             plr_rec.grp_mode[i],
             plr_rec.grp_radx[i],
@@ -938,6 +838,7 @@ fn on_pir_rec(
     // update tracker, get dut_index of current file_id
     let dut_index = tracker.pir_detected(file_id, pir_rec.head_num, pir_rec.site_num);
     db_ctx.insert_dut(rusqlite::params![
+        file_id,
         pir_rec.head_num,
         pir_rec.site_num,
         dut_index
@@ -970,6 +871,7 @@ fn on_ptr_rec(
     if !tracker.update_default_limits(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit) {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         db_ctx.insert_test_info(rusqlite::params![
+            file_id,
             test_id,
             ptr_rec.test_num,
             10, // PTR sub code
@@ -1048,6 +950,7 @@ fn on_mpr_rec(
     if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         db_ctx.insert_test_info(rusqlite::params![
+            file_id,
             test_id,
             mpr_rec.test_num,
             15, // MPR sub code
@@ -1102,6 +1005,7 @@ fn on_ftr_rec(
     if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         db_ctx.insert_test_info(rusqlite::params![
+            file_id,
             test_id,
             ftr_rec.test_num,
             20, // FTR sub code
@@ -1150,7 +1054,7 @@ fn on_prr_rec(
     // get dut_index
     // get wafer_index if WIR is detected
     let (dut_index, wafer_index) = tracker.prr_detected(file_id, &prr_rec)?;
-    // update PRR info to database, TODO: maybe use hashmap to avoid updating database?
+    // update PRR info to database
     db_ctx.update_dut(rusqlite::params![
         prr_rec.num_test,
         prr_rec.test_t,
@@ -1168,6 +1072,7 @@ fn on_prr_rec(
             true => Some(prr_rec.y_coord),
             false => None,
         },
+        file_id,
         dut_index
     ])?;
     Ok(())
@@ -1290,6 +1195,7 @@ fn on_wir_rec(
     // the following info is also available in WRR, but it still should be updated
     // in WIR in case the stdf is incomplete (no WRR).
     db_ctx.insert_wafer(rusqlite::params![
+        file_id,
         wir_rec.head_num,
         wafer_index,
         None::<u32>,
@@ -1320,6 +1226,7 @@ fn on_wrr_rec(
     // the following info is also available in WRR, but it still should be updated
     // in WIR in case the stdf is incomplete (no WRR).
     db_ctx.insert_wafer(rusqlite::params![
+        file_id,
         wrr_rec.head_num,
         wafer_index,
         wrr_rec.part_cnt,
@@ -1383,6 +1290,7 @@ fn on_pcr_rec(
     pcr_rec: PCR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_dut_cnt(rusqlite::params![
+        file_id,
         pcr_rec.head_num,
         pcr_rec.site_num,
         pcr_rec.part_cnt,
@@ -1416,6 +1324,7 @@ fn on_dtr_rec(
     let (dut_index, is_before_prr) = tracker.get_datalog_relative_pos(file_id);
 
     db_ctx.insert_datalog_rec(rusqlite::params![
+        file_id,
         "DTR",
         dtr_rec.text_dat,
         dut_index,
@@ -1435,6 +1344,7 @@ fn on_gdr_rec(
     let flatten_string = flatten_generic_data(&gdr_rec);
 
     db_ctx.insert_datalog_rec(rusqlite::params![
+        file_id,
         "GDR",
         flatten_string,
         dut_index,
@@ -1647,7 +1557,6 @@ fn on_mrr_rec(
     }
     Ok(())
 }
-//
 
 #[inline(always)]
 fn flatten_generic_data(gdr_rec: &GDR) -> String {

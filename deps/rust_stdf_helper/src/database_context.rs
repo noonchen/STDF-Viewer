@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Mon Oct 31 2022
+// Last Modified: Tue Nov 01 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -12,7 +12,8 @@
 use crate::StdfHelperError;
 use rusqlite::{Connection, Statement, ToSql};
 
-static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
+static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
+                                DROP TABLE IF EXISTS File_Info;
                                 DROP TABLE IF EXISTS Dut_Info;
                                 DROP TABLE IF EXISTS Dut_Counts;
                                 DROP TABLE IF EXISTS Test_Info;
@@ -27,14 +28,23 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                 VACUUM;
 
                                 BEGIN;
+
+                                CREATE TABLE IF NOT EXISTS File_List (
+                                                        Fid INTEGER,
+                                                        Lot_ID TEXT, 
+                                                        Sublot_ID TEXT,
+                                                        Product_ID TEXT,
+                                                        Flow_ID TEXT);
+            
                                 CREATE TABLE IF NOT EXISTS File_Info (
                                                         Fid INTEGER,
                                                         Field TEXT, 
                                                         Value TEXT);
                                                         
                                 CREATE TABLE IF NOT EXISTS Wafer_Info (
+                                                        Fid INTEGER,
                                                         HEAD_NUM INTEGER, 
-                                                        WaferIndex INTEGER PRIMARY KEY,
+                                                        WaferIndex INTEGER,
                                                         PART_CNT INTEGER,
                                                         RTST_CNT INTEGER,
                                                         ABRT_CNT INTEGER,
@@ -45,12 +55,14 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         FRAME_ID TEXT,
                                                         MASK_ID TEXT,
                                                         USR_DESC TEXT,
-                                                        EXC_DESC TEXT);
+                                                        EXC_DESC TEXT,
+                                                        PRIMARY KEY (Fid, WaferIndex)) WITHOUT ROWID;
                                                         
                                 CREATE TABLE IF NOT EXISTS Dut_Info (
+                                                        Fid INTEGER,
                                                         HEAD_NUM INTEGER, 
                                                         SITE_NUM INTEGER, 
-                                                        DUTIndex INTEGER PRIMARY KEY,
+                                                        DUTIndex INTEGER,
                                                         TestCount INTEGER,
                                                         TestTime INTEGER,
                                                         PartID TEXT,
@@ -59,9 +71,11 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         Flag INTEGER,
                                                         WaferIndex INTEGER,
                                                         XCOORD INTEGER,
-                                                        YCOORD INTEGER) WITHOUT ROWID;
+                                                        YCOORD INTEGER,
+                                                        PRIMARY KEY (Fid, DUTIndex)) WITHOUT ROWID;
                                                         
                                 CREATE TABLE IF NOT EXISTS Dut_Counts (
+                                                        Fid INTEGER,
                                                         HEAD_NUM INTEGER, 
                                                         SITE_NUM INTEGER, 
                                                         PART_CNT INTEGER,
@@ -71,6 +85,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         FUNC_CNT INTEGER);
 
                                 CREATE TABLE IF NOT EXISTS Test_Info (
+                                                        Fid INTEGER,
                                                         TEST_ID INTEGER,
                                                         TEST_NUM INTEGER,
                                                         recHeader INTEGER,
@@ -87,7 +102,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         HSpec REAL,
                                                         VECT_NAM TEXT,
                                                         SEQ_NAME TEXT,
-                                                        PRIMARY KEY (TEST_NUM, TEST_NAME)) WITHOUT ROWID;
+                                                        PRIMARY KEY (Fid, TEST_NUM, TEST_NAME)) WITHOUT ROWID;
                                                         
                                 CREATE TABLE IF NOT EXISTS Test_Offsets (
                                                         DUTIndex INTEGER,
@@ -97,13 +112,15 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
                                                         
                                 CREATE TABLE IF NOT EXISTS Bin_Info (
+                                                        Fid INTEGER,
                                                         BIN_TYPE TEXT,
                                                         BIN_NUM INTEGER, 
                                                         BIN_NAME TEXT,
                                                         BIN_PF TEXT,
-                                                        PRIMARY KEY (BIN_TYPE, BIN_NUM));
+                                                        PRIMARY KEY (Fid, BIN_TYPE, BIN_NUM));
 
                                 CREATE TABLE IF NOT EXISTS Pin_Map (
+                                                        Fid INTEGER,
                                                         HEAD_NUM INTEGER, 
                                                         SITE_NUM INTEGER, 
                                                         PMR_INDX INTEGER,
@@ -114,14 +131,16 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         From_GRP INTEGER);
 
                                 CREATE TABLE IF NOT EXISTS Pin_Info (
-                                                        P_PG_INDX INTEGER PRIMARY KEY, 
+                                                        Fid INTEGER,
+                                                        P_PG_INDX INTEGER, 
                                                         GRP_NAM TEXT, 
                                                         GRP_MODE INTEGER,
                                                         GRP_RADX INTEGER,
                                                         PGM_CHAR TEXT,
                                                         PGM_CHAL TEXT,
                                                         RTN_CHAR TEXT,
-                                                        RTN_CHAL TEXT);
+                                                        RTN_CHAL TEXT,
+                                                        PRIMARY KEY (Fid, P_PG_INDX));
 
                                 CREATE TABLE IF NOT EXISTS TestPin_Map (
                                                         TEST_ID INTEGER, 
@@ -134,9 +153,10 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
                                                         TEST_ID INTEGER, 
                                                         LLimit REAL,
                                                         HLimit REAL,
-                                                        PRIMARY KEY (DUTIndex, TEST_ID));
+                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
 
                                 CREATE TABLE IF NOT EXISTS Datalog (
+                                                        Fid INTEGER,
                                                         RecordType TEXT,
                                                         Value TEXT, 
                                                         AfterDUTIndex INTEGER,
@@ -150,36 +170,42 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_Info;
 
                                 BEGIN;";
 
+static INSERT_FILE_LIST: &str = "INSERT INTO 
+                                    File_List
+                                VALUES 
+                                    (?,?,?,?,?)";
+
 static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
                                     (?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
-                                Dut_Info (HEAD_NUM, SITE_NUM, DUTIndex) 
+                                Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex) 
                             VALUES 
-                                (?,?,?);";
+                                (?,?,?,?);";
 
 static UPDATE_DUT: &str = "UPDATE Dut_Info SET 
                                 TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, 
                                 HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
                                 WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD 
                             WHERE 
-                                DUTIndex=:DUTIndex;";
+                                Fid=:Fid AND DUTIndex=:DUTIndex;";
 
 static INSERT_TEST_REC: &str = "INSERT OR REPLACE INTO 
-                                Test_Offsets 
-                            VALUES 
-                                (:DUTIndex, :TEST_ID, :Offset ,:BinaryLen);";
+                                    Test_Offsets 
+                                VALUES 
+                                    (:DUTIndex, :TEST_ID, :Offset ,:BinaryLen);";
 
 static INSERT_TEST_INFO: &str = "INSERT INTO 
                                     Test_Info 
                                 VALUES 
-                                    (:TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
+                                    (:Fid, :TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
                                     :RES_SCAL, :LLimit, :HLimit, :Unit, :OPT_FLAG, 
                                     :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, 
                                     :HSpec, :VECT_NAM, :SEQ_NAME);";
 
+// test_id => (file_id, test_num, test_name)
 static UPDATE_FAIL_COUNT: &str = "UPDATE 
                                     Test_Info 
                                 SET 
@@ -190,30 +216,30 @@ static UPDATE_FAIL_COUNT: &str = "UPDATE
 static INSERT_HBIN: &str = "INSERT OR REPLACE INTO 
                                 Bin_Info 
                             VALUES 
-                                ('H', :HBIN_NUM, :HBIN_NAME, :PF);";
+                                (:Fid, 'H', :HBIN_NUM, :HBIN_NAME, :PF);";
 
 static INSERT_SBIN: &str = "INSERT OR REPLACE INTO 
                                 Bin_Info 
                             VALUES 
-                                ('S', :SBIN_NUM, :SBIN_NAME, :PF);";
+                                (:Fid, 'S', :SBIN_NUM, :SBIN_NAME, :PF);";
 
 static INSERT_DUT_COUNT: &str = "INSERT INTO 
                                     Dut_Counts 
                                 VALUES 
-                                    (:HEAD_NUM, :SITE_NUM, :PART_CNT, :RTST_CNT, 
-                                    :ABRT_CNT, :GOOD_CNT, :FUNC_CNT);";
+                                    (:Fid, :HEAD_NUM, :SITE_NUM, :PART_CNT, 
+                                    :RTST_CNT, :ABRT_CNT, :GOOD_CNT, :FUNC_CNT);";
 
 static INSERT_WAFER: &str = "INSERT OR REPLACE INTO 
                                     Wafer_Info 
                                 VALUES 
-                                    (:HEAD_NUM, :WaferIndex, :PART_CNT, :RTST_CNT, 
+                                    (:Fid, :HEAD_NUM, :WaferIndex, :PART_CNT, :RTST_CNT, 
                                     :ABRT_CNT, :GOOD_CNT, :FUNC_CNT, :WAFER_ID, 
                                     :FABWF_ID, :FRAME_ID, :MASK_ID, :USR_DESC, :EXC_DESC);";
 
 static INSERT_PIN_MAP: &str = "INSERT INTO 
                                     Pin_Map 
                                 VALUES 
-                                    (:HEAD_NUM, :SITE_NUM, :PMR_INDX, :CHAN_TYP, 
+                                    (:Fid, :HEAD_NUM, :SITE_NUM, :PMR_INDX, :CHAN_TYP, 
                                     :CHAN_NAM, :PHY_NAM, :LOG_NAM, :From_GRP);";
 
 static UPDATE_FROM_GRP: &str = "UPDATE 
@@ -221,24 +247,25 @@ static UPDATE_FROM_GRP: &str = "UPDATE
                                 SET 
                                     From_GRP=:From_GRP 
                                 WHERE 
-                                    PMR_INDX=:PMR_INDX;";
+                                    Fid=:Fid AND PMR_INDX=:PMR_INDX;";
 
 // # create a row with GRP_NAME in Pin_Info if PGR exists, in some rare cases, PMR shows after PGR, ignore it.
 static INSERT_GRP_NAM: &str = "INSERT OR IGNORE INTO 
-                                    Pin_Info (P_PG_INDX, GRP_NAM) 
+                                    Pin_Info (Fid, P_PG_INDX, GRP_NAM) 
                                 VALUES 
-                                    (:P_PG_INDX, :GRP_NAM);";
+                                    (:Fid, :P_PG_INDX, :GRP_NAM);";
 
 // # insert rows in Pin_Info and keep GRP_NAM
 static INSERT_PIN_INFO: &str = "INSERT OR REPLACE INTO 
                                     Pin_Info 
                                 VALUES 
-                                    (:P_PG_INDX, (SELECT 
-                                                    GRP_NAM 
-                                                FROM 
-                                                    Pin_Info 
-                                                WHERE 
-                                                    P_PG_INDX=:P_PG_INDX), 
+                                    (:Fid, :P_PG_INDX, 
+                                        (SELECT 
+                                            GRP_NAM 
+                                        FROM 
+                                            Pin_Info 
+                                        WHERE 
+                                            Fid=:Fid AND P_PG_INDX=:P_PG_INDX), 
                                     :GRP_MODE, :GRP_RADX, 
                                     :PGM_CHAR, :PGM_CHAL, :RTN_CHAR, :RTN_CHAL);";
 
@@ -255,12 +282,13 @@ static INSERT_DYNAMIC_LIMIT: &str = "INSERT OR REPLACE INTO
 static INSERT_DATALOG: &str = "INSERT INTO 
                                     Datalog 
                                 VALUES 
-                                    (:RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);";
+                                    (:Fid, :RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);";
 
 static CREATE_INDEX_AND_COMMIT: &str = "CREATE INDEX 
                                             dutKey 
                                         ON 
                                             Dut_Info (
+                                                Fid         ASC,
                                                 HEAD_NUM    ASC,
                                                 SITE_NUM    ASC);
                                                 
@@ -270,6 +298,7 @@ static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
 
 pub struct DataBaseCtx<'con> {
     db: &'con Connection,
+    insert_file_list_stmt: Statement<'con>,
     insert_file_info_stmt: Statement<'con>,
     insert_dut_stmt: Statement<'con>,
     update_dut_stmt: Statement<'con>,
@@ -292,6 +321,7 @@ pub struct DataBaseCtx<'con> {
 impl<'con> DataBaseCtx<'con> {
     pub fn new(conn: &'con Connection) -> Result<Self, StdfHelperError> {
         conn.execute_batch(CREATE_TABLE_SQL)?;
+        let insert_file_list_stmt = conn.prepare(INSERT_FILE_LIST)?;
         let insert_file_info_stmt = conn.prepare(INSERT_FILE_INFO)?;
         let insert_dut_stmt = conn.prepare(INSERT_DUT)?;
         let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
@@ -312,6 +342,7 @@ impl<'con> DataBaseCtx<'con> {
 
         Ok(DataBaseCtx {
             db: conn,
+            insert_file_list_stmt,
             insert_file_info_stmt,
             insert_dut_stmt,
             update_dut_stmt,
@@ -335,6 +366,12 @@ impl<'con> DataBaseCtx<'con> {
     #[inline(always)]
     pub fn start_new_transaction(&self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(START_NEW_TRANSACTION)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn insert_file_list(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_file_list_stmt.execute(p)?;
         Ok(())
     }
 
@@ -443,7 +480,7 @@ impl<'con> DataBaseCtx<'con> {
     #[inline(always)]
     pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
-
+        self.insert_file_list_stmt.finalize()?;
         self.insert_file_info_stmt.finalize()?;
         self.insert_dut_stmt.finalize()?;
         self.update_dut_stmt.finalize()?;
