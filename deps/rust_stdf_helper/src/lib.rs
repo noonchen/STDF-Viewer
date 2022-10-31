@@ -14,13 +14,7 @@ use std::thread;
 mod database_context;
 mod rust_functions;
 use database_context::DataBaseCtx;
-use rust_functions::{process_incoming_record, RecordTracker};
-
-// impl std::convert::From<rusqlite::Error> for PyErr {
-//     fn from(err: Error) -> Self {
-//         pyo3::exceptions::PyException::new_err(err.to_string())
-//     }
-// }
+use rust_functions::{process_incoming_record, process_summary_data, RecordTracker};
 
 #[derive(Debug)]
 pub struct StdfHelperError {
@@ -341,6 +335,7 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
     if num_files == 0 {
         return Ok(());
     }
+
     // initiate sqlite3 database
     let conn = match Connection::open(&dbpath) {
         Ok(conn) => conn,
@@ -352,15 +347,15 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
     let (tx, rx) = mpsc::channel();
     let mut thread_handles = vec![];
     let mut thread_txes = Vec::with_capacity(num_files);
-
-    // clone {num_files-1} sender
+    // clone {num_files-1} sender, and push the `tx` to last
     (0..num_files - 1)
         .map(|_| thread_txes.push(tx.clone()))
         .count();
-    // push the last tx into vector
     thread_txes.push(tx);
 
-    // one thread per file, use raw data record because we need to store offset and such.
+    // sending parsing work to
+    // other threads.
+    // one file per thread
     for (fid, (fpath, thread_tx)) in stdf_paths
         .into_iter()
         .zip(thread_txes.into_iter())
@@ -389,11 +384,13 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
         process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
         // commit and begin a new transaction after fixed number of records
         transaction_count_up += 1;
-        if transaction_count_up > 1000_000 {
+        if transaction_count_up > 1_000_000 {
             transaction_count_up = 0;
             db_ctx.start_new_transaction()?;
         }
     }
+    // write HBR/SBR/TSR into database
+    process_summary_data(&mut db_ctx, &mut record_tracker)?;
 
     // join threads
     for handle in thread_handles {

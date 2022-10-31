@@ -180,6 +180,13 @@ static INSERT_TEST_INFO: &str = "INSERT INTO
                                     :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, 
                                     :HSpec, :VECT_NAM, :SEQ_NAME);";
 
+static UPDATE_FAIL_COUNT: &str = "UPDATE 
+                                    Test_Info 
+                                SET 
+                                    FailCount=:count 
+                                WHERE 
+                                    TEST_ID=:TEST_ID";
+
 static INSERT_HBIN: &str = "INSERT OR REPLACE INTO 
                                 Bin_Info 
                             VALUES 
@@ -268,6 +275,7 @@ pub struct DataBaseCtx<'con> {
     update_dut_stmt: Statement<'con>,
     insert_test_rec_stmt: Statement<'con>,
     insert_test_info_stmt: Statement<'con>,
+    update_fail_count_stmt: Statement<'con>,
     insert_hbin_stmt: Statement<'con>,
     insert_sbin_stmt: Statement<'con>,
     insert_dut_cnt_stmt: Statement<'con>,
@@ -289,6 +297,7 @@ impl<'con> DataBaseCtx<'con> {
         let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
         let insert_test_rec_stmt = conn.prepare(INSERT_TEST_REC)?;
         let insert_test_info_stmt = conn.prepare(INSERT_TEST_INFO)?;
+        let update_fail_count_stmt = conn.prepare(UPDATE_FAIL_COUNT)?;
         let insert_hbin_stmt = conn.prepare(INSERT_HBIN)?;
         let insert_sbin_stmt = conn.prepare(INSERT_SBIN)?;
         let insert_dut_cnt_stmt = conn.prepare(INSERT_DUT_COUNT)?;
@@ -308,6 +317,7 @@ impl<'con> DataBaseCtx<'con> {
             update_dut_stmt,
             insert_test_rec_stmt,
             insert_test_info_stmt,
+            update_fail_count_stmt,
             insert_hbin_stmt,
             insert_sbin_stmt,
             insert_dut_cnt_stmt,
@@ -413,6 +423,24 @@ impl<'con> DataBaseCtx<'con> {
     }
 
     #[inline(always)]
+    pub fn insert_hbin(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_hbin_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn insert_sbin(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_sbin_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn update_fail_count(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_fail_count_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
 
@@ -421,6 +449,7 @@ impl<'con> DataBaseCtx<'con> {
         self.update_dut_stmt.finalize()?;
         self.insert_test_rec_stmt.finalize()?;
         self.insert_test_info_stmt.finalize()?;
+        self.update_fail_count_stmt.finalize()?;
         self.insert_hbin_stmt.finalize()?;
         self.insert_sbin_stmt.finalize()?;
         self.insert_dut_cnt_stmt.finalize()?;

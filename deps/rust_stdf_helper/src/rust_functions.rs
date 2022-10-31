@@ -362,6 +362,23 @@ impl RecordTracker {
         };
         (dut_index, is_before_prr)
     }
+
+    #[inline(always)]
+    pub fn bps_detected(&mut self, file_id: usize, bps_rec: &BPS) -> Result<(), StdfHelperError> {
+        self.program_sections
+            .entry(file_id)
+            .and_modify(|v| v.push(bps_rec.seq_name.clone()))
+            .or_insert_with(|| vec![bps_rec.seq_name.clone()]);
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn eps_detected(&mut self, file_id: usize) -> Result<(), StdfHelperError> {
+        self.program_sections.entry(file_id).and_modify(|v| {
+            v.pop();
+        });
+        Ok(())
+    }
 }
 
 #[inline(always)]
@@ -398,15 +415,15 @@ pub fn process_incoming_record(
         StdfRecord::TSR(tsr_rec) => on_tsr_rec(rec_tracker, file_id, tsr_rec)?,
         // // rec type 1
         StdfRecord::MIR(mir_rec) => on_mir_rec(db_ctx, file_id, mir_rec)?,
-        // StdfRecord::MRR(mrr_rec) => mrr_rec.read_from_bytes(raw_data, order),
+        StdfRecord::MRR(mrr_rec) => on_mrr_rec(db_ctx, file_id, mrr_rec)?,
         StdfRecord::PCR(pcr_rec) => on_pcr_rec(db_ctx, file_id, pcr_rec)?,
         StdfRecord::HBR(hbr_rec) => on_hbr_rec(rec_tracker, file_id, hbr_rec)?,
         StdfRecord::SBR(sbr_rec) => on_sbr_rec(rec_tracker, file_id, sbr_rec)?,
         StdfRecord::PMR(pmr_rec) => on_pmr_rec(db_ctx, file_id, pmr_rec)?,
         StdfRecord::PGR(pgr_rec) => on_pgr_rec(db_ctx, file_id, pgr_rec)?,
         StdfRecord::PLR(plr_rec) => on_plr_rec(db_ctx, file_id, plr_rec)?,
-        // StdfRecord::RDR(rdr_rec) => rdr_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::SDR(sdr_rec) => sdr_rec.read_from_bytes(raw_data, order),
+        StdfRecord::RDR(rdr_rec) => on_rdr_rec(db_ctx, file_id, rdr_rec)?,
+        StdfRecord::SDR(sdr_rec) => on_sdr_rec(db_ctx, file_id, sdr_rec)?,
         // // StdfRecord::PSR(psr_rec) => psr_rec,
         // // StdfRecord::NMR(nmr_rec) => nmr_rec,
         // // StdfRecord::CNR(cnr_rec) => cnr_rec,
@@ -417,8 +434,8 @@ pub fn process_incoming_record(
         StdfRecord::ATR(atr_rec) => on_atr_rec(db_ctx, file_id, atr_rec)?,
         StdfRecord::VUR(vur_rec) => on_vur_rec(db_ctx, file_id, vur_rec)?,
         // // rec type 20
-        // StdfRecord::BPS(bps_rec) => bps_rec.read_from_bytes(raw_data, order),
-        // StdfRecord::EPS(eps_rec) => eps_rec.read_from_bytes(raw_data, order),
+        StdfRecord::BPS(bps_rec) => on_bps_rec(rec_tracker, file_id, bps_rec)?,
+        StdfRecord::EPS(_eps_rec) => on_eps_rec(rec_tracker, file_id)?,
         // rec type 180: Reserved
         // rec type 181: Reserved
         // not matched
@@ -427,6 +444,29 @@ pub fn process_incoming_record(
     Ok(())
 }
 
+#[inline(always)]
+pub fn process_summary_data(
+    db_ctx: &mut DataBaseCtx,
+    rec_tracker: &mut RecordTracker,
+) -> Result<(), StdfHelperError> {
+    // write HBR
+    for (&(file_id, bin_num), (bin_nam, bin_pf)) in rec_tracker.hbin_tracker.iter() {
+        db_ctx.insert_hbin(rusqlite::params![bin_num, bin_nam, &bin_pf.to_string()])?;
+    }
+    // write SBR
+    for (&(file_id, bin_num), (bin_nam, bin_pf)) in rec_tracker.sbin_tracker.iter() {
+        db_ctx.insert_sbin(rusqlite::params![bin_num, bin_nam, &bin_pf.to_string()])?;
+    }
+    // write TSR
+    for (&test_id, &fail_cnt) in rec_tracker.test_fail_count.iter() {
+        if let Err(e) = db_ctx.update_fail_count(rusqlite::params![fail_cnt, test_id,]) {
+            // we don't really care about errors when saving TSR's failcount
+            // because it can be parsed in python
+            println!("Sqlite3 error when saving TSR fail counts: {}", e.msg);
+        }
+    }
+    Ok(())
+}
 // database related functions
 
 #[inline(always)]
@@ -1403,6 +1443,210 @@ fn on_gdr_rec(
     Ok(())
 }
 
+#[inline(always)]
+fn on_bps_rec(
+    tracker: &mut RecordTracker,
+    file_id: usize,
+    bps_rec: BPS,
+) -> Result<(), StdfHelperError> {
+    tracker.bps_detected(file_id, &bps_rec)?;
+    Ok(())
+}
+
+#[inline(always)]
+fn on_eps_rec(tracker: &mut RecordTracker, file_id: usize) -> Result<(), StdfHelperError> {
+    tracker.eps_detected(file_id)?;
+    Ok(())
+}
+
+#[inline(always)]
+fn on_rdr_rec(
+    db_ctx: &mut DataBaseCtx,
+    file_id: usize,
+    rdr_rec: RDR,
+) -> Result<(), StdfHelperError> {
+    db_ctx.insert_file_info(rusqlite::params![
+        file_id,
+        "Retest Hardware Bins",
+        if rdr_rec.num_bins > 0 {
+            rdr_rec
+                .rtst_bin
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            "All hardware bins are retested".to_string()
+        }
+    ])?;
+    Ok(())
+}
+
+#[inline(always)]
+fn on_sdr_rec(
+    db_ctx: &mut DataBaseCtx,
+    file_id: usize,
+    sdr_rec: SDR,
+) -> Result<(), StdfHelperError> {
+    if !sdr_rec.hand_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Handler Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.hand_typ,
+        ])?;
+    }
+
+    if !sdr_rec.hand_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Handler ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.hand_id,
+        ])?;
+    }
+
+    if !sdr_rec.card_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Probe Card Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.card_typ,
+        ])?;
+    }
+
+    if !sdr_rec.card_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Probe Card ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.card_id,
+        ])?;
+    }
+
+    if !sdr_rec.load_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Load Board Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.load_typ,
+        ])?;
+    }
+
+    if !sdr_rec.load_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Load Board ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.load_id,
+        ])?;
+    }
+
+    if !sdr_rec.dib_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("DIB Board Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.dib_typ,
+        ])?;
+    }
+
+    if !sdr_rec.dib_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("DIB Board ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.dib_id,
+        ])?;
+    }
+
+    if !sdr_rec.cabl_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Interface Cable Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.cabl_typ,
+        ])?;
+    }
+
+    if !sdr_rec.cabl_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Interface Cable ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.cabl_id,
+        ])?;
+    }
+
+    if !sdr_rec.cont_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Handler Contactor Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.cont_typ,
+        ])?;
+    }
+
+    if !sdr_rec.cont_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Handler Contactor ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.cont_id,
+        ])?;
+    }
+
+    if !sdr_rec.lasr_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Laser Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.lasr_typ,
+        ])?;
+    }
+
+    if !sdr_rec.lasr_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Laser ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.lasr_id,
+        ])?;
+    }
+
+    if !sdr_rec.extr_typ.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Extra Equipment Type (Group {})", sdr_rec.site_grp),
+            &sdr_rec.extr_typ,
+        ])?;
+    }
+
+    if !sdr_rec.extr_id.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            format!("Extra Equipment ID (Group {})", sdr_rec.site_grp),
+            &sdr_rec.extr_id,
+        ])?;
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn on_mrr_rec(
+    db_ctx: &mut DataBaseCtx,
+    file_id: usize,
+    mrr_rec: MRR,
+) -> Result<(), StdfHelperError> {
+    db_ctx.insert_file_info(rusqlite::params![
+        file_id,
+        "FINISH_T",
+        u32_to_localtime(mrr_rec.finish_t)
+    ])?;
+
+    if mrr_rec.disp_cod != ' ' {
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            "DISP_COD",
+            &mrr_rec.disp_cod.to_string(),
+        ])?;
+    }
+
+    if !mrr_rec.usr_desc.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![file_id, "USR_DESC", &mrr_rec.usr_desc,])?;
+    }
+
+    if !mrr_rec.exc_desc.is_empty() {
+        db_ctx.insert_file_info(rusqlite::params![file_id, "EXC_DESC", &mrr_rec.exc_desc,])?;
+    }
+    Ok(())
+}
 //
 
 #[inline(always)]
