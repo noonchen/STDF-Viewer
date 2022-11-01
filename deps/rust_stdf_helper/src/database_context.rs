@@ -166,7 +166,8 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 COMMIT;
                                 
                                 PRAGMA synchronous = OFF;
-                                PRAGMA journal_mode = WAL;
+                                PRAGMA journal_mode = OFF;
+                                PRAGMA locking_mode = EXCLUSIVE;
 
                                 BEGIN;";
 
@@ -292,7 +293,8 @@ static CREATE_INDEX_AND_COMMIT: &str = "CREATE INDEX
                                                 HEAD_NUM    ASC,
                                                 SITE_NUM    ASC);
                                                 
-                                        COMMIT;";
+                                        COMMIT;
+                                        PRAGMA locking_mode = NORMAL";
 
 static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
 
