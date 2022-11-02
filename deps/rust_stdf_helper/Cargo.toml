@@ -1,0 +1,22 @@
+[package]
+name = "rust_stdf_helper"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "rust_stdf_helper"
+# crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.17.1", features = ["extension-module"] }
+rust-stdf = "0.2.3"
+rusqlite = { version = "0.28.0", features = ["bundled"]}
+ndarray = { version = "0.15.6", features = ["rayon"] }
+numpy = "0.17.2"
+chrono = "0.4.22"
+hex = "0.4.3"
