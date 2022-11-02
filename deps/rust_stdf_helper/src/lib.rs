@@ -38,14 +38,13 @@ impl From<StdfHelperError> for PyErr {
 /// Analyze record types in a STDF file
 #[pyfunction]
 #[pyo3(name = "analyzeSTDF")]
-fn analyze_stdf_file(filepath: &str) -> PyResult<String> {
+fn analyze_stdf_file(filepath: &str) -> PyResult<()> {
     let mut reader = match StdfReader::new(filepath) {
         Ok(r) => r,
         Err(e) => return Err(PyOSError::new_err(e.to_string())),
     };
 
-    let mut tmp_log;
-    let mut result_log = String::new();
+    let mut result_log = String::with_capacity(512);
     let mut total_record: u64 = 0;
     let mut previous_rec_type: u64 = 0;
     let mut dup_cnt = 0;
@@ -53,52 +52,61 @@ fn analyze_stdf_file(filepath: &str) -> PyResult<String> {
     let mut wafer_cnt = 0;
 
     for rec in reader.get_record_iter() {
+        let rec = match rec {
+            Ok(r) => r,
+            Err(e) => return Err(PyException::new_err(e.to_string())),
+        };
         total_record += 1;
         let rec_code = rec.get_type();
         let rec_name = get_rec_name_from_code(rec_code);
 
-        if rec_code == REC_INVALID {
-            result_log += "Invalid STDF V4 Record Detected\n";
+        if let StdfRecord::InvalidRec(h) = rec {
+            result_log += &format!(
+                "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
+                h.len, h.typ, h.sub
+            );
             break;
         }
 
         if rec.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
             if dup_cnt != 0 && previous_rec_type != 0 {
-                // flush previous log
-                tmp_log = format!(
+                // flush previous record info to result_log
+                result_log += &format!(
                     "{} × {}\n",
                     get_rec_name_from_code(previous_rec_type),
                     dup_cnt
                 );
-                result_log += &tmp_log;
             }
 
             match rec {
                 StdfRecord::PIR(pir_rec) => {
                     dut_cnt += 1;
-                    tmp_log = format!(
+                    result_log += &format!(
                         "[{}] {} (HEAD: {}, SITE: {})\n",
                         dut_cnt, rec_name, pir_rec.head_num, pir_rec.site_num
                     );
-                    result_log += &tmp_log;
                 }
                 StdfRecord::WIR(wir_rec) => {
                     wafer_cnt += 1;
-                    tmp_log = format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
-                    result_log += &tmp_log;
+                    result_log += &format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
                 }
                 StdfRecord::PRR(prr_rec) => {
-                    tmp_log = format!(
+                    result_log += &format!(
                         "{} (HEAD: {}, SITE: {})\n",
                         rec_name, prr_rec.head_num, prr_rec.site_num
                     );
-                    result_log += &tmp_log;
+                    // send or print result_log at PRR
+                    // avoid result_log takes up too much memory...
+                    println!("{}", result_log);
+                    // send via qt signal..
+                    // TODO
+                    // reset to default
+                    result_log = String::with_capacity(512);
                 }
                 StdfRecord::WRR(wrr_rec) => {
-                    tmp_log = format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
-                    result_log += &tmp_log;
+                    result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
                 }
-                _ => {}
+                _ => { /* impossible case */ }
             }
             // reset preheader to 0, in order to print every PXR WXR
             previous_rec_type = 0;
@@ -109,13 +117,12 @@ fn analyze_stdf_file(filepath: &str) -> PyResult<String> {
                 dup_cnt += 1;
             } else {
                 if previous_rec_type != 0 {
-                    // print previous record
-                    tmp_log = format!(
+                    // flush previous record
+                    result_log += &format!(
                         "{} × {}\n",
                         get_rec_name_from_code(previous_rec_type),
                         dup_cnt
                     );
-                    result_log += &tmp_log;
                 }
                 previous_rec_type = rec_code;
                 dup_cnt = 1;
@@ -126,20 +133,21 @@ fn analyze_stdf_file(filepath: &str) -> PyResult<String> {
     // print last record
     if dup_cnt != 0 && previous_rec_type != 0 {
         // flush previous log
-        tmp_log = format!(
+        result_log += &format!(
             "{} × {}\n",
             get_rec_name_from_code(previous_rec_type),
             dup_cnt
         );
-        result_log += &tmp_log;
     }
 
-    tmp_log = format!(
+    result_log += &format!(
         "\nTotal wafers: {}\nTotal duts/dies: {}\nTotal Records: {}\nAnalysis Finished",
         wafer_cnt, dut_cnt, total_record
     );
-    result_log += &tmp_log;
-    Ok(result_log)
+    println!("{}", result_log);
+    // send via qt signal..
+    // TODO
+    Ok(())
 }
 
 /// get PTR/FTR results and flags from raw bytes
@@ -374,6 +382,7 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
     let mut transaction_count_up = 0;
     // process and write database in main thread
     for (fid, raw_rec) in rx {
+        let raw_rec = raw_rec.unwrap();
         let rec_info = (
             fid,
             raw_rec.byte_order,

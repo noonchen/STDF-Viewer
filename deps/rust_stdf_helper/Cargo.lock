@@ -624,9 +624,9 @@ dependencies = [
 
 [[package]]
 name = "rust-stdf"
-version = "0.2.1"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bbacba5e43f95a623d3ec4dc09349f8726d36ecc8c9e126cc5fc0c352c87d8a"
+checksum = "f403b679102441caba73d02235cb744e447af4757b3aa3832ad04fdd555c5383"
 dependencies = [
  "bzip2",
  "chrono",

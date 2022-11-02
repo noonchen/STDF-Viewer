@@ -14,7 +14,7 @@ name = "rust_stdf_helper"
 
 [dependencies]
 pyo3 = { version = "0.17.1", features = ["extension-module"] }
-rust-stdf = "0.2.1"
+rust-stdf = "0.2.3"
 rusqlite = { version = "0.28.0", features = ["bundled"]}
 ndarray = { version = "0.15.6", features = ["rayon"] }
 numpy = "0.17.2"
