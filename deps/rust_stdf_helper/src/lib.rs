@@ -9,8 +9,9 @@ use pyo3::{
 use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, ByteOrder, StdfRecord};
 use std::convert::From;
-use std::sync::mpsc;
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::{mpsc, Arc};
+use std::{thread, time};
 
 mod database_context;
 mod rust_functions;
@@ -427,19 +428,37 @@ fn parse_mpr_from_raw<'py>(
 /// create sqlite3 database for given stdf files
 #[pyfunction]
 #[pyo3(name = "generate_database")]
-fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
+fn generate_database(
+    py: Python,
+    dbpath: String,
+    stdf_paths: Vec<String>,
+    progress_signal: &PyAny,
+    stop_flag: &PyAny,
+) -> PyResult<()> {
     // do nothing if no file
     let num_files = stdf_paths.len();
     if num_files == 0 {
         return Ok(());
     }
 
-    // initiate sqlite3 database
-    let conn = match Connection::open(&dbpath) {
-        Ok(conn) => conn,
-        Err(e) => return Err(PyOSError::new_err(e.to_string())),
+    // convert and check python arguments
+    let progress_signal: Py<PyAny> = progress_signal.into();
+    let stop_flag: Py<PyAny> = stop_flag.into();
+
+    let is_valid_progress_signal = match progress_signal.getattr(py, intern!(py, "emit")) {
+        Ok(p) => p.as_ref(py).is_callable(),
+        Err(_) => {
+            println!("progress_signal does not have a method `emit`");
+            false
+        }
     };
-    let mut db_ctx = DataBaseCtx::new(&conn)?;
+    let is_valid_stop = match stop_flag.getattr(py, intern!(py, "stop")) {
+        Ok(p) => p.as_ref(py).is_instance_of::<PyBool>()?,
+        Err(_) => {
+            println!("stop_flag does not have an bool attr `stop`");
+            false
+        }
+    };
 
     // prepare channel for multithreading communication
     let (tx, rx) = mpsc::channel();
@@ -460,46 +479,137 @@ fn generate_database(dbpath: String, stdf_paths: Vec<String>) -> PyResult<()> {
         .enumerate()
     {
         let handle = thread::spawn(move || {
+            let file_size = get_file_size(&fpath).unwrap() as f32;
             let mut stdf_reader = StdfReader::new(fpath).unwrap();
             for raw_rec in stdf_reader.get_rawdata_iter() {
-                thread_tx.send((fid, raw_rec)).unwrap();
+                let raw_rec = match raw_rec {
+                    Ok(r) => r,
+                    Err(_) => {
+                        // there is only one error, that is
+                        // unexpected EOF, we just sliently
+                        // stop here
+                        break;
+                    }
+                };
+                // calculate the reading progress in each thread
+                let progress_x100 = raw_rec.offset as f32 * 10000.0 / file_size;
+                if thread_tx.send((fid, progress_x100, raw_rec)).is_err() {
+                    break;
+                }
             }
         });
         thread_handles.push(handle);
     }
 
-    let mut record_tracker = RecordTracker::new();
-    let mut transaction_count_up = 0;
-    // process and write database in main thread
-    for (fid, raw_rec) in rx {
-        let raw_rec = raw_rec.unwrap();
-        let rec_info = (
-            fid,
-            raw_rec.byte_order,
-            raw_rec.offset,
-            raw_rec.raw_data.len(),
-            StdfRecord::from(raw_rec),
-        );
-        process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
-        // commit and begin a new transaction after fixed number of records
-        transaction_count_up += 1;
-        if transaction_count_up > 1_000_000 {
-            transaction_count_up = 0;
-            db_ctx.start_new_transaction()?;
-        }
-    }
-    // write HBR/SBR/TSR into database
-    process_summary_data(&mut db_ctx, &mut record_tracker)?;
+    // create some atomic var for data communication between threads
+    let global_stop = Arc::new(AtomicBool::new(false));
+    // only need to hold a number <= 10000, u16 should be enough
+    let total_progress = Arc::new(AtomicU16::new(0));
 
-    // join threads
-    for handle in thread_handles {
-        handle.join().unwrap();
+    let global_stop_copy = global_stop.clone();
+    let total_progress_copy = total_progress.clone();
+
+    if is_valid_progress_signal || is_valid_stop {
+        // start another thread for updating stop signal
+        // and sending progress back to python
+        let gil_th = thread::spawn(move || {
+            loop {
+                let current_progress = total_progress_copy.load(Ordering::Relaxed);
+                // sleep for 100ms
+                thread::sleep(time::Duration::from_millis(100));
+                // access python object inside a gil block
+                if let Err(py_e) = Python::with_gil(|py| -> PyResult<()> {
+                    if is_valid_progress_signal {
+                        progress_signal.call_method1(
+                            py,
+                            intern!(py, "emit"),
+                            (current_progress,),
+                        )?;
+                    }
+                    if is_valid_stop {
+                        global_stop_copy.store(
+                            stop_flag
+                                .getattr(py, intern!(py, "stop"))?
+                                .extract::<bool>(py)?,
+                            Ordering::Relaxed,
+                        );
+                    };
+                    Ok(())
+                }) {
+                    // print python exceptions occured
+                    // in this thread and exit...
+                    println!("{}", py_e);
+                    break;
+                }
+                if current_progress == 10000 {
+                    break;
+                }                
+            }
+        });
+        thread_handles.push(gil_th);
     }
-    // finalize database
-    db_ctx.finalize()?;
-    if let Err((_, err)) = conn.close() {
-        return Err(StdfHelperError::from(err))?;
-    }
+
+    py.allow_threads(|| -> Result<(), StdfHelperError> {
+        // initiate sqlite3 database
+        let conn = match Connection::open(&dbpath) {
+            Ok(conn) => conn,
+            Err(e) => return Err(StdfHelperError { msg: e.to_string() }),
+        };
+        let mut db_ctx = DataBaseCtx::new(&conn)?;
+
+        let mut record_tracker = RecordTracker::new();
+        let mut progress_tracker = vec![0.0f32; num_files];
+        let mut transaction_count_up = 0;
+        // process and write database in main thread
+        for (fid, progress_x100, raw_rec) in rx {
+            let rec_info = (
+                fid,
+                raw_rec.byte_order,
+                raw_rec.offset,
+                raw_rec.raw_data.len(),
+                StdfRecord::from(raw_rec),
+            );
+            process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
+
+            if is_valid_progress_signal {
+                // main thread will calculate the `total progress`
+                if let Some(v) = progress_tracker.get_mut(fid) {
+                    *v = progress_x100;
+                };
+                total_progress.store(
+                    (progress_tracker.iter().sum::<f32>() / num_files as f32) as u16,
+                    Ordering::Relaxed,
+                );
+            }
+
+            if is_valid_stop && global_stop.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // commit and begin a new transaction after fixed number of records
+            transaction_count_up += 1;
+            if transaction_count_up > 1_000_000 {
+                transaction_count_up = 0;
+                db_ctx.start_new_transaction()?;
+            }
+        }
+        // write HBR/SBR/TSR into database
+        process_summary_data(&mut db_ctx, &mut record_tracker)?;
+        // write 10000 as the sign of complete...
+        total_progress.store(10000u16, Ordering::Relaxed);
+
+        // join threads
+        for handle in thread_handles {
+            handle.join().unwrap();
+        }
+        // finalize database
+        db_ctx.finalize()?;
+        if let Err((_, err)) = conn.close() {
+            return Err(StdfHelperError::from(err))?;
+        };
+        Ok(())
+    })?;
+
     Ok(())
 }
 

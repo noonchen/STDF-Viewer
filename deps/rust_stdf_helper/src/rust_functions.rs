@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Nov 02 2022
+// Last Modified: Thu Nov 03 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -436,6 +436,15 @@ pub fn process_incoming_record(
         StdfRecord::EPS(_eps_rec) => on_eps_rec(rec_tracker, file_id)?,
         // rec type 180: Reserved
         // rec type 181: Reserved
+        // invalid
+        StdfRecord::InvalidRec(header) => {
+            return Err(StdfHelperError {
+                msg: format!(
+                    "Invalid record detected, typ: {}, sub: {}, len: {}",
+                    header.typ, header.sub, header.len
+                ),
+            })
+        }
         // not matched
         _ => (),
     }
