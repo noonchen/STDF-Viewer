@@ -2,8 +2,9 @@ use numpy::ndarray::{Array1, Array2, Zip};
 use numpy::{IntoPyArray, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::{
     exceptions::{PyException, PyOSError},
+    intern,
     prelude::*,
-    types::PyDict,
+    types::{PyBool, PyDict},
 };
 use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, ByteOrder, StdfRecord};
@@ -38,11 +39,36 @@ impl From<StdfHelperError> for PyErr {
 /// Analyze record types in a STDF file
 #[pyfunction]
 #[pyo3(name = "analyzeSTDF")]
-fn analyze_stdf_file(filepath: &str) -> PyResult<()> {
+fn analyze_stdf_file(
+    py: Python,
+    filepath: &str,
+    qsignal: &PyAny,
+    stop_flag: &PyAny,
+) -> PyResult<()> {
     let mut reader = match StdfReader::new(filepath) {
         Ok(r) => r,
         Err(e) => return Err(PyOSError::new_err(e.to_string())),
     };
+
+    let qsignal: Py<PyAny> = qsignal.into();
+    let stop_flag: Py<PyAny> = stop_flag.into();
+    //
+    let is_valid_qsignal = match qsignal.getattr(py, intern!(py, "emit")) {
+        Ok(p) => p.as_ref(py).is_callable(),
+        Err(_) => {
+            println!("qsignal does not have a method `emit`");
+            false
+        }
+    };
+    let is_valid_stop = match stop_flag.getattr(py, intern!(py, "stop")) {
+        Ok(p) => p.as_ref(py).is_instance_of::<PyBool>()?,
+        Err(_) => {
+            println!("stop_flag does not have an bool attr `stop`");
+            false
+        }
+    };
+
+    let mut stop_flag_rust = false;
 
     let mut result_log = String::with_capacity(512);
     let mut total_record: u64 = 0;
@@ -51,103 +77,126 @@ fn analyze_stdf_file(filepath: &str) -> PyResult<()> {
     let mut dut_cnt = 0;
     let mut wafer_cnt = 0;
 
-    for rec in reader.get_record_iter() {
-        let rec = match rec {
-            Ok(r) => r,
-            Err(e) => return Err(PyException::new_err(e.to_string())),
-        };
-        total_record += 1;
-        let rec_code = rec.get_type();
-        let rec_name = get_rec_name_from_code(rec_code);
+    py.allow_threads(|| {
+        for rec in reader.get_record_iter() {
+            if stop_flag_rust {
+                break;
+            }
 
-        if let StdfRecord::InvalidRec(h) = rec {
-            result_log += &format!(
-                "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
-                h.len, h.typ, h.sub
-            );
-            break;
-        }
+            let rec = match rec {
+                Ok(r) => r,
+                Err(e) => return Err(PyException::new_err(e.to_string())),
+            };
+            total_record += 1;
+            let rec_code = rec.get_type();
+            let rec_name = get_rec_name_from_code(rec_code);
 
-        if rec.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
-            if dup_cnt != 0 && previous_rec_type != 0 {
-                // flush previous record info to result_log
+            if let StdfRecord::InvalidRec(h) = rec {
                 result_log += &format!(
-                    "{} × {}\n",
-                    get_rec_name_from_code(previous_rec_type),
-                    dup_cnt
+                    "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
+                    h.len, h.typ, h.sub
                 );
+                break;
             }
 
-            match rec {
-                StdfRecord::PIR(pir_rec) => {
-                    dut_cnt += 1;
-                    result_log += &format!(
-                        "[{}] {} (HEAD: {}, SITE: {})\n",
-                        dut_cnt, rec_name, pir_rec.head_num, pir_rec.site_num
-                    );
-                }
-                StdfRecord::WIR(wir_rec) => {
-                    wafer_cnt += 1;
-                    result_log += &format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
-                }
-                StdfRecord::PRR(prr_rec) => {
-                    result_log += &format!(
-                        "{} (HEAD: {}, SITE: {})\n",
-                        rec_name, prr_rec.head_num, prr_rec.site_num
-                    );
-                    // send or print result_log at PRR
-                    // avoid result_log takes up too much memory...
-                    println!("{}", result_log);
-                    // send via qt signal..
-                    // TODO
-                    // reset to default
-                    result_log = String::with_capacity(512);
-                }
-                StdfRecord::WRR(wrr_rec) => {
-                    result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
-                }
-                _ => { /* impossible case */ }
-            }
-            // reset preheader to 0, in order to print every PXR WXR
-            previous_rec_type = 0;
-            dup_cnt = 0;
-        } else {
-            // other record types
-            if previous_rec_type == rec_code {
-                dup_cnt += 1;
-            } else {
-                if previous_rec_type != 0 {
-                    // flush previous record
+            if rec.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
+                if dup_cnt != 0 && previous_rec_type != 0 {
+                    // flush previous record info to result_log
                     result_log += &format!(
                         "{} × {}\n",
                         get_rec_name_from_code(previous_rec_type),
                         dup_cnt
                     );
                 }
-                previous_rec_type = rec_code;
-                dup_cnt = 1;
+
+                match rec {
+                    StdfRecord::PIR(pir_rec) => {
+                        dut_cnt += 1;
+                        result_log += &format!(
+                            "[{}] {} (HEAD: {}, SITE: {})\n",
+                            dut_cnt, rec_name, pir_rec.head_num, pir_rec.site_num
+                        );
+                    }
+                    StdfRecord::WIR(wir_rec) => {
+                        wafer_cnt += 1;
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
+                    }
+                    StdfRecord::PRR(prr_rec) => {
+                        result_log += &format!(
+                            "{} (HEAD: {}, SITE: {})\n",
+                            rec_name, prr_rec.head_num, prr_rec.site_num
+                        );
+                        // send or print result_log at PRR
+                        // avoid result_log takes up too much memory...
+                        println!("{}", result_log);
+                        // send via qt signal..
+                        if is_valid_qsignal || is_valid_stop {
+                            Python::with_gil(|py| -> PyResult<()> {
+                                if is_valid_qsignal {
+                                    qsignal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+                                }
+                                if is_valid_stop {
+                                    stop_flag_rust = stop_flag
+                                        .getattr(py, intern!(py, "stop"))?
+                                        .extract::<bool>(py)?;
+                                }
+                                Ok(())
+                            })?;
+                        }
+                        // reset to default
+                        result_log = String::with_capacity(512);
+                    }
+                    StdfRecord::WRR(wrr_rec) => {
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
+                    }
+                    _ => { /* impossible case */ }
+                }
+                // reset preheader to 0, in order to print every PXR WXR
+                previous_rec_type = 0;
+                dup_cnt = 0;
+            } else {
+                // other record types
+                if previous_rec_type == rec_code {
+                    dup_cnt += 1;
+                } else {
+                    if previous_rec_type != 0 {
+                        // flush previous record
+                        result_log += &format!(
+                            "{} × {}\n",
+                            get_rec_name_from_code(previous_rec_type),
+                            dup_cnt
+                        );
+                    }
+                    previous_rec_type = rec_code;
+                    dup_cnt = 1;
+                }
             }
         }
-    }
 
-    // print last record
-    if dup_cnt != 0 && previous_rec_type != 0 {
-        // flush previous log
+        // print last record
+        if dup_cnt != 0 && previous_rec_type != 0 {
+            // flush previous log
+            result_log += &format!(
+                "{} × {}\n",
+                get_rec_name_from_code(previous_rec_type),
+                dup_cnt
+            );
+        }
+
         result_log += &format!(
-            "{} × {}\n",
-            get_rec_name_from_code(previous_rec_type),
-            dup_cnt
+            "\nTotal wafers: {}\nTotal duts/dies: {}\nTotal Records: {}\nAnalysis Finished",
+            wafer_cnt, dut_cnt, total_record
         );
-    }
-
-    result_log += &format!(
-        "\nTotal wafers: {}\nTotal duts/dies: {}\nTotal Records: {}\nAnalysis Finished",
-        wafer_cnt, dut_cnt, total_record
-    );
-    println!("{}", result_log);
-    // send via qt signal..
-    // TODO
-    Ok(())
+        println!("{}", result_log);
+        // send via qt signal..
+        Python::with_gil(|py| -> PyResult<()> {
+            if is_valid_qsignal {
+                let _ = qsignal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+            }
+            Ok(())
+        })?;
+        Ok(())
+    })
 }
 
 /// get PTR/FTR results and flags from raw bytes
@@ -211,21 +260,24 @@ fn parse_ptr_ftr_from_raw<'py>(
             *flag = ftr_rec.test_flg[0].into();
         };
     }
-    // parallel parse data
-    Zip::from(raw.rows())
-        .and(&lens)
-        .and(&mut data_list)
-        .and(&mut flag_list)
-        .par_for_each(|r, l, d, f| {
-            inner_parse(
-                is_ptr,
-                &endian,
-                r.to_slice().expect("cannot get slice from numpy ndarray"),
-                l,
-                d,
-                f,
-            )
-        });
+
+    py.allow_threads(|| {
+        // parallel parse data
+        Zip::from(raw.rows())
+            .and(&lens)
+            .and(&mut data_list)
+            .and(&mut flag_list)
+            .par_for_each(|r, l, d, f| {
+                inner_parse(
+                    is_ptr,
+                    &endian,
+                    r.to_slice().expect("cannot get slice from numpy ndarray"),
+                    l,
+                    d,
+                    f,
+                )
+            });
+    });
     let data_list = data_list.into_pyarray(py);
     let flag_list = flag_list.into_pyarray(py);
     let dict = PyDict::new(py);
@@ -304,24 +356,26 @@ fn parse_mpr_from_raw<'py>(
         *flag = mpr_rec.test_flg[0].into();
     }
 
-    // parallel parse data
-    Zip::from(raw.rows())
-        .and(&lens)
-        .and(data_list.rows_mut())
-        .and(state_list.rows_mut())
-        .and(&mut flag_list)
-        .par_for_each(|r, l, d, s, f| {
-            inner_parse(
-                &endian,
-                pin_cnt,
-                rslt_cnt,
-                r.to_slice().expect("cannot get slice from numpy ndarray"),
-                l,
-                d.into_slice().expect("ndarray is not contiguous"),
-                s.into_slice().expect("ndarray is not contiguous"),
-                f,
-            )
-        });
+    py.allow_threads(|| {
+        // parallel parse data
+        Zip::from(raw.rows())
+            .and(&lens)
+            .and(data_list.rows_mut())
+            .and(state_list.rows_mut())
+            .and(&mut flag_list)
+            .par_for_each(|r, l, d, s, f| {
+                inner_parse(
+                    &endian,
+                    pin_cnt,
+                    rslt_cnt,
+                    r.to_slice().expect("cannot get slice from numpy ndarray"),
+                    l,
+                    d.into_slice().expect("ndarray is not contiguous"),
+                    s.into_slice().expect("ndarray is not contiguous"),
+                    f,
+                )
+            });
+    });
     // previous order: row: dutIndex, col: pin
     // python expected: row: pin, col: dutIndex
     let data_list = data_list.reversed_axes().into_pyarray(py);
