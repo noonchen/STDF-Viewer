@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Tue Nov 01 2022
+// Last Modified: Wed Nov 02 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -13,6 +13,8 @@ use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use rust_stdf::*;
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
+use std::{fs, io};
 
 pub struct RecordTracker {
     // file id, test num, test name -> unique test id (map size)
@@ -1616,4 +1618,22 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
         rslt.push_str("NULL");
     }
     rslt
+}
+
+#[inline(always)]
+pub fn get_file_size(file_path: &str) -> io::Result<u64> {
+    let mut fp = fs::File::open(file_path)?;
+    if file_path.ends_with(".gz") {
+        // gz file, read last 4 bytes as uncompressed data size
+        // although it's inaccurate for > 4GB file, are there
+        // anyone really going to open that large file using
+        // my app? don't think so~
+        fp.seek(SeekFrom::End(-4))?;
+        let mut buffer = [0u8; 4];
+        fp.read_exact(&mut buffer)?;
+        Ok(u32::from_le_bytes(buffer).into())
+    } else {
+        // binary file
+        Ok(fp.metadata()?.len())
+    }
 }

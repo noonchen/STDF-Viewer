@@ -15,7 +15,7 @@ use std::thread;
 mod database_context;
 mod rust_functions;
 use database_context::DataBaseCtx;
-use rust_functions::{process_incoming_record, process_summary_data, RecordTracker};
+use rust_functions::{get_file_size, process_incoming_record, process_summary_data, RecordTracker};
 
 #[derive(Debug)]
 pub struct StdfHelperError {
@@ -42,21 +42,36 @@ impl From<StdfHelperError> for PyErr {
 fn analyze_stdf_file(
     py: Python,
     filepath: &str,
-    qsignal: &PyAny,
+    data_signal: &PyAny,
+    progress_signal: &PyAny,
     stop_flag: &PyAny,
 ) -> PyResult<()> {
+    // get file size
+    let file_size = get_file_size(filepath)?;
+    if file_size == 0 {
+        return Err(PyOSError::new_err("empty file detected"));
+    }
+
     let mut reader = match StdfReader::new(filepath) {
         Ok(r) => r,
         Err(e) => return Err(PyOSError::new_err(e.to_string())),
     };
 
-    let qsignal: Py<PyAny> = qsignal.into();
+    let data_signal: Py<PyAny> = data_signal.into();
+    let progress_signal: Py<PyAny> = progress_signal.into();
     let stop_flag: Py<PyAny> = stop_flag.into();
     //
-    let is_valid_qsignal = match qsignal.getattr(py, intern!(py, "emit")) {
+    let is_valid_data_signal = match data_signal.getattr(py, intern!(py, "emit")) {
         Ok(p) => p.as_ref(py).is_callable(),
         Err(_) => {
-            println!("qsignal does not have a method `emit`");
+            println!("data_signal does not have a method `emit`");
+            false
+        }
+    };
+    let is_valid_progress_signal = match progress_signal.getattr(py, intern!(py, "emit")) {
+        Ok(p) => p.as_ref(py).is_callable(),
+        Err(_) => {
+            println!("progress_signal does not have a method `emit`");
             false
         }
     };
@@ -69,6 +84,8 @@ fn analyze_stdf_file(
     };
 
     let mut stop_flag_rust = false;
+    // offset / file_size * 100
+    let mut parse_progess = 0;
 
     let mut result_log = String::with_capacity(512);
     let mut total_record: u64 = 0;
@@ -78,7 +95,7 @@ fn analyze_stdf_file(
     let mut wafer_cnt = 0;
 
     py.allow_threads(|| {
-        for rec in reader.get_record_iter() {
+        for rec in reader.get_rawdata_iter() {
             if stop_flag_rust {
                 break;
             }
@@ -88,13 +105,13 @@ fn analyze_stdf_file(
                 Err(e) => return Err(PyException::new_err(e.to_string())),
             };
             total_record += 1;
-            let rec_code = rec.get_type();
+            let rec_code = rec.header.get_type();
             let rec_name = get_rec_name_from_code(rec_code);
 
-            if let StdfRecord::InvalidRec(h) = rec {
+            if rec_code == REC_INVALID {
                 result_log += &format!(
                     "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
-                    h.len, h.typ, h.sub
+                    rec.header.len, rec.header.typ, rec.header.sub
                 );
                 break;
             }
@@ -109,7 +126,9 @@ fn analyze_stdf_file(
                     );
                 }
 
-                match rec {
+                parse_progess = rec.offset * 100 / file_size;
+                let parsed_rec: StdfRecord = rec.into();
+                match parsed_rec {
                     StdfRecord::PIR(pir_rec) => {
                         dut_cnt += 1;
                         result_log += &format!(
@@ -128,12 +147,23 @@ fn analyze_stdf_file(
                         );
                         // send or print result_log at PRR
                         // avoid result_log takes up too much memory...
-                        println!("{}", result_log);
+                        // println!("{}", result_log);
                         // send via qt signal..
-                        if is_valid_qsignal || is_valid_stop {
+                        if is_valid_data_signal || is_valid_stop {
                             Python::with_gil(|py| -> PyResult<()> {
-                                if is_valid_qsignal {
-                                    qsignal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+                                if is_valid_data_signal {
+                                    data_signal.call_method1(
+                                        py,
+                                        intern!(py, "emit"),
+                                        (result_log,),
+                                    )?;
+                                }
+                                if is_valid_progress_signal {
+                                    progress_signal.call_method1(
+                                        py,
+                                        intern!(py, "emit"),
+                                        (parse_progess,),
+                                    )?;
                                 }
                                 if is_valid_stop {
                                     stop_flag_rust = stop_flag
@@ -187,11 +217,17 @@ fn analyze_stdf_file(
             "\nTotal wafers: {}\nTotal duts/dies: {}\nTotal Records: {}\nAnalysis Finished",
             wafer_cnt, dut_cnt, total_record
         );
-        println!("{}", result_log);
+        if stop_flag_rust {
+            result_log += "\n***Operation terminated by User***";
+        }
+        // println!("{}", result_log);
         // send via qt signal..
         Python::with_gil(|py| -> PyResult<()> {
-            if is_valid_qsignal {
-                let _ = qsignal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+            if is_valid_data_signal {
+                let _ = data_signal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+            }
+            if is_valid_progress_signal {
+                progress_signal.call_method1(py, intern!(py, "emit"), (100u64,))?;
             }
             Ok(())
         })?;
