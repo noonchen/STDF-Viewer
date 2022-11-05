@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Mar 12 2022
+# Last Modified: Sat Nov 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -199,14 +199,25 @@ class DatabaseFetcher:
         return BinStats
     
     
-    def getFileInfo(self):
-        '''return MIR & WCR & ATR & RDR field-value dict'''
+    def getFileInfo(self, filecount: int):
+        '''return field-value pair in File_Info table'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        MIR_Info = {}
-        for field, value in self.cursor.execute("SELECT * FROM File_Info"):
-            MIR_Info[field] = value
-        return MIR_Info
+        InfoDict = {}
+        # # get file count from database
+        # self.cursor.execute("SELECT count(Fid) FROM File_List")
+        # filecount = self.cursor.fetchone()[0]
+        
+        # get field data of multiple files, use `field` as key
+        block1 = ", ".join([f"id{i}.Value AS File{i}" for i in range(filecount)])
+        block2 = "\n".join([f"LEFT JOIN (SELECT * FROM File_Info WHERE Fid = {i}) as id{i} on A.Field = id{i}.Field" for i in range(filecount)])
+        sql = f"SELECT A.Field, {block1} FROM (SELECT DISTINCT Field FROM File_Info) as A \
+                {block2}"
+                
+        for data in self.cursor.execute(sql):
+            InfoDict[data[0]] = data[1:]
+        
+        return InfoDict
     
     
     def getTestFailCnt(self):
@@ -495,8 +506,9 @@ if __name__ == "__main__":
     from time import time
     count = 1
     df = DatabaseFetcher()
-    df.connectDB("logs/tmp.db")
+    df.connectDB("deps/rust_stdf_helper/target/rust_test.db")
     s = time()
+    print(df.getFileInfo())
     # for _ in range(count):
     # print(df.getDUT_TestInfo(5040, HeadList=[1], SiteList=[-1]))
     

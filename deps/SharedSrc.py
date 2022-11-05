@@ -173,12 +173,13 @@ def calculateCanvasIndex(_test_num: int, _head: int, _site: int, _pmr: int, _tes
 dutFlagBitInfo = {}        # description of dut flag
 testFlagBitInfo = {}       # description of test flag
 returnStateInfo = {}       # description of return state
-
+# wafer direction description
+direction_symbol = {}
 # this function takes a tr method, and it will be called 
 # when STDF-Viewer is initializing
-def updateFlagDicts(tr):
+def translate_const_dicts(tr):
     '''retranslate bit info when language changes'''
-    global dutFlagBitInfo, testFlagBitInfo, returnStateInfo
+    global dutFlagBitInfo, testFlagBitInfo, returnStateInfo, direction_symbol
     dutFlagBitInfo = \
         {7: tr("Bit7: Bit reserved"),
             6: tr("Bit6: Bit reserved"),
@@ -208,7 +209,12 @@ def updateFlagDicts(tr):
             0x7: tr("RTN_STAT7: Failed midband"),
             0x8: tr("RTN_STAT8: Failed with a glitch"),
             0x9: tr("RTN_STAT9: Open"),
-            0xA: tr("RTN_STAT10: Short")}    
+            0xA: tr("RTN_STAT10: Short")}
+    direction_symbol = {"U": tr("Up"), 
+                        "D": tr("Down"), 
+                        "L": tr("Left"), 
+                        "R": tr("Right")}
+
 
 
 def dut_flag_parser(flagHexString: str) -> str:

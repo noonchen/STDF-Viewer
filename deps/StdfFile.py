@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sat Nov 05 2022
+# Last Modified: Sun Nov 06 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -12,31 +12,69 @@
 #
 
 
-import zipfile
+import os, zipfile
 import numpy as np
 from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 
 from deps.DatabaseFetcher import DatabaseFetcher
+from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol
 import rust_stdf_helper
 
 
-
-
-
-class StdfFile:
+class StdfFiles:
     def __init__(self, paths: list[str]):
-        self.file_path = paths
+        self.file_paths = paths
         self.file_type = []
         self.file_handles = []
+        # save zip object in case of being gc
+        self.zip_handles = []
         
+    def open(self):
+        # open files and store types and pointers
+        for path in self.file_paths:
+            if (path.lower()).endswith("gz"):
+                self.file_type.append("gz")
+                self.file_handles.append(IndexedGzipFile(filename=path, mode='rb'))
+            elif (path.lower()).endswith("bz2"):
+                self.file_type.append("bzip")
+                self.file_handles.append(IndexedBzip2File(path, parallelization = 4))
+            elif (path.lower()).endswith("zip"):
+                zipObj = zipfile.ZipFile(path, "r")
+                # zip checks
+                if len(zipObj.namelist()) == 0:
+                    raise OSError("Empty zip file detected")
+                fileNameOf1st = zipObj.namelist()[0]
+                if zipObj.filelist[0].file_size == 0:
+                    raise OSError(f"The first item in the zip is not a file: \n{fileNameOf1st}")
+                # open the 1st file in zip, ignore the rest
+                self.file_type.append("zip")
+                self.file_handles.append(zipObj.open(fileNameOf1st, "r", force_zip64=True))
+                self.zip_handles.append(zipObj)
+            else:
+                self.file_type.append("orig")
+                self.file_handles.append(open(path, 'rb'))
+        
+    def seek(self, fid: int, offset: int, whence: int = 0):
+        self.file_handles[fid].seek(offset, whence)
+        
+    def read(self, fid: int, numBytes: int):
+        return self.file_handles[fid].read(numBytes)
+    
+    def close(self):
+        [fp.close() for fp in self.file_handles]
+        [zipfp.close() for zipfp in self.zip_handles]
+
+
+
+
+class DataInterface:
+    def __init__(self, paths: list[str]):
+        self.stdf = StdfFiles(paths)
         self.DatabaseFetcher = DatabaseFetcher()
         self.dbConnected = False
         self.containsWafer = False
         
-        # dict to store site/head checkbox objects
-        self.site_cb_dict = {}
-        self.head_cb_dict = {}
         self.availableSites = []
         self.availableHeads = []
         self.testRecTypeDict = {}
@@ -48,45 +86,67 @@ class StdfFile:
         # dict to store H/SBIN info
         self.HBIN_dict = {}
         self.SBIN_dict = {}
-        
+        # all test list or wafers in the database
         self.completeTestList = []
         self.completeWaferList = []
         
-        for path in self.file_path:
-            if (path.lower()).endswith("gz"):
-                self.file_type.append("gz")
-                self.file_handles.append(IndexedGzipFile(filename=path, mode='rb'))
-            
-            elif (path.lower()).endswith("bz2"):
-                self.file_type.append("bzip")
-                self.file_handles.append(IndexedBzip2File(path, parallelization = 4))
-            
-            # elif (path.lower()).endswith("zip"):
-            #     self.ftype = "zip"
-            #     self.zipObj = zipfile.ZipFile(path, "r")
-            #     if len(self.zipObj.namelist()) == 0:
-            #         raise OSError("Empty zip file detected")
-            #     # open the 1st file in zip, ignore the rest
-            #     fileNameOf1st = self.zipObj.namelist()[0]
-            #     if self.zipObj.filelist[0].file_size == 0:
-            #         raise OSError(f"The first item in the zip is not a file: \n{fileNameOf1st}")            
-            #     self.fHandle = self.zipObj.open(fileNameOf1st, "r", force_zip64=True)
-            
-            else:
-                self.file_type.append("orig")
-                self.file_handles.append(open(path, 'rb'))
-    
-    def seek(self, fid: int, offset: int, whence: int = 0):
-        self.file_handles[fid].seek(offset, whence)
         
-    def read(self, fid: int, numBytes: int):
-        return self.file_handles[fid].read(numBytes)
-    
-    def close(self):
-        [fp.close() for fp in self.file_handles]
-        # if self.ftype == "zip":
-        #     self.zipObj.close()
-
+    def getFileMetaData(self) -> list:
+        metaDataList = []
+        filecount = len(self.stdf.file_paths)
+        # if database is not exist,
+        # return a empty list instead
+        if not self.dbConnected:
+            return metaDataList
+        # some basic os info
+        get_file_size = lambda p: "%.2f MB"%(os.stat(p).st_size / 2**20)
+        metaDataList.append(["File Name: ", *list(map(os.path.basename, self.stdf.file_paths)) ])
+        metaDataList.append(["Directory Path: ", *list(map(os.path.dirname, self.stdf.file_paths)) ])
+        metaDataList.append(["File Size: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        # dut summary
+        #TODO: get correct dut count and yield, exclude superceded duts
+        metaDataList.append(["DUTs Tested: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        metaDataList.append(["DUTs Passed: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        metaDataList.append(["DUTs Failed: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        metaDataList.append(["DUTs Ignored: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        metaDataList.append(["DUTs Unknown: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        # MIR Record data
+        InfoDict = self.DatabaseFetcher.getFileInfo(filecount)
+        for fn in mirFieldNames:
+            value: tuple = InfoDict.pop(fn, ())
+            if value == (): 
+                # skip non-existed MIR fields
+                continue
+            metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
+        if self.containsWafer:
+            #TODO
+            metaDataList.append(["Wafers Tested: ", *list(map(os.path.dirname, self.stdf.file_paths)) ])
+            wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(filecount)])
+            if "WAFR_SIZ" in InfoDict:
+                wafer_size_tuple = InfoDict.pop("WAFR_SIZ")
+                metaDataList.append(["Wafer Size: ", *[f"{size} {unit}" if size is not None and unit is not None else "" for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
+            if "DIE_WID" in InfoDict and "DIE_HT" in InfoDict:
+                wid_tuple = InfoDict.pop("DIE_WID")
+                ht_tuple = InfoDict.pop("DIE_HT")
+                metaDataList.append(["Wafer Die Width Height: ", *[f"{wid} {unit} × {ht} {unit}" if wid is not None and ht is not None and unit is not None else "" for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
+            if "CENTER_X" in InfoDict and "CENTER_Y" in InfoDict:
+                cent_x_tuple = InfoDict.pop("CENTER_X")
+                cent_y_tuple = InfoDict.pop("CENTER_Y")
+                metaDataList.append(["Wafer Center: ", *[f"({x}, {y})" if x is not None and y is not None else "" for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
+            if "WF_FLAT" in InfoDict:
+                flat_orient_tuple = InfoDict.pop("WF_FLAT")
+                metaDataList.append(["Wafer Flat Direction: ", *[direction_symbol.get(d, d) if d is not None else "" for d in flat_orient_tuple] ])
+            if "POS_X" in InfoDict and "POS_Y" in InfoDict:
+                pos_x_tuple = InfoDict.pop("POS_X")
+                pos_y_tuple = InfoDict.pop("POS_Y")
+                metaDataList.append(["Wafer XY Direction: ", *[f"({direction_symbol.get(x_orient, x_orient)}, {direction_symbol.get(y_orient, y_orient)})" if x_orient is not None and y_orient is not None else "" for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+        # append other info: ATR, RDR, SDRs, sort names for better display
+        for propertyName in sorted(InfoDict.keys()):
+            value: tuple = InfoDict[propertyName]
+            metaDataList.append([f"{propertyName}: ", *[v if v is not None else "" for v in value]])
+        
+        return metaDataList
+        
 
     # TODO
     def getDataFromOffsets(self, testInfo:dict) -> dict:

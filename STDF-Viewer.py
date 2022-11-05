@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Nov 05 2022
+# Last Modified: Sun Nov 06 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -32,7 +32,7 @@ from base64 import b64decode
 from deps.SharedSrc import *
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
-from deps.StdfFile import StdfFile
+from deps.StdfFile import DataInterface, StdfFile
 from deps.MatplotlibWidgets import PlotCanvas, MagCursor
 from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter
 
@@ -97,25 +97,30 @@ class MyWindow(QtWidgets.QMainWindow):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        
         sys.excepthook = self.onException
-        
-        self.preTab = None              # used for detecting tab changes
-        self.preSiteSelection = set()    # used for detecting site selection changes
+        # used for detecting tab changes
+        self.preTab = None             
+        # used for detecting site selection changes
+        self.preSiteSelection = set()    
         self.preHeadSelection = set()
         self.preTestSelection = set()
-        self.cursorDict = {}    # init/clear a dict to store cursors instance to prevent garbage collection
+        # dict to store site/head checkbox objects
+        self.site_cb_dict = {}
+        self.head_cb_dict = {}
+        # init/clear a dict to store cursors instance to prevent garbage collection
+        self.cursorDict = {}
         self.init_SettingParams()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
         self.defaultFontNames = defaultFontNames
         self.imageFont = self.defaultFontNames.English
-        # STDF file(s) handle, for reading/processing test data 
-        self.std_handle = None
+        # data_interface for processing requests by GUI and reading data 
+        # from database or files
+        self.data_interface = None
         pathList = [item for item in sys.argv[1:] if os.path.isfile(item)]
         if pathList: 
             self.updateRecentFolder(pathList[0])
-            self.std_handle = StdfFile(pathList)
+            self.data_interface = DataInterface(pathList)
         # init and connect signals
         self.signals = signals4MainUI()
         self.signals.parseStatusSignal.connect(self.updateData)
@@ -715,68 +720,11 @@ class MyWindow(QtWidgets.QMainWindow):
         horizontalHeader.setVisible(False)
         verticalHeader.setVisible(False)
         
-        if self.std_handle is None:
-            # skip the following steps if no file is loaded
-            return
-        
-        extraInfoList = []
-        # manually add rows of std file info
-        absPath = os.path.realpath(self.std_handle.fpath)
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("File Name: "), os.path.basename(absPath)]])
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("Directory Path: "), os.path.dirname(absPath)]])
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("File Size: "), "%.2f MB"%(os.stat(self.std_handle.fpath).st_size / 2**20)]])
-        if self.containsWafer:
-            extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("Wafers Tested: "), str(len(self.completeWaferList))]])    # WIR #
-        statsDict = self.DatabaseFetcher.getDUTStats()
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Tested: "), str(statsDict["Total"])]])    # PIR #
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Passed: "), str(statsDict["Pass"])]])
-        extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Failed: "), str(statsDict["Failed"])]])
-        if statsDict["Unknown"] > 0:
-            extraInfoList.append([QtGui.QStandardItem(ele) for ele in [self.tr("DUTs Unknown: "), str(statsDict["Unknown"])]])
-
-        # append mir info
-        fileInfoDict = self.DatabaseFetcher.getFileInfo()
-        for fn in mirFieldNames:
-            value:str = fileInfoDict.pop(fn, "")
-            if fn == "BYTE_ORD":
-                self.needByteSwap = not (value.lower().startswith(sys.byteorder))
-            if value == "" or value == " " : continue
-            extraInfoList.append([mirDict[fn] + ": ", value])
+        metaDataList = self.data_interface.getFileMetaData()
             
-        # append wafer configuration info
-        if self.containsWafer:
-            wafer_unit = fileInfoDict.pop("WF_UNITS", "")
-            if "WAFR_SIZ" in fileInfoDict:
-                WAFR_SIZ = fileInfoDict.pop("WAFR_SIZ")
-                extraInfoList.append([self.tr("Wafer Size: "), f'{WAFR_SIZ} {wafer_unit}'])
-            if "DIE_WID" in fileInfoDict and "DIE_HT" in fileInfoDict:
-                DIE_WID = fileInfoDict.pop("DIE_WID")
-                DIE_HT = fileInfoDict.pop("DIE_HT")
-                extraInfoList.append([self.tr("Wafer Die Width Height: "), f'{DIE_WID} {wafer_unit} × {DIE_HT} {wafer_unit}'])
-            if "CENTER_X" in fileInfoDict and "CENTER_Y" in fileInfoDict:
-                CENTER_X = fileInfoDict.pop("CENTER_X")
-                CENTER_Y = fileInfoDict.pop("CENTER_Y")
-                extraInfoList.append([self.tr("Wafer Center: "), f'({CENTER_X}, {CENTER_Y})'])
-            
-            direction_symbol = {"U": self.tr("Up"), 
-                                "D": self.tr("Down"), 
-                                "L": self.tr("Left"), 
-                                "R": self.tr("Right")}
-            flat_orient = direction_symbol.get(fileInfoDict.pop("WF_FLAT", ""), self.tr("Unknown"))
-            x_orient = direction_symbol.get(fileInfoDict.pop("POS_X", ""), self.tr("Unknown"))
-            y_orient = direction_symbol.get(fileInfoDict.pop("POS_Y", ""), self.tr("Unknown"))
-            self.waferOrientation = [x_orient, y_orient]
-            extraInfoList.append([self.tr("Wafer Flat Direction: "), f'{flat_orient}'])
-            extraInfoList.append([self.tr("Wafer XY Direction: "), f'({x_orient}, {y_orient})'])
-            
-        # append other info: ATR, RDR, SDRs, sort names for better display
-        for propertyName in sorted(fileInfoDict.keys()):
-            value = fileInfoDict[propertyName]
-            if value == "" or value == " " : continue
-            extraInfoList.append([f"{propertyName}: ", value])
-            
-        for tmpRow in extraInfoList:
-            qitemRow = [QtGui.QStandardItem(ele) for ele in tmpRow]
+        for tmpRow in metaDataList:
+            # translate the first element, which is the field names
+            qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
             if self.settingParams.language != "English":
                 # fix weird font when switch to chinese-s
                 qfont = QtGui.QFont(self.imageFont)
