@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Tue Mar 08 2022
+# Last Modified: Thu Nov 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -25,7 +25,8 @@
 
 
 from .ui.stdfViewer_debugUI import Ui_debugPanel
-from .cystdf import stdfRecordAnalyzer
+import rust_stdf_helper
+
 import sys, os, subprocess, platform
 # pyqt5
 from PyQt5 import QtWidgets, QtCore
@@ -218,7 +219,7 @@ class RecordAnalyzerWrapper(QtCore.QObject):
     @Slot()
     def analyzeBegin(self):
         try:
-            stdfRecordAnalyzer(self.stdPath, self.resultSignal, self.progressSignal, self.flag)
+            rust_stdf_helper.analyzeSTDF(self.stdPath, self.resultSignal, self.progressSignal, self.flag)
             if self.flag.stop:
                 # user terminated
                 if self.resultSignal: self.resultSignal.emit(self.tr("### User terminated ###\n"))

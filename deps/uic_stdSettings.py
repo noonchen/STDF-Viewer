@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Dec 09 2021
+# Last Modified: Sat Nov 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -70,6 +70,42 @@ indexDic_sortby = {0: "Original",
 indexDic_sortby_reverse = {v:k for k, v in indexDic_sortby.items()}
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+
+
+class SettingParams:
+    def __init__(self):
+        # trend
+        self.showHL_trend = True
+        self.showLL_trend = True
+        self.showHSpec_trend = True
+        self.showLSpec_trend = True
+        self.showMed_trend = True
+        self.showMean_trend = True
+        # histo
+        self.showHL_histo = True
+        self.showLL_histo = True
+        self.showHSpec_histo = True
+        self.showLSpec_histo = True
+        self.showMed_histo = True
+        self.showMean_histo = True
+        self.showGaus_histo = True
+        self.showBoxp_histo = True
+        self.binCount = 30
+        self.showSigma = "3, 6, 9"
+        # General
+        self.language = "English"
+        self.recentFolder = ""
+        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
+        self.dataPrecision = 3
+        self.checkCpk = False
+        self.cpkThreshold = 1.33
+        self.sortTestList = "Original"
+        # colors
+        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
+                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
+        self.sbinColor = {}
+        self.hbinColor = {}
+
 
 class colorBtn(QtWidgets.QWidget):
     def __init__(self, parent=None, name="", num=None):
