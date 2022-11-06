@@ -1185,7 +1185,7 @@ fn on_wcr_rec(
     if wcr_rec.wf_units != 0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
-            "DIE_WID",
+            "WF_UNITS",
             match wcr_rec.wf_units {
                 1 => "inch",
                 2 => "cm",
