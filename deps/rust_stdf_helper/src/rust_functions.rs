@@ -150,44 +150,46 @@ impl RecordTracker {
 
     #[inline(always)]
     pub fn hbr_detected(&mut self, file_id: usize, hbr_rec: &HBR) {
+        let bin_pf = if hbr_rec.hbin_pf == 'P' || hbr_rec.hbin_pf == 'F' {
+            hbr_rec.hbin_pf
+        } else {
+            'U'
+        };
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.hbin_tracker.get_mut(&(file_id, hbr_rec.hbin_num)) {
             // update name & Pass/Fail if exist
             if !hbr_rec.hbin_nam.is_empty() {
                 *name = hbr_rec.hbin_nam.clone();
             };
-            *pf = if hbr_rec.hbin_pf == ' ' {
-                hbr_rec.hbin_pf
-            } else {
-                'U'
-            };
+            *pf = bin_pf;
         } else {
             // insert if not exist
             self.hbin_tracker.insert(
                 (file_id, hbr_rec.hbin_num),
-                (hbr_rec.hbin_nam.clone(), hbr_rec.hbin_pf),
+                (hbr_rec.hbin_nam.clone(), bin_pf),
             );
         }
     }
 
     #[inline(always)]
     pub fn sbr_detected(&mut self, file_id: usize, sbr_rec: &SBR) {
+        let bin_pf = if sbr_rec.sbin_pf == 'P' || sbr_rec.sbin_pf == 'F' {
+            sbr_rec.sbin_pf
+        } else {
+            'U'
+        };
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.sbin_tracker.get_mut(&(file_id, sbr_rec.sbin_num)) {
             // update name & Pass/Fail if exist
             if !sbr_rec.sbin_nam.is_empty() {
                 *name = sbr_rec.sbin_nam.clone();
             };
-            *pf = if sbr_rec.sbin_pf == ' ' {
-                sbr_rec.sbin_pf
-            } else {
-                'U'
-            };
+            *pf = bin_pf;
         } else {
             // insert if not exist
             self.sbin_tracker.insert(
                 (file_id, sbr_rec.sbin_num),
-                (sbr_rec.sbin_nam.clone(), sbr_rec.sbin_pf),
+                (sbr_rec.sbin_nam.clone(), bin_pf),
             );
         }
     }
