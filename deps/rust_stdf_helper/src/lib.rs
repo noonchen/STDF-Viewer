@@ -543,7 +543,7 @@ fn generate_database(
                 }
                 if current_progress == 10000 {
                     break;
-                }                
+                }
             }
         });
         thread_handles.push(gil_th);

@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Tue Nov 01 2022
+// Last Modified: Sun Nov 06 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -72,6 +72,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         WaferIndex INTEGER,
                                                         XCOORD INTEGER,
                                                         YCOORD INTEGER,
+                                                        Supersede INTEGER,
                                                         PRIMARY KEY (Fid, DUTIndex)) WITHOUT ROWID;
                                                         
                                 CREATE TABLE IF NOT EXISTS Dut_Counts (
@@ -163,6 +164,14 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         isBeforePRR INTEGER);
                                                         
                                 DROP INDEX IF EXISTS dutKey;
+                                CREATE INDEX 
+                                    dutKey 
+                                ON 
+                                    Dut_Info (
+                                        Fid         ASC,
+                                        HEAD_NUM    ASC,
+                                        SITE_NUM    ASC);
+
                                 COMMIT;
                                 
                                 PRAGMA synchronous = OFF;
@@ -182,9 +191,9 @@ static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO
                                     (?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
-                                Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex) 
+                                Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex, Supersede) 
                             VALUES 
-                                (?,?,?,?);";
+                                (?,?,?,?,?);";
 
 static UPDATE_DUT: &str = "UPDATE Dut_Info SET 
                                 TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, 
@@ -192,6 +201,24 @@ static UPDATE_DUT: &str = "UPDATE Dut_Info SET
                                 WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD 
                             WHERE 
                                 Fid=:Fid AND DUTIndex=:DUTIndex;";
+
+static UPDATE_SUPERSEDE_DUT: &str = "UPDATE Dut_Info SET
+                                        Supersede=1
+                                    WHERE
+                                        Fid=:Fid AND 
+                                        HEAD_NUM=:HEAD_NUM AND 
+                                        SITE_NUM=:SITE_NUM AND
+                                        PartID=:PartID;";
+
+static UPDATE_SUPERSEDE_DIE: &str = "UPDATE Dut_Info SET
+                                        Supersede=1
+                                    WHERE
+                                        Fid=:Fid AND 
+                                        HEAD_NUM=:HEAD_NUM AND 
+                                        SITE_NUM=:SITE_NUM AND
+                                        WaferIndex=:WaferIndex AND
+                                        XCOORD=:XCOORD AND
+                                        YCOORD=:YCOORD;";
 
 static INSERT_TEST_REC: &str = "INSERT OR REPLACE INTO 
                                     Test_Offsets 
@@ -285,15 +312,7 @@ static INSERT_DATALOG: &str = "INSERT INTO
                                 VALUES 
                                     (:Fid, :RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);";
 
-static CREATE_INDEX_AND_COMMIT: &str = "CREATE INDEX 
-                                            dutKey 
-                                        ON 
-                                            Dut_Info (
-                                                Fid         ASC,
-                                                HEAD_NUM    ASC,
-                                                SITE_NUM    ASC);
-                                                
-                                        COMMIT;
+static COMMIT_AND_SET_LOCKING: &str = "COMMIT;
                                         PRAGMA locking_mode = NORMAL";
 
 static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
@@ -304,6 +323,8 @@ pub struct DataBaseCtx<'con> {
     insert_file_info_stmt: Statement<'con>,
     insert_dut_stmt: Statement<'con>,
     update_dut_stmt: Statement<'con>,
+    update_supersede_dut_stmt: Statement<'con>,
+    update_supersede_die_stmt: Statement<'con>,
     insert_test_rec_stmt: Statement<'con>,
     insert_test_info_stmt: Statement<'con>,
     update_fail_count_stmt: Statement<'con>,
@@ -327,6 +348,8 @@ impl<'con> DataBaseCtx<'con> {
         let insert_file_info_stmt = conn.prepare(INSERT_FILE_INFO)?;
         let insert_dut_stmt = conn.prepare(INSERT_DUT)?;
         let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
+        let update_supersede_dut_stmt = conn.prepare(UPDATE_SUPERSEDE_DUT)?;
+        let update_supersede_die_stmt = conn.prepare(UPDATE_SUPERSEDE_DIE)?;
         let insert_test_rec_stmt = conn.prepare(INSERT_TEST_REC)?;
         let insert_test_info_stmt = conn.prepare(INSERT_TEST_INFO)?;
         let update_fail_count_stmt = conn.prepare(UPDATE_FAIL_COUNT)?;
@@ -348,6 +371,8 @@ impl<'con> DataBaseCtx<'con> {
             insert_file_info_stmt,
             insert_dut_stmt,
             update_dut_stmt,
+            update_supersede_dut_stmt,
+            update_supersede_die_stmt,
             insert_test_rec_stmt,
             insert_test_info_stmt,
             update_fail_count_stmt,
@@ -420,6 +445,18 @@ impl<'con> DataBaseCtx<'con> {
     }
 
     #[inline(always)]
+    pub fn update_supersede_dut(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_supersede_dut_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn update_supersede_die(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_supersede_die_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn insert_test_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
         self.insert_test_rec_stmt.execute(p)?;
         Ok(())
@@ -481,7 +518,7 @@ impl<'con> DataBaseCtx<'con> {
 
     #[inline(always)]
     pub fn finalize(self) -> Result<(), StdfHelperError> {
-        self.db.execute_batch(CREATE_INDEX_AND_COMMIT)?;
+        self.db.execute_batch(COMMIT_AND_SET_LOCKING)?;
         self.insert_file_list_stmt.finalize()?;
         self.insert_file_info_stmt.finalize()?;
         self.insert_dut_stmt.finalize()?;

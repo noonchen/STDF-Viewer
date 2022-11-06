@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Thu Nov 03 2022
+// Last Modified: Sun Nov 06 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -156,7 +156,11 @@ impl RecordTracker {
             if !hbr_rec.hbin_nam.is_empty() {
                 *name = hbr_rec.hbin_nam.clone();
             };
-            *pf = hbr_rec.hbin_pf;
+            *pf = if hbr_rec.hbin_pf == ' ' {
+                hbr_rec.hbin_pf
+            } else {
+                'U'
+            };
         } else {
             // insert if not exist
             self.hbin_tracker.insert(
@@ -174,7 +178,11 @@ impl RecordTracker {
             if !sbr_rec.sbin_nam.is_empty() {
                 *name = sbr_rec.sbin_nam.clone();
             };
-            *pf = sbr_rec.sbin_pf;
+            *pf = if sbr_rec.sbin_pf == ' ' {
+                sbr_rec.sbin_pf
+            } else {
+                'U'
+            };
         } else {
             // insert if not exist
             self.sbin_tracker.insert(
@@ -852,7 +860,8 @@ fn on_pir_rec(
         file_id,
         pir_rec.head_num,
         pir_rec.site_num,
-        dut_index
+        dut_index,
+        0 // default supersede = false
     ])?;
     Ok(())
 }
@@ -1065,6 +1074,17 @@ fn on_prr_rec(
     // get dut_index
     // get wafer_index if WIR is detected
     let (dut_index, wafer_index) = tracker.prr_detected(file_id, &prr_rec)?;
+    let part_flg = prr_rec.part_flg[0];
+    let x_coord = match prr_rec.x_coord != -32768 {
+        // use NULL to replace -32768
+        true => Some(prr_rec.x_coord), // in order to reduce db size
+        false => None,
+    };
+    let y_coord = match prr_rec.y_coord != -32768 {
+        true => Some(prr_rec.y_coord),
+        false => None,
+    };
+
     // update PRR info to database
     db_ctx.update_dut(rusqlite::params![
         prr_rec.num_test,
@@ -1074,18 +1094,35 @@ fn on_prr_rec(
         prr_rec.soft_bin,
         prr_rec.part_flg[0],
         wafer_index,
-        match prr_rec.x_coord != -32768 {
-            // use NULL to replace -32768
-            true => Some(prr_rec.x_coord), // in order to reduce db size
-            false => None,
-        },
-        match prr_rec.y_coord != -32768 {
-            true => Some(prr_rec.y_coord),
-            false => None,
-        },
+        x_coord,
+        y_coord,
         file_id,
         dut_index
     ])?;
+    // check if current dut supersede previous
+    //TODO
+    let supersede_dut = part_flg & 1u8 == 1u8;
+    let supersede_die = part_flg & 2u8 == 2u8;
+    if supersede_dut {
+        // set previous dut with same fid, head, site and part_id as superseded
+        db_ctx.update_supersede_dut(rusqlite::params![
+            file_id,
+            prr_rec.head_num,
+            prr_rec.site_num,
+            prr_rec.part_id,
+        ])?;
+    }
+    if supersede_die {
+        // set previous dut with same fid, head, site, wafer_index, x and y as superseded
+        db_ctx.update_supersede_die(rusqlite::params![
+            file_id,
+            prr_rec.head_num,
+            prr_rec.site_num,
+            wafer_index,
+            x_coord,
+            y_coord
+        ])?;
+    }
     Ok(())
 }
 
