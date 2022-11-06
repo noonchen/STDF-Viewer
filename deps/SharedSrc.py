@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Nov 05 2022
+# Last Modified: Sun Nov 06 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -51,10 +51,16 @@ class tab(IntEnum):
     Wafer = 4
     
 class REC(IntEnum):
-    '''Constants of STDF Records: typ<<8 | sub'''
-    PTR = 3850
-    FTR = 3860
-    MPR = 3855
+    '''Constants of STDF Test Records: sub'''
+    PTR = 10
+    FTR = 20
+    MPR = 15
+    
+record_name_dict = {
+    REC.PTR: "PTR",
+    REC.FTR: "FTR",
+    REC.MPR: "MPR"
+}
 
 # unit prefixes
 unit_prefix = {15: "f",

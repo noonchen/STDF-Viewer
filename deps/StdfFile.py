@@ -18,7 +18,7 @@ from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 
 from deps.DatabaseFetcher import DatabaseFetcher
-from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol
+from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol, REC, record_name_dict
 import rust_stdf_helper
 
 
@@ -71,7 +71,7 @@ class StdfFiles:
 class DataInterface:
     def __init__(self, paths: list[str]):
         self.stdf = StdfFiles(paths)
-        self.DatabaseFetcher = DatabaseFetcher()
+        self.DatabaseFetcher = DatabaseFetcher(len(paths))
         self.dbConnected = False
         self.containsWafer = False
         
@@ -82,13 +82,25 @@ class DataInterface:
         self.failCntDict = {}
         self.dutArray = np.array([])    # complete dut array in the stdf
         self.dutSiteInfo = {}           # site of each dut in self.dutArray
-        self.waferOrientation = ["Unknown", "Unknown"]
+        self.waferOrientation = ((), ())
         # dict to store H/SBIN info
         self.HBIN_dict = {}
         self.SBIN_dict = {}
         # all test list or wafers in the database
         self.completeTestList = []
         self.completeWaferList = []
+        
+        
+    def loadDatabase(self, dbPath: str):
+        self.DatabaseFetcher.connectDB(dbPath)
+        self.dbConnected = True
+        self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
+        # TODO
+        
+    def close(self):
+        #TODO
+        if self.dbConnected:
+            self.DatabaseFetcher.closeDB()
         
         
     def getFileMetaData(self) -> list:
@@ -104,14 +116,15 @@ class DataInterface:
         metaDataList.append(["Directory Path: ", *list(map(os.path.dirname, self.stdf.file_paths)) ])
         metaDataList.append(["File Size: ", *list(map(get_file_size, self.stdf.file_paths)) ])
         # dut summary
-        #TODO: get correct dut count and yield, exclude superceded duts
-        metaDataList.append(["DUTs Tested: ", *list(map(get_file_size, self.stdf.file_paths)) ])
-        metaDataList.append(["DUTs Passed: ", *list(map(get_file_size, self.stdf.file_paths)) ])
-        metaDataList.append(["DUTs Failed: ", *list(map(get_file_size, self.stdf.file_paths)) ])
-        metaDataList.append(["DUTs Ignored: ", *list(map(get_file_size, self.stdf.file_paths)) ])
-        metaDataList.append(["DUTs Unknown: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        dutCntDict = self.DatabaseFetcher.getDUTCountDict()
+        metaDataList.append(["Yield: ", [f"{100*p/t :.2f}%" if t!=0 else "" for (p, t) in zip(dutCntDict["Pass"], dutCntDict["Total"])] ])
+        metaDataList.append(["DUTs Tested: ", *dutCntDict["Total"] ])
+        metaDataList.append(["DUTs Passed: ", *dutCntDict["Pass"] ])
+        metaDataList.append(["DUTs Failed: ", *dutCntDict["Failed"] ])
+        metaDataList.append(["DUTs Superseded: ", *dutCntDict["Superseded"] ])
+        metaDataList.append(["DUTs Unknown: ", *dutCntDict["Unknown"] ])
         # MIR Record data
-        InfoDict = self.DatabaseFetcher.getFileInfo(filecount)
+        InfoDict = self.DatabaseFetcher.getFileInfo()
         for fn in mirFieldNames:
             value: tuple = InfoDict.pop(fn, ())
             if value == (): 
@@ -119,8 +132,7 @@ class DataInterface:
                 continue
             metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
         if self.containsWafer:
-            #TODO
-            metaDataList.append(["Wafers Tested: ", *list(map(os.path.dirname, self.stdf.file_paths)) ])
+            metaDataList.append(["Wafers Tested: ", *list(map(str, self.DatabaseFetcher.getWaferCount())) ])
             wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(filecount)])
             if "WAFR_SIZ" in InfoDict:
                 wafer_size_tuple = InfoDict.pop("WAFR_SIZ")
@@ -139,6 +151,7 @@ class DataInterface:
             if "POS_X" in InfoDict and "POS_Y" in InfoDict:
                 pos_x_tuple = InfoDict.pop("POS_X")
                 pos_y_tuple = InfoDict.pop("POS_Y")
+                self.waferOrientation = (pos_x_tuple, pos_y_tuple)
                 metaDataList.append(["Wafer XY Direction: ", *[f"({direction_symbol.get(x_orient, x_orient)}, {direction_symbol.get(y_orient, y_orient)})" if x_orient is not None and y_orient is not None else "" for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
         # append other info: ATR, RDR, SDRs, sort names for better display
         for propertyName in sorted(InfoDict.keys()):
@@ -434,3 +447,17 @@ class DataInterface:
                                     
             return rowList
     
+
+
+if __name__ == "__main__":
+    stdf_paths = [
+    "/Users/nochenon/Documents/STDF Files/10K_TTR-Log_NormalBinning_P020_05Sep2020_1244.std.gz",
+    "/Users/nochenon/Documents/STDF Files/S5643_62_NI_Fx2_V00_22May2021_TL18B087.3_P1_0941.std.gz",
+    "/Users/nochenon/Documents/STDF Files/IPD_G6S046-09C2_04Jun2022_1350.std",
+    ]
+    di = DataInterface(stdf_paths)
+    di.loadDatabase("deps/rust_stdf_helper/target/rust_test.db")
+    for i in di.getFileMetaData():
+        print(i)
+        
+    di.close()

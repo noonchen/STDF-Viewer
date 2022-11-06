@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Nov 05 2022
+# Last Modified: Sun Nov 06 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,9 +24,10 @@
 
 import sqlite3
 import numpy as np
+from SharedSrc import record_name_dict
 
 
-getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "Unknown")
+# getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "Unknown")
 
 
 def tryDecode(b: bytes) -> str:
@@ -45,13 +46,14 @@ def tryDecode(b: bytes) -> str:
 
 
 class DatabaseFetcher:
-    def __init__(self):
+    def __init__(self, num_files: int):
         self.connection = None
         self.cursor = None
+        self.num_files = num_files
         self.completeDutArray = np.array([])
     
     
-    def connectDB(self, dataBasePath):
+    def connectDB(self, dataBasePath: str):
         self.closeDB()
         self.connection = sqlite3.connect(dataBasePath)
         self.connection.text_factory = tryDecode
@@ -63,16 +65,22 @@ class DatabaseFetcher:
             self.connection.close()
         
     
-    def containsWafer(self):
-        '''return True if db contains wafer info'''
+    def getWaferCount(self) -> list[int]:
+        '''return a list of int, where list[file_index] = count'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        self.cursor.execute("SELECT count(*) FROM Wafer_Info")
-        sqlResult = self.cursor.fetchone()
-        if sqlResult:
-            return sqlResult[0] > 0
-        else:
-            return False
+        self.cursor.execute("SELECT A.Fid, B.wafercnt FROM \
+                            (SELECT Fid FROM File_List ) as A \
+                            LEFT JOIN (SELECT Fid, count(*) as wafercnt FROM Wafer_Info) as B \
+                            on A.Fid = B.Fid \
+                            ORDER by A.Fid")
+        result = []
+        for _, wafercount in self.cursor.fetchall():
+            if wafercount is None or wafercount == 0:
+                result.append(0)
+            else:
+                result.append(wafercount)
+        return result
     
     
     def getTestItemsList(self):
@@ -81,9 +89,10 @@ class DatabaseFetcher:
             
         TestList = []
         for TEST_NUM, TEST_NAME, PMR_INDX in self.cursor.execute("SELECT Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX \
-                                                                 FROM Test_Info \
-                                                                 LEFT JOIN TestPin_Map on Test_Info.TEST_ID = TestPin_Map.TEST_ID\
-                                                                 ORDER by Test_Info.TEST_ID, TestPin_Map.ROWID"):
+                                                                    FROM Test_Info \
+                                                                    LEFT JOIN TestPin_Map \
+                                                                    on Test_Info.TEST_ID = TestPin_Map.TEST_ID\
+                                                                    ORDER by Test_Info.TEST_ID, TestPin_Map.ROWID"):
             if isinstance(PMR_INDX, int):
                 # Create test items for each pin in MPR data
                 TestList.append(f"{TEST_NUM}\t#{PMR_INDX}\t{TEST_NAME}")
@@ -98,7 +107,14 @@ class DatabaseFetcher:
             
         recTypeDict = {}
         for TEST_NUM, TEST_NAME, recHeader in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, recHeader FROM Test_Info"):
-            recTypeDict[(TEST_NUM, TEST_NAME)] = recHeader
+            if (TEST_NUM, TEST_NAME) in recTypeDict and recTypeDict[(TEST_NUM, TEST_NAME)] != recHeader:
+                previous_rec = recTypeDict[(TEST_NUM, TEST_NAME)]
+                # this test item is already registered twice with different record type, not supported
+                raise ValueError(f"{TEST_NUM} {TEST_NAME} is registered as {record_name_dict[previous_rec]}, \
+                    but it appears as {record_name_dict[recHeader]} again.\nIf you are opening multiple files, \
+                    you should open them separately.")
+            else:
+                recTypeDict[(TEST_NUM, TEST_NAME)] = recHeader
         return recTypeDict
     
     
@@ -107,8 +123,8 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         WaferList = ["-\tStacked Wafer Map"]
-        for row in self.cursor.execute("SELECT WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
-            WaferList.append(f"#{row[0]}\t{row[1]}")
+        for row in self.cursor.execute("SELECT Fid, WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
+            WaferList.append(f"File{row[0]}\t#{row[1]}\t{row[2]}")
         return WaferList
     
     
@@ -132,6 +148,7 @@ class DatabaseFetcher:
         return HeadList
     
     
+    #TODO
     def getPinNames(self, testNum:int, testName:str, pinType:str = "RTN"):
         '''return dict of pmr info'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -166,6 +183,7 @@ class DatabaseFetcher:
         return pinNameDict
     
     
+    #TODO
     def getBinInfo(self, bin="HBIN"):
         '''return a list of dicts contains bin info'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -179,6 +197,7 @@ class DatabaseFetcher:
             raise ValueError("Bin should be 'HBIN' or 'SBIN'")
         
     
+    #TODO
     def getBinStats(self, head, site, bin="HBIN"):
         '''return (bin num, count) list'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -199,7 +218,7 @@ class DatabaseFetcher:
         return BinStats
     
     
-    def getFileInfo(self, filecount: int):
+    def getFileInfo(self):
         '''return field-value pair in File_Info table'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
@@ -209,8 +228,8 @@ class DatabaseFetcher:
         # filecount = self.cursor.fetchone()[0]
         
         # get field data of multiple files, use `field` as key
-        block1 = ", ".join([f"id{i}.Value AS File{i}" for i in range(filecount)])
-        block2 = "\n".join([f"LEFT JOIN (SELECT * FROM File_Info WHERE Fid = {i}) as id{i} on A.Field = id{i}.Field" for i in range(filecount)])
+        block1 = ", ".join([f"id{i}.Value AS File{i}" for i in range(self.num_files)])
+        block2 = "\n".join([f"LEFT JOIN (SELECT * FROM File_Info WHERE Fid = {i}) as id{i} on A.Field = id{i}.Field" for i in range(self.num_files)])
         sql = f"SELECT A.Field, {block1} FROM (SELECT DISTINCT Field FROM File_Info) as A \
                 {block2}"
                 
@@ -220,16 +239,21 @@ class DatabaseFetcher:
         return InfoDict
     
     
-    def getTestFailCnt(self):
-        '''return dict of (test num, test name) -> fail count'''
+    def getTestFailCnt(self) -> dict:
+        '''return dict of (test num, test name) -> [fail count]'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         TestFailCnt = {}
-        for TEST_NUM, TEST_NAME, FailCount in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, FailCount FROM Test_Info"):
-            TestFailCnt[(TEST_NUM, TEST_NAME)] = FailCount
+        for TEST_NUM, TEST_NAME, Fid, FailCount in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, Fid, FailCount FROM Test_Info"):
+            if not (TEST_NUM, TEST_NAME) in TestFailCnt:
+                TestFailCnt[(TEST_NUM, TEST_NAME)] = [0 for _ in range(self.num_files)]
+            # update nested list
+            nested = TestFailCnt[(TEST_NUM, TEST_NAME)]
+            nested[Fid] = FailCount
         return TestFailCnt
     
     
+    #TODO
     def getDUT_SiteInfo(self):
         '''get <dutIndex> to <site> dictionary and complete dut list for masking'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -257,6 +281,7 @@ class DatabaseFetcher:
         return (self.completeDutArray, dutSiteInfo)
     
     
+    #TODO
     def getDUT_Summary(self):
         '''return a complete dut info dict where key=dutIndex and value='''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -287,20 +312,37 @@ class DatabaseFetcher:
         return dutInfoDict
     
     
-    def getDUTStats(self):
-        '''return number of total, passed, failed'''
+    def getDUTCountDict(self):
+        '''return a dict of Literal[Total|Pass|Failed|Unknown|Superseded] -> [count]'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        statsDict = {"Total": 0, "Pass": 0, "Failed": 0, "Unknown": 0}
-        # use count(*) instead of count(Flag) to count NULL values
-        for flag, count in self.cursor.execute("SELECT Flag, count(*) FROM Dut_Info GROUP by Flag"):
-            flag = flag if isinstance(flag, int) else 0x10    # 0x10 == No pass/fail indication, force to be Unknown if flag is NAN
-            dutStatus = getStatus(flag)
-            statsDict[dutStatus] = statsDict[dutStatus] + count
-            statsDict["Total"] = statsDict["Total"] + count
-        return statsDict
+        cntDict = {
+            "Total":        [0 for _ in range(self.num_files)], 
+            "Pass":         [0 for _ in range(self.num_files)], 
+            "Failed":       [0 for _ in range(self.num_files)], 
+            "Superseded":   [0 for _ in range(self.num_files)],
+            "Unknown":      [0 for _ in range(self.num_files)], 
+            }
+        # total duts from all files
+        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info GROUP by Fid ORDER by Fid"):
+            cntDict["Total"][fid] = count
+        # pass duts from all files
+        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 0 GROUP by Fid ORDER by Fid"):
+            cntDict["Pass"][fid] = count
+        # fail duts from all files
+        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 8 GROUP by Fid ORDER by Fid"):
+            cntDict["Failed"][fid] = count
+        # fail duts from all files
+        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16) GROUP by Fid ORDER by Fid"):
+            cntDict["Unknown"][fid] = count
+        # superseded duts from all files
+        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=1 GROUP by Fid ORDER by Fid"):
+            cntDict["Superseded"][fid] = count
+            
+        return cntDict
     
     
+    #TODO
     def getTestInfo_AllDUTs(self, testID: tuple) -> dict:
         '''return test info of all duts in the database, including offsets and length in stdf file'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -348,6 +390,7 @@ class DatabaseFetcher:
         return dict(zip( ["xmax", "xmin", "ymax", "ymin"], sqlResult))
     
     
+    #TODO
     def getWaferInfo(self):
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -364,6 +407,7 @@ class DatabaseFetcher:
         return waferDict
     
     
+    #TODO
     def getWaferCoordsDict(self, waferIndex: int, head: int, site: int) -> dict[int, list]:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -383,6 +427,7 @@ class DatabaseFetcher:
         return coordsDict
     
     
+    #TODO
     def getStackedWaferData(self, head: int, site: int) -> dict[tuple, int]:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -406,6 +451,7 @@ class DatabaseFetcher:
         return failDieDistribution
     
     
+    #TODO
     def getDUTIndexFromBin(self, head:int, site:int, bin:int, binType:str = "HBIN") -> list:
         if self.cursor is None: raise RuntimeError("No database is connected")
         if binType != "HBIN" and binType != "SBIN": raise RuntimeError("binType should be HBIN or SBIN")
@@ -426,6 +472,7 @@ class DatabaseFetcher:
         return dutIndexList
     
     
+    #TODO
     def getDUTIndexFromXY(self, x:int, y:int, wafer_num:int) -> list:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -439,6 +486,7 @@ class DatabaseFetcher:
         return dutIndexList
     
     
+    #TODO
     def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, LLimit:float, HLimit:float, limitScale:int):
         if self.cursor is None: raise RuntimeError("No database is connected")
         hasValidLow = False
@@ -481,9 +529,9 @@ class DatabaseFetcher:
         leftStr = ""
         midStr = ""
         rightStr = ""
-        sql = "SELECT * FROM Datalog"
+        sql = "SELECT * FROM Datalog ORDER by Fid"
             
-        for RecordType, Value, AfterDUTIndex, isBeforePRR in self.cursor.execute(sql):
+        for Fid, RecordType, Value, AfterDUTIndex, isBeforePRR in self.cursor.execute(sql):
             # generate approx location
             if AfterDUTIndex == 0:
                 leftStr = "|"
@@ -497,7 +545,7 @@ class DatabaseFetcher:
                 leftStr = f"PIR #{AfterDUTIndex}"
                 midStr = f"PRR #{AfterDUTIndex}"
                 rightStr = RecordType
-            DR_List.append((RecordType, f"\n{Value}\n", f"{leftStr} ··· {midStr} ··· {rightStr}"))
+            DR_List.append((RecordType, f"\n{Value}\n", f"File{Fid}: {leftStr} ··· {midStr} ··· {rightStr}"))
             
         return DR_List
 
@@ -505,10 +553,11 @@ class DatabaseFetcher:
 if __name__ == "__main__":
     from time import time
     count = 1
-    df = DatabaseFetcher()
+    df = DatabaseFetcher(3)
     df.connectDB("deps/rust_stdf_helper/target/rust_test.db")
     s = time()
-    print(df.getFileInfo())
+    # print(df.getFileInfo())
+    print(df.getDUTCountDict())
     # for _ in range(count):
     # print(df.getDUT_TestInfo(5040, HeadList=[1], SiteList=[-1]))
     
