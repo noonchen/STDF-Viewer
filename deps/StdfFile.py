@@ -18,7 +18,7 @@ from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 
 from deps.DatabaseFetcher import DatabaseFetcher
-from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol, REC, record_name_dict
+from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol, REC, record_name_dict, unit_prefix
 import rust_stdf_helper
 
 

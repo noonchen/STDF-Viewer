@@ -27,9 +27,6 @@ import numpy as np
 from SharedSrc import record_name_dict
 
 
-# getStatus = lambda flag: "Pass" if flag & 0b00011000 == 0 else ("Failed" if flag & 0b00010000 == 0 else "Unknown")
-
-
 def tryDecode(b: bytes) -> str:
     '''Try to decode bytes into string using limited codesets'''
     # try decode with utf-8, compatible with ascii
@@ -50,7 +47,8 @@ class DatabaseFetcher:
         self.connection = None
         self.cursor = None
         self.num_files = num_files
-        self.completeDutArray = np.array([])
+        # dut array from all files
+        self.dutArrays = []
     
     
     def connectDB(self, dataBasePath: str):
@@ -253,32 +251,38 @@ class DatabaseFetcher:
         return TestFailCnt
     
     
-    #TODO
     def getDUT_SiteInfo(self):
-        '''get <dutIndex> to <site> dictionary and complete dut list for masking'''
+        '''return a list of dutSiteInfo dict, which 
+        contains `dutIndex` to `site` information used for dut masking'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        allHeads = self.getHeadList()
-        dutSiteInfo = dict( zip(allHeads, [[] for _ in range(len(allHeads))] ) )    # initalize dutSiteInfo dict, head as key, [] as value
-        completeDutList = []
-        
-        sql = "SELECT HEAD_NUM, SITE_NUM, DUTIndex FROM Dut_Info ORDER by DUTIndex"
-        sqlResult = self.cursor.execute(sql)
+        # clear previous dutArrays if exist, avoid duplicates
+        self.dutArrays = []
+        dutSiteInfoList = []
+        for fid in range(self.num_files):
+            headList = set()
+            for head, in self.cursor.execute(f"SELECT DISTINCT HEAD_NUM FROM Dut_Info WHERE Fid={fid}"):
+                headList.add(head)
+            # initalize dutSiteInfo dict, head as key, [] as value
+            dutSiteInfo = dict( zip(headList, [[] for _ in range(len(headList))] ) )
+            completeDutList = []
             
-        for HEAD_NUM, SITE_NUM, DUTIndex in sqlResult:
-            completeDutList.append(DUTIndex)
-            for h, sl in dutSiteInfo.items():
-                if h == HEAD_NUM:
-                    sl.append(SITE_NUM)
-                else:
-                    sl.append(None)
-                    
-        # convert to numpy array for masking
-        self.completeDutArray = np.array(completeDutList, dtype=int)
-        for head, sitelist in dutSiteInfo.items():
-            dutSiteInfo[head] = np.array(sitelist, dtype=float)
+            sql = f"SELECT HEAD_NUM, SITE_NUM, DUTIndex FROM Dut_Info WHERE Fid={fid} ORDER by DUTIndex"
+            for HEAD_NUM, SITE_NUM, DUTIndex in self.cursor.execute(sql):
+                completeDutList.append(DUTIndex)
+                for h, sl in dutSiteInfo.items():
+                    sl.append(SITE_NUM if h == HEAD_NUM else None)
+                        
+            # convert to numpy array for masking
+            completeDutArray = np.array(completeDutList, dtype=int)
+            for head, sitelist in dutSiteInfo.items():
+                dutSiteInfo[head] = np.array(sitelist, dtype=float)
+                
+            # store dut array for other functions
+            self.dutArrays.append(completeDutArray)
+            dutSiteInfoList.append(dutSiteInfo)
         
-        return (self.completeDutArray, dutSiteInfo)
+        return dutSiteInfoList
     
     
     #TODO
@@ -342,44 +346,44 @@ class DatabaseFetcher:
         return cntDict
     
     
-    #TODO
-    def getTestInfo_AllDUTs(self, testID: tuple) -> dict:
-        '''return test info of all duts in the database, including offsets and length in stdf file'''
+    def getTestInfo_AllDUTs(self, testID: tuple) -> list[dict]:
+        '''return a list of test info of all duts in the database, where index is file id'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        testInfo = {}
-        sqlResult = None
-        # get test item's additional info
-        self.cursor.execute("SELECT * FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?", testID)
-        col = [tup[0] for tup in self.cursor.description]
-        val = self.cursor.fetchone()
-        testInfo.update(zip(col, val))
-        
-        # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
-        if self.completeDutArray.size == 0:
-            self.getDUT_SiteInfo()
-        
-        # get offset & length, insert -1 if testNum is not presented in a DUT
-        tmpContainer = dict(zip( self.completeDutArray, [[-1, -1]]*(self.completeDutArray.size) ))
-        sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
-            WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) AND \
-                    DUTIndex in (SELECT DUTIndex FROM Dut_Info) \
-            ORDER by DUTIndex"
-        sqlResult = self.cursor.execute(sql, testID)
-        
-        # fill in the sql result in a dict where key=dutIndex, value= offset & length        
-        for ind, oft, biL in sqlResult:
-            tmpContainer[ind] = [oft, biL]
+        result = []
+        for fid in range(self.num_files):
+            testInfo = {}
+            sqlResult = None
+            # get test item's additional info
+            self.cursor.execute("SELECT * FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?", [fid, *testID])
+            col = [tup[0] for tup in self.cursor.description]
+            val = self.cursor.fetchone()
+            testInfo.update(zip(col, val))
+            
+            # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
+            if len(self.dutArrays) == 0:
+                self.getDUT_SiteInfo()
+            
+            # get offset & length, insert -1 if testNum is not presented in a DUT
+            totalDutCnt = self.dutArrays[fid].size
+            tmp_oft = np.full(totalDutCnt, -1, dtype=np.int64)
+            tmp_biL = np.empty(totalDutCnt, -1, dtype=np.int32)
+            
+            sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
+                WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?) AND \
+                        DUTIndex in (SELECT DUTIndex FROM Dut_Info WHERE Fid=?) \
+                ORDER by DUTIndex"
+            sqlResult = self.cursor.execute(sql, [fid, *testID, fid])
+            
+            # dutIndex starts from 1
+            for ind, oft, biL in sqlResult:
+                tmp_oft[ind-1] = oft
+                tmp_biL[ind-1] = biL
 
-        totalDutCnt = self.completeDutArray.size
-        tmp_oft = np.empty(totalDutCnt, dtype=np.int64)
-        tmp_biL = np.empty(totalDutCnt, dtype=np.int32)
-        
-        for i, ind in enumerate(self.completeDutArray):
-            tmp_oft[i], tmp_biL[i] = tmpContainer[ind]
-        
-        testInfo.update({"Offset": tmp_oft, "BinaryLen": tmp_biL})
-        return testInfo
+            testInfo.update({"Offset": tmp_oft, "BinaryLen": tmp_biL})
+            result.append(testInfo)
+            
+        return result
     
     
     def getWaferBounds(self):
@@ -407,19 +411,18 @@ class DatabaseFetcher:
         return waferDict
     
     
-    #TODO
-    def getWaferCoordsDict(self, waferIndex: int, head: int, site: int) -> dict[int, list]:
+    def getWaferCoordsDict(self, waferIndex: int, head: int, site: int, fid: int) -> dict[int, list]:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         coordsDict: dict[int, list] = {}     # key: sbin, value: coords list
         if site == -1:
             sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND HEAD_NUM=? ORDER by SBIN"
-            sql_param = (waferIndex, head)
+                WHERE WaferIndex=? AND HEAD_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
+            sql_param = (waferIndex, head, fid)
         else:
             sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND HEAD_NUM=? AND SITE_NUM=? ORDER by SBIN"
-            sql_param = (waferIndex, head, site)
+                WHERE WaferIndex=? AND HEAD_NUM=? AND SITE_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
+            sql_param = (waferIndex, head, site, fid)
             
         for SBIN, XCOORD, YCOORD in self.cursor.execute(sql, sql_param):
             coordsDict.setdefault(SBIN, []).append((XCOORD, YCOORD))
@@ -427,25 +430,25 @@ class DatabaseFetcher:
         return coordsDict
     
     
-    #TODO
     def getStackedWaferData(self, head: int, site: int) -> dict[tuple, int]:
+        ''' get fail count of every X,Y in the database (merge all STDF if opened multiple files) '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         failDieDistribution: dict[tuple, int] = {}     # key: coords, value: fail counts
         if site == -1:
             sql = " SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? GROUP by XCOORD, YCOORD, Flag"
+                WHERE HEAD_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
             sql_param = (head,)
         else:
             sql = "SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? AND SITE_NUM=? GROUP by XCOORD, YCOORD, Flag"
+                WHERE HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
             sql_param = (head, site)
             
         for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
             if isinstance(XCOORD, int) and isinstance(YCOORD, int) and isinstance(Flag, int):
                 # skip invalid dut (e.g. dut without PRR)
                 previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
-                if getStatus(Flag) == "Failed":
+                if Flag & 24 == 8:
                     failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
         
         return failDieDistribution
