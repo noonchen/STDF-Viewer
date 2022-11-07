@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Nov 06 2022
+# Last Modified: Mon Nov 07 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -181,38 +181,33 @@ class DatabaseFetcher:
         return pinNameDict
     
     
-    #TODO
-    def getBinInfo(self, bin="HBIN"):
-        '''return a list of dicts contains bin info'''
+    def getBinInfo(self, isHBIN=True):
+        '''return a list of dicts contains bin names and pass/fail flag,
+        if multiple files are opened, bin name and flag of same bin number will be merged'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
-        if bin == "HBIN" or bin == "SBIN":
-            BinInfoDict = {}
-            for BIN_NUM, BIN_NAME, BIN_PF in self.cursor.execute('''SELECT BIN_NUM, BIN_NAME, BIN_PF FROM Bin_Info WHERE BIN_TYPE = ? ORDER by BIN_NUM''', bin[0]):
-                BinInfoDict[BIN_NUM] = {"BIN_NAME": BIN_NAME, "BIN_PF": BIN_PF}
-            return BinInfoDict
-        else:
-            raise ValueError("Bin should be 'HBIN' or 'SBIN'")
+        BinInfoDict = {}
+        for BIN_NUM, BIN_NAME, BIN_PF in self.cursor.execute('''SELECT BIN_NUM, BIN_NAME, BIN_PF FROM Bin_Info WHERE BIN_TYPE = ? ORDER by BIN_NUM''', "H" if isHBIN else "S"):
+            BinInfoDict[BIN_NUM] = {"BIN_NAME": BIN_NAME, "BIN_PF": BIN_PF}
+        return BinInfoDict
         
     
-    #TODO
-    def getBinStats(self, head, site, bin="HBIN"):
-        '''return (bin num, count) list'''
+    def getBinStats(self, head, site, isHBIN=True):
+        '''return a dict of bin num -> [count]'''
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         BinStats = {}
+        binType = "HBIN" if isHBIN else "SBIN"
         sql_param = {"HEAD_NUM":head, "SITE_NUM":site}
-        if bin == "HBIN" or bin == "SBIN":
-            if site == -1:
-                sql = f'''SELECT {bin}, count({bin}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM GROUP by {bin}'''
-            else:
-                sql = f'''SELECT {bin}, count({bin}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM GROUP by {bin}'''
-                
-            for bin, count in self.cursor.execute(sql, sql_param):
-                if bin is None: continue
-                BinStats[bin] = count
+        if site == -1:
+            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM GROUP by Fid, {binType}'''
         else:
-            raise ValueError("Bin should be 'HBIN' or 'SBIN'")
+            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM GROUP by Fid, {binType}'''
+            
+        for fid, bin_num, count in self.cursor.execute(sql, sql_param):
+            if bin_num is None: continue
+            countList = BinStats.setdefault(bin_num, [0 for _ in range(self.num_files)])
+            countList[fid] = count
         return BinStats
     
     
