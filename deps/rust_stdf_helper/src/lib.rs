@@ -244,7 +244,7 @@ fn analyze_stdf_file(
 fn read_raw_from_fileobj<'py>(
     py: Python<'py>,
     fileobj: PyObject,
-    offset: PyReadonlyArray1<u64>,
+    offset: PyReadonlyArray1<i64>,
     lens: PyReadonlyArray1<i32>,
 ) -> PyResult<&'py PyArray2<u8>> {
     // validate `fileobj`
@@ -272,16 +272,18 @@ fn read_raw_from_fileobj<'py>(
     if max_len > 0 {
         for ((&oft, &len), mut data_row) in offset.iter().zip(lens.iter()).zip(data_list.rows_mut())
         {
-            // seek to `offset`
-            fileobj.call_method1(py, intern!(py, "seek"), (oft,))?;
-            // read `len`
-            let rslt = fileobj.call_method1(py, intern!(py, "read"), (len,))?;
-            let pybytes: &PyBytes = rslt.cast_as(py)?;
-            let read_data = pybytes.as_bytes();
-            let dst = &mut data_row
-                .as_slice_mut()
-                .expect("cannot get slice from ndarray row")[..len as usize];
-            dst.copy_from_slice(read_data);
+            if oft >= 0 && len > 0 {
+                // seek to `offset`
+                fileobj.call_method1(py, intern!(py, "seek"), (oft,))?;
+                // read `len`
+                let rslt = fileobj.call_method1(py, intern!(py, "read"), (len,))?;
+                let pybytes: &PyBytes = rslt.cast_as(py)?;
+                let read_data = pybytes.as_bytes();
+                let dst = &mut data_row
+                    .as_slice_mut()
+                    .expect("cannot get slice from ndarray row")[..len as usize];
+                dst.copy_from_slice(read_data);
+            }
         }
     }
     Ok(data_list.into_pyarray(py))
