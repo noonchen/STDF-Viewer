@@ -1,5 +1,7 @@
 use numpy::ndarray::{Array1, Array2, Zip};
-use numpy::{IntoPyArray, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
+use pyo3::exceptions::PyValueError;
+use pyo3::types::PyBytes;
 use pyo3::{
     exceptions::{PyException, PyOSError},
     intern,
@@ -236,6 +238,55 @@ fn analyze_stdf_file(
     })
 }
 
+/// read data from python file object
+#[pyfunction]
+#[pyo3(name = "read_rawList")]
+fn read_raw_from_fileobj<'py>(
+    py: Python<'py>,
+    fileobj: PyObject,
+    offset: PyReadonlyArray1<u64>,
+    lens: PyReadonlyArray1<i32>,
+) -> PyResult<&'py PyArray2<u8>> {
+    // validate `fileobj`
+    let no_read = match fileobj.getattr(py, intern!(py, "read")) {
+        Ok(p) => !p.as_ref(py).is_callable(),
+        Err(_) => true,
+    };
+    let no_seek = match fileobj.getattr(py, intern!(py, "seek")) {
+        Ok(p) => !p.as_ref(py).is_callable(),
+        Err(_) => true,
+    };
+    if no_read || no_seek {
+        return Err(PyErr::new::<PyValueError, _>(
+            "Object doesn't have `read` or `seek` method",
+        ));
+    };
+
+    let offset = offset.as_array();
+    let lens = lens.as_array();
+    let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x)) as usize;
+    // initiate a 2D array for storing file data
+    // row count = len(offset)
+    // column count = max(len)
+    let mut data_list = Array2::from_elem((offset.dim(), max_len), 0u8);
+    if max_len > 0 {
+        for ((&oft, &len), mut data_row) in offset.iter().zip(lens.iter()).zip(data_list.rows_mut())
+        {
+            // seek to `offset`
+            fileobj.call_method1(py, intern!(py, "seek"), (oft,))?;
+            // read `len`
+            let rslt = fileobj.call_method1(py, intern!(py, "read"), (len,))?;
+            let pybytes: &PyBytes = rslt.cast_as(py)?;
+            let read_data = pybytes.as_bytes();
+            let dst = &mut data_row
+                .as_slice_mut()
+                .expect("cannot get slice from ndarray row")[..len as usize];
+            dst.copy_from_slice(read_data);
+        }
+    }
+    Ok(data_list.into_pyarray(py))
+}
+
 /// get PTR/FTR results and flags from raw bytes
 #[pyfunction]
 #[pyo3(name = "parse_PTR_FTR_rawList")]
@@ -254,6 +305,7 @@ fn parse_ptr_ftr_from_raw<'py>(
     let raw = raw.as_array();
     let lens = lens.as_array();
     let rec_cnt = lens.dim();
+    let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x));
     // create Array for storing results
     let mut data_list = Array1::from_elem(rec_cnt, f32::NAN);
     let mut flag_list = Array1::from_elem(rec_cnt, -1i32);
@@ -298,23 +350,25 @@ fn parse_ptr_ftr_from_raw<'py>(
         };
     }
 
-    py.allow_threads(|| {
-        // parallel parse data
-        Zip::from(raw.rows())
-            .and(&lens)
-            .and(&mut data_list)
-            .and(&mut flag_list)
-            .par_for_each(|r, l, d, f| {
-                inner_parse(
-                    is_ptr,
-                    &endian,
-                    r.to_slice().expect("cannot get slice from numpy ndarray"),
-                    l,
-                    d,
-                    f,
-                )
-            });
-    });
+    if max_len > 0 {
+        py.allow_threads(|| {
+            // parallel parse data
+            Zip::from(raw.rows())
+                .and(&lens)
+                .and(&mut data_list)
+                .and(&mut flag_list)
+                .par_for_each(|r, l, d, f| {
+                    inner_parse(
+                        is_ptr,
+                        &endian,
+                        r.to_slice().expect("cannot get slice from numpy ndarray"),
+                        l,
+                        d,
+                        f,
+                    )
+                });
+        });
+    }
     let data_list = data_list.into_pyarray(py);
     let flag_list = flag_list.into_pyarray(py);
     let dict = PyDict::new(py);
@@ -344,6 +398,7 @@ fn parse_mpr_from_raw<'py>(
     let raw = raw.as_array();
     let lens = lens.as_array();
     let rec_cnt = lens.dim();
+    let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x));
     // create Array for storing results
     // contiguous is required in order to get slice from ndarray,
     // must iter by row...
@@ -393,26 +448,28 @@ fn parse_mpr_from_raw<'py>(
         *flag = mpr_rec.test_flg[0].into();
     }
 
-    py.allow_threads(|| {
-        // parallel parse data
-        Zip::from(raw.rows())
-            .and(&lens)
-            .and(data_list.rows_mut())
-            .and(state_list.rows_mut())
-            .and(&mut flag_list)
-            .par_for_each(|r, l, d, s, f| {
-                inner_parse(
-                    &endian,
-                    pin_cnt,
-                    rslt_cnt,
-                    r.to_slice().expect("cannot get slice from numpy ndarray"),
-                    l,
-                    d.into_slice().expect("ndarray is not contiguous"),
-                    s.into_slice().expect("ndarray is not contiguous"),
-                    f,
-                )
-            });
-    });
+    if max_len > 0 {
+        py.allow_threads(|| {
+            // parallel parse data
+            Zip::from(raw.rows())
+                .and(&lens)
+                .and(data_list.rows_mut())
+                .and(state_list.rows_mut())
+                .and(&mut flag_list)
+                .par_for_each(|r, l, d, s, f| {
+                    inner_parse(
+                        &endian,
+                        pin_cnt,
+                        rslt_cnt,
+                        r.to_slice().expect("cannot get slice from numpy ndarray"),
+                        l,
+                        d.into_slice().expect("ndarray is not contiguous"),
+                        s.into_slice().expect("ndarray is not contiguous"),
+                        f,
+                    )
+                });
+        });
+    }
     // previous order: row: dutIndex, col: pin
     // python expected: row: pin, col: dutIndex
     let data_list = data_list.reversed_axes().into_pyarray(py);
@@ -617,6 +674,7 @@ fn generate_database(
 #[pymodule]
 fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_stdf_file, m)?)?;
+    m.add_function(wrap_pyfunction!(read_raw_from_fileobj, m)?)?;
     m.add_function(wrap_pyfunction!(parse_ptr_ftr_from_raw, m)?)?;
     m.add_function(wrap_pyfunction!(parse_mpr_from_raw, m)?)?;
     m.add_function(wrap_pyfunction!(generate_database, m)?)?;
