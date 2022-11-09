@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Nov 07 2022
+# Last Modified: Wed Nov 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,7 +24,7 @@
 
 import sqlite3
 import numpy as np
-from SharedSrc import record_name_dict
+from deps.SharedSrc import record_name_dict
 
 
 def tryDecode(b: bytes) -> str:
@@ -278,37 +278,6 @@ class DatabaseFetcher:
             dutSiteInfoList.append(dutSiteInfo)
         
         return dutSiteInfoList
-    
-    
-    #TODO
-    def getDUT_Summary(self):
-        '''return a complete dut info dict where key=dutIndex and value='''
-        if self.cursor is None: raise RuntimeError("No database is connected")
-        
-        dutInfoDict = {}
-        sql = "SELECT * FROM Dut_Info ORDER by DUTIndex"
-        sqlResult = self.cursor.execute(sql)
-        
-        for head, site, DUTIndex, testCount, Testtime, partID, hbin, sbin, prrFlag, waferIndex, xcoord, ycoord in sqlResult:
-            # if PRR of certain DUTs is missing, testCount... will all be None
-            if isinstance(prrFlag, int):
-                prrStat = getStatus(prrFlag) 
-                dutFlagText = f"{prrStat} - 0x{prrFlag:02X}"
-            else:
-                dutFlagText = "-"
-                
-            tmpRow = (partID if partID else "-",
-                      "Head %d - Site %d" % (head, site),
-                      "%d" % testCount if testCount is not None else "-",
-                      "%d ms" % Testtime if Testtime is not None else "-",
-                      "Bin %d" % hbin if hbin is not None else "-",
-                      "Bin %d" % sbin if sbin is not None else "-",
-                      "%d" % waferIndex if waferIndex is not None else "-",
-                      "(%d, %d)" % (xcoord, ycoord) if not (xcoord is None or ycoord is None) else "-",
-                      dutFlagText)
-            dutInfoDict[DUTIndex] = tmpRow
-            
-        return dutInfoDict
     
     
     def getDUTCountDict(self):

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Tue Mar 01 2022
+# Last Modified: Wed Nov 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,7 +24,7 @@
 
 
 
-from PyQt5 import QtCore, QtWidgets, QtGui
+from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
 
@@ -238,6 +238,50 @@ class NormalProxyModel(QAbstractProxyModel):
     def headerData(self, section, orientation, role):
         return self.sourceModel().headerData(section, orientation, role)
 
+    
+
+class ColorSqlQueryModel(QtSql.QSqlQueryModel):
+    def __init__(self, parent) -> None:
+        super().__init__(parent)
+        
+    def data(self, index: QtCore.QModelIndex, role: int):        
+        if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
+            # change default aligment to center
+            return QtCore.Qt.AlignmentFlag.AlignCenter
+        
+        if (role == QtCore.Qt.ItemDataRole.ForegroundRole or 
+            role == QtCore.Qt.ItemDataRole.BackgroundColorRole or 
+            role == QtCore.Qt.ItemDataRole.ToolTipRole):
+            # set row background, font color and tooltips according to flag status
+            
+            # get dut flag string, which is the 
+            # right most element of current row
+            dutFlagIndex = super().index(index.row(), super().columnCount()-1)
+            dutFlag = super().data(dutFlagIndex, QtCore.Qt.ItemDataRole.DisplayRole)
+            if isinstance(dutFlag, str):
+                if role == QtCore.Qt.ItemDataRole.ForegroundRole:
+                    if dutFlag.startswith("Fail") or dutFlag.startswith("Supersede"):
+                        # set to font color to white
+                        return QtGui.QColor("#FFFFFF")                        
+                
+                elif role == QtCore.Qt.ItemDataRole.BackgroundColorRole:
+                    # mark fail row as red
+                    if dutFlag.startswith("Fail"): return QtGui.QColor("#CC0000")
+                    # mark superseded row as gray
+                    elif dutFlag.startswith("Supersede"): return QtGui.QColor("#D0D0D0")
+                    # mark unknown as orange
+                    elif dutFlag.startswith("Unknown"): return QtGui.QColor("#FE7B00")
+                
+                elif role == QtCore.Qt.ItemDataRole.ToolTipRole:
+                    #TODO get flag number
+                    if not dutFlag.startswith("Pass"): return "a problematic dut..."
+                
+                else:
+                    pass
+        # return original data otherwise
+        return super().data(index, role)
+
+    
     
 if __name__ == '__main__':
     testStrings = ['Site 1', 'Site 10', 'Site 100', 'Site 2', 'Site 22']

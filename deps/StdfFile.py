@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Nov 06 2022
+# Last Modified: Wed Nov 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -18,7 +18,7 @@ from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
 
 from deps.DatabaseFetcher import DatabaseFetcher
-from deps.SharedSrc import mirFieldNames, mirDict, direction_symbol, REC, record_name_dict, unit_prefix
+from deps.SharedSrc import *
 import rust_stdf_helper
 
 
@@ -72,17 +72,18 @@ class DataInterface:
     def __init__(self, paths: list[str]):
         self.stdf = StdfFiles(paths)
         self.DatabaseFetcher = DatabaseFetcher(len(paths))
+        self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
         
         self.availableSites = []
         self.availableHeads = []
-        self.testRecTypeDict = {}
-        self.waferInfoDict = {}
+        self.testRecTypeDict = {}       # used for get test record type
+        # self.waferInfoDict = {}
         self.failCntDict = {}
-        self.dutArray = np.array([])    # complete dut array in the stdf
-        self.dutSiteInfo = {}           # site of each dut in self.dutArray
-        self.waferOrientation = ((), ())
+        self.dutArrays = []             # complete dut arrays from all files
+        self.dutSiteInfo = []           # site of each dut in self.dutArray
+        # self.waferOrientation = ((), ())
         # dict to store H/SBIN info
         self.HBIN_dict = {}
         self.SBIN_dict = {}
@@ -94,13 +95,33 @@ class DataInterface:
     def loadDatabase(self, dbPath: str):
         self.DatabaseFetcher.connectDB(dbPath)
         self.dbConnected = True
+        self.dbPath = dbPath
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
-        # TODO
+        # for site/head selection
+        self.availableSites = self.DatabaseFetcher.getSiteList()
+        self.availableHeads = self.DatabaseFetcher.getHeadList()        
+        # get all MPR test numbers
+        self.testRecTypeDict = self.DatabaseFetcher.getTestRecordTypeDict()
+        # update fail cnt dict
+        self.failCntDict = self.DatabaseFetcher.getTestFailCnt()
+        # for dut masking
+        self.dutSiteInfo = self.DatabaseFetcher.getDUT_SiteInfo()
+        # hold a same reference to complete dut arrays
+        self.dutArrays = self.DatabaseFetcher.dutArrays        
+        # update Bin dict
+        self.HBIN_dict = self.DatabaseFetcher.getBinInfo(isHBIN=True)
+        self.SBIN_dict = self.DatabaseFetcher.getBinInfo(isHBIN=False)
+        # for UI display
+        self.completeTestList = self.DatabaseFetcher.getTestItemsList()
+        self.completeWaferList = self.DatabaseFetcher.getWaferList()
+        
         
     def close(self):
-        #TODO
         if self.dbConnected:
+            # disconnect database
             self.DatabaseFetcher.closeDB()
+        # close files
+        self.stdf.close()
         
         
     def getFileMetaData(self) -> list:

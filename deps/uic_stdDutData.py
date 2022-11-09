@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Wed Mar 09 2022
+# Last Modified: Wed Nov 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -88,6 +88,7 @@ class DutDataReader(QtWidgets.QWidget):
         dutData = []
         dutStat = []
         testFlagInfo = []
+        #TODO maybe we can optimize by ordering the seek positions?
         for i, testTuple in enumerate(self.test_number_tuple_List):
             if self.stopFlag: return
 

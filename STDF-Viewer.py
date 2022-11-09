@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Nov 06 2022
+# Last Modified: Wed Nov 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -32,7 +32,7 @@ from base64 import b64decode
 from deps.SharedSrc import *
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
-from deps.StdfFile import DataInterface, StdfFile
+from deps.StdfFile import DataInterface
 from deps.MatplotlibWidgets import PlotCanvas, MagCursor
 from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter
 
@@ -68,7 +68,7 @@ import matplotlib.font_manager as fm
 # high dpi support
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
-Version = "V3.4.0"
+Version = "V4.0.0"
 isMac = platform.system() == 'Darwin'
     
 # save config path to sys
@@ -88,7 +88,7 @@ class FontNames:
 
 
 class signals4MainUI(QtCore.QObject):
-    parseStatusSignal = Signal(bool)  # get std parse status from loader
+    dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
 
 
@@ -98,6 +98,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
+        # data_interface for processing requests by GUI and reading data 
+        # from database or files
+        self.data_interface = None        
         # used for detecting tab changes
         self.preTab = None             
         # used for detecting site selection changes
@@ -114,16 +117,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.translatorCode = QTranslator(self)
         self.defaultFontNames = defaultFontNames
         self.imageFont = self.defaultFontNames.English
-        # data_interface for processing requests by GUI and reading data 
-        # from database or files
-        self.data_interface = None
-        pathList = [item for item in sys.argv[1:] if os.path.isfile(item)]
-        if pathList: 
-            self.updateRecentFolder(pathList[0])
-            self.data_interface = DataInterface(pathList)
         # init and connect signals
         self.signals = signals4MainUI()
-        self.signals.parseStatusSignal.connect(self.updateData)
+        self.signals.dataInterfaceSignal.connect(self.updateData)
         self.signals.statusSignal.connect(self.updateStatus)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
@@ -279,7 +275,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # need to rewrite file info table after changing language
         self.updateFileHeader()
         # update flag dictionarys
-        updateFlagDicts(self.tr)
+        translate_const_dicts(self.tr)
     
     
     def dumpConfigFile(self):
@@ -329,10 +325,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if os.path.isfile(f):
             # store folder path
             self.updateRecentFolder(f)
-            self.std_handle = StdfFile([f])
-            # TODO
-            self.stdHandleList.append(self.std_handle)   # if a file is already open, its handle is saved in case the new file not opened successfully
-            self.callFileLoader(self.std_handle)
+            self.callFileLoader([f])
               
     
     def onFailMarker(self):
@@ -410,6 +403,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # since we used proxy model in DUT summary, the selectedRows is from proxy model
             # it should be converted back to source model rows first
             getSourceIndex = lambda pIndex: self.proxyModel_tmodel_dut.mapToSource(pIndex)
+            # TODO: instead of retrieving dut index, we need to get rowid from Dut_Info table
             selectedDutIndex = [self.Row_DutIndexDict[getSourceIndex(r).row()] for r in selectedRows]   # if row(s) is selected, self.Row_DutIndexDict is already updated in self.prepareDataForDUTSummary()
             self.showDutDataTable(sorted(selectedDutIndex))
 
@@ -665,9 +659,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # write default setting params
         self.settingParams = SettingParams()
         # init bin color by bin info
-        if self.dbConnected:
-            for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.SBIN_dict), 
-                                            (self.settingParams.hbinColor, self.HBIN_dict)]:
+        if isinstance(self.data_interface, DataInterface):
+            for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.data_interface.SBIN_dict), 
+                                            (self.settingParams.hbinColor, self.data_interface.HBIN_dict)]:
                 for bin in bin_info.keys():
                     binType = bin_info[bin]["BIN_PF"]   # P, F or Unknown
                     color = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
@@ -710,36 +704,34 @@ class MyWindow(QtWidgets.QMainWindow):
             model.appendRow(QtGui.QStandardItem(data))
 
 
-    # TODO
     def updateFileHeader(self):
-        # clear
-        self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
-        
-        horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
-        verticalHeader = self.ui.fileInfoTable.verticalHeader()
-        horizontalHeader.setVisible(False)
-        verticalHeader.setVisible(False)
-        
-        metaDataList = self.data_interface.getFileMetaData()
+        if isinstance(self.data_interface, DataInterface):
+            # clear old info
+            self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
             
-        for tmpRow in metaDataList:
-            # translate the first element, which is the field names
-            qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
-            if self.settingParams.language != "English":
-                # fix weird font when switch to chinese-s
-                qfont = QtGui.QFont(self.imageFont)
-                [qele.setData(qfont, QtCore.Qt.FontRole) for qele in qitemRow]
-            self.tmodel_info.appendRow(qitemRow)
-        
-        horizontalHeader.resizeSection(0, 250)
-        horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
-        horizontalHeader.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        # resize to content to show all texts, then add additional height to each row
-        for row in range(self.tmodel_info.rowCount()):
-            verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.ResizeToContents)
-            newHeight = verticalHeader.sectionSize(row) + 20
-            verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.Fixed)
-            verticalHeader.resizeSection(row, newHeight)
+            horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
+            verticalHeader = self.ui.fileInfoTable.verticalHeader()
+            horizontalHeader.setVisible(False)
+            verticalHeader.setVisible(False)
+                
+            for tmpRow in self.data_interface.getFileMetaData():
+                # translate the first element, which is the field names
+                qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
+                if self.settingParams.language != "English":
+                    # fix weird font when switch to chinese-s
+                    qfont = QtGui.QFont(self.imageFont)
+                    [qele.setData(qfont, QtCore.Qt.FontRole) for qele in qitemRow]
+                self.tmodel_info.appendRow(qitemRow)
+            
+            horizontalHeader.resizeSection(0, 250)
+            horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
+            horizontalHeader.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+            # resize to content to show all texts, then add additional height to each row
+            for row in range(self.tmodel_info.rowCount()):
+                verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.ResizeToContents)
+                newHeight = verticalHeader.sectionSize(row) + 20
+                verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.Fixed)
+                verticalHeader.resizeSection(row, newHeight)
     
     
     # TODO
@@ -1464,59 +1456,42 @@ class MyWindow(QtWidgets.QMainWindow):
         gc.collect()
     
     
-    def callFileLoader(self, stdHandle):
-        if stdHandle:
-            self.loader.loadFile(stdHandle.fpath)
+    def callFileLoader(self, paths: list[str]):
+        if paths:
+            self.loader.loadFile(paths)
 
         
-    @Slot(bool)
-    def updateData(self, parseStatus):
-        if parseStatus:
+    @Slot(object)
+    def updateData(self, newDI: DataInterface):
+        if newDI is not None:
             # clear old images & tables
             self.clearAllContents()
             
-            # remove old std file handler
-            if len(self.stdHandleList) == 2:
-                if not self.stdHandleList[0] is None:
-                    self.stdHandleList[0].close()
-            self.stdHandleList = [self.std_handle]
-            self.DatabaseFetcher.closeDB()
-            databasePath = os.path.join(sys.rootFolder, "logs", "tmp.db")
-            os.replace(os.path.join(sys.rootFolder, "logs", "tmp_new.db"), databasePath)
-            self.DatabaseFetcher.connectDB(databasePath)
-            self.dbConnected = True
+            # close old data interface
+            if isinstance(self.data_interface, DataInterface):
+                self.data_interface.close()
             
-            # get all MPR test numbers
-            self.testRecTypeDict = self.DatabaseFetcher.getTestRecordTypeDict()
-            
-            # update Bin dict
-            self.HBIN_dict = self.DatabaseFetcher.getBinInfo(bin="HBIN")
-            self.SBIN_dict = self.DatabaseFetcher.getBinInfo(bin="SBIN")
-            
-            # update fail cnt dict
-            self.failCntDict = self.DatabaseFetcher.getTestFailCnt()
+            self.data_interface = newDI
             
             # disable/enable wafer tab
-            self.containsWafer = self.DatabaseFetcher.containsWafer()
-            self.ui.tabControl.setTabEnabled(4, self.containsWafer)
-            if self.containsWafer:
-                #read waferDict
-                self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
+            self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
+            #TODO read waferDict
+            # self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
     
             # update listView
-            self.completeTestList = self.DatabaseFetcher.getTestItemsList()
+            self.completeTestList = self.data_interface.completeTestList
+            self.completeWaferList = self.data_interface.completeWaferList
             self.refreshTestList()
-            self.completeWaferList = self.DatabaseFetcher.getWaferList()
             self.updateModelContent(self.sim_list_wafer, self.completeWaferList)
             
             # remove site/head checkbox for invalid sites/heads
             current_exist_site = list(self.site_cb_dict.keys())     # avoid RuntimeError: dictionary changed size during iteration
             current_exist_head = list(self.head_cb_dict.keys())
-            sites_in_file = self.DatabaseFetcher.getSiteList()
-            heads_in_file = self.DatabaseFetcher.getHeadList()
+            self.availableSites = self.data_interface.availableSites
+            self.availableHeads = self.data_interface.availableHeads
             
             for site in current_exist_site:
-                if site not in sites_in_file:
+                if site not in self.availableSites:
                     self.site_cb_dict.pop(site)
                     row = 1 + site//4
                     col = site % 4
@@ -1526,7 +1501,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         self.ui.gridLayout_site_select.removeItem(cb_layout)
                         
             for headnum in current_exist_head:
-                if headnum not in heads_in_file:
+                if headnum not in self.availableHeads:
                     self.head_cb_dict.pop(headnum)
                     row = headnum//3
                     col = headnum % 3
@@ -1536,9 +1511,6 @@ class MyWindow(QtWidgets.QMainWindow):
                         self.ui.gridLayout_head_select.removeItem(cb_layout_h)                    
                                  
             # add & enable checkboxes for each sites and heads
-            self.availableSites = list(sites_in_file)
-            self.availableHeads = list(heads_in_file)
-            
             siteNum = 0     # pre-define local var in case there are no available sites
             for siteNum in self.availableSites:
                 if siteNum in self.site_cb_dict: 
@@ -1567,8 +1539,9 @@ class MyWindow(QtWidgets.QMainWindow):
             nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
             self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
             # get dutArray and its site info
-            self.dutArray, self.dutSiteInfo = self.DatabaseFetcher.getDUT_SiteInfo()
-            
+            self.dutArrays = self.data_interface.dutArrays
+            self.dutSiteInfo = self.data_interface.dutSiteInfo
+            # update UI
             self.settingUI.removeColorBtns()               # remove existing color btns
             self.settingUI.initColorBtns()
             self.exporter.removeSiteCBs()
@@ -1580,16 +1553,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateGDR_DTR_Table()
             self.updateStatTableContent()
             self.updateTabContent(forceUpdate=True)
-            
-        else:
-            # aborted, restore to original stdf file handler
-            self.std_handle.close()
-            self.std_handle = self.stdHandleList[0]
-            self.stdHandleList = [self.std_handle]
-            # delete tmp_new.db
-            tmp_new_path = os.path.join(sys.rootFolder, "logs", "tmp_new.db")
-            if os.path.exists(tmp_new_path):
-                os.remove(tmp_new_path)
 
     
     @Slot(str, bool, bool, bool)
@@ -1659,9 +1622,11 @@ def run():
     matplotlib.rcParams["font.family"] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = font_names
     
+    pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow(defaultFontNames)
     window.show()
-    window.callFileLoader(window.std_handle)
+    if pathFromArgs:
+        window.callFileLoader(pathFromArgs)
     sys.exit(app.exec_())
     
 if __name__ == '__main__':
