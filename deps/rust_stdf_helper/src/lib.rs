@@ -497,7 +497,7 @@ fn generate_database(
     // do nothing if no file
     let num_files = stdf_paths.len();
     if num_files == 0 {
-        return Ok(());
+        return Err(PyValueError::new_err("Empty STDF path list"));
     }
 
     // convert and check python arguments
@@ -532,7 +532,7 @@ fn generate_database(
     // sending parsing work to
     // other threads.
     // one file per thread
-    for (fid, (fpath, thread_tx)) in stdf_paths
+    for (fid, (fpath, thread_tx)) in stdf_paths.clone()
         .into_iter()
         .zip(thread_txes.into_iter())
         .enumerate()
@@ -615,6 +615,14 @@ fn generate_database(
             Err(e) => return Err(StdfHelperError { msg: e.to_string() }),
         };
         let mut db_ctx = DataBaseCtx::new(&conn)?;
+
+        // store file paths to database
+        for (fid, fpath) in stdf_paths.iter().enumerate() {
+            db_ctx.insert_file_name(rusqlite::params![
+                fid,
+                fpath
+            ])?;
+        }
 
         let mut record_tracker = RecordTracker::new();
         let mut progress_tracker = vec![0.0f32; num_files];

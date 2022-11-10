@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Nov 06 2022
+// Last Modified: Thu Nov 10 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -566,12 +566,12 @@ fn on_mir_rec(
     mir_rec: MIR,
 ) -> Result<(), StdfHelperError> {
     // update File_List table
-    db_ctx.insert_file_list(rusqlite::params![
-        file_id,
+    db_ctx.update_file_list(rusqlite::params![
         &mir_rec.lot_id,
         &mir_rec.sblot_id,
         &mir_rec.proc_id,
-        &mir_rec.flow_id
+        &mir_rec.flow_id,
+        file_id
     ])?;
     // update File_Info table
     db_ctx.insert_file_info(rusqlite::params![

@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Nov 06 2022
+// Last Modified: Thu Nov 10 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -30,7 +30,8 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 BEGIN;
 
                                 CREATE TABLE IF NOT EXISTS File_List (
-                                                        Fid INTEGER,
+                                                        Fid INTEGER PRIMARY KEY,
+                                                        Filename TEXT,
                                                         Lot_ID TEXT, 
                                                         Sublot_ID TEXT,
                                                         Product_ID TEXT,
@@ -180,11 +181,17 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
 
                                 BEGIN;";
 
-static INSERT_FILE_LIST: &str = "INSERT INTO 
-                                    File_List
+static INSERT_FILE_NAME: &str = "INSERT INTO 
+                                    File_List (Fid, Filename)
                                 VALUES 
-                                    (?,?,?,?,?)";
+                                    (?,?)";
 
+static UPDATE_FILE_LIST: &str = "UPDATE File_List SET 
+                                    Lot_ID=:Lot_ID, Sublot_ID=:Sublot_ID, 
+                                    Product_ID=:Product_ID, Flow_ID=:Flow_ID
+                                WHERE 
+                                    Fid=:Fid";
+                                    
 static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
@@ -319,7 +326,8 @@ static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
 
 pub struct DataBaseCtx<'con> {
     db: &'con Connection,
-    insert_file_list_stmt: Statement<'con>,
+    insert_file_name_stmt: Statement<'con>,
+    update_file_list_stmt: Statement<'con>,
     insert_file_info_stmt: Statement<'con>,
     insert_dut_stmt: Statement<'con>,
     update_dut_stmt: Statement<'con>,
@@ -344,7 +352,8 @@ pub struct DataBaseCtx<'con> {
 impl<'con> DataBaseCtx<'con> {
     pub fn new(conn: &'con Connection) -> Result<Self, StdfHelperError> {
         conn.execute_batch(CREATE_TABLE_SQL)?;
-        let insert_file_list_stmt = conn.prepare(INSERT_FILE_LIST)?;
+        let insert_file_name_stmt = conn.prepare(INSERT_FILE_NAME)?;
+        let update_file_list_stmt = conn.prepare(UPDATE_FILE_LIST)?;
         let insert_file_info_stmt = conn.prepare(INSERT_FILE_INFO)?;
         let insert_dut_stmt = conn.prepare(INSERT_DUT)?;
         let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
@@ -367,7 +376,8 @@ impl<'con> DataBaseCtx<'con> {
 
         Ok(DataBaseCtx {
             db: conn,
-            insert_file_list_stmt,
+            insert_file_name_stmt,
+            update_file_list_stmt,
             insert_file_info_stmt,
             insert_dut_stmt,
             update_dut_stmt,
@@ -397,8 +407,14 @@ impl<'con> DataBaseCtx<'con> {
     }
 
     #[inline(always)]
-    pub fn insert_file_list(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
-        self.insert_file_list_stmt.execute(p)?;
+    pub fn insert_file_name(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_file_name_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn update_file_list(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.update_file_list_stmt.execute(p)?;
         Ok(())
     }
 
@@ -519,7 +535,8 @@ impl<'con> DataBaseCtx<'con> {
     #[inline(always)]
     pub fn finalize(self) -> Result<(), StdfHelperError> {
         self.db.execute_batch(COMMIT_AND_SET_LOCKING)?;
-        self.insert_file_list_stmt.finalize()?;
+        self.insert_file_name_stmt.finalize()?;
+        self.update_file_list_stmt.finalize()?;
         self.insert_file_info_stmt.finalize()?;
         self.insert_dut_stmt.finalize()?;
         self.update_dut_stmt.finalize()?;
