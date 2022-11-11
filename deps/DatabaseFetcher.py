@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Sat Nov 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,7 +24,7 @@
 
 import sqlite3
 import numpy as np
-from deps.SharedSrc import record_name_dict
+from deps.SharedSrc import record_name_dict, DUT_SUMMARY_QUERY, DATALOG_QUERY
 
 
 def tryDecode(b: bytes) -> str:
@@ -493,26 +493,9 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         DR_List = []
-        leftStr = ""
-        midStr = ""
-        rightStr = ""
-        sql = "SELECT * FROM Datalog ORDER by Fid"
             
-        for Fid, RecordType, Value, AfterDUTIndex, isBeforePRR in self.cursor.execute(sql):
-            # generate approx location
-            if AfterDUTIndex == 0:
-                leftStr = "|"
-                midStr = RecordType
-                rightStr = "PIR #1"
-            elif isBeforePRR:
-                leftStr = f"PIR #{AfterDUTIndex}"
-                midStr = RecordType
-                rightStr = f"PRR #{AfterDUTIndex}"
-            else:
-                leftStr = f"PIR #{AfterDUTIndex}"
-                midStr = f"PRR #{AfterDUTIndex}"
-                rightStr = RecordType
-            DR_List.append((RecordType, f"\n{Value}\n", f"File{Fid}: {leftStr} ··· {midStr} ··· {rightStr}"))
+        for RecordType, Value, ApproxLoc in self.cursor.execute(DATALOG_QUERY):
+            DR_List.append((RecordType, Value, ApproxLoc))
             
         return DR_List
 
@@ -521,10 +504,10 @@ if __name__ == "__main__":
     from time import time
     count = 1
     df = DatabaseFetcher(3)
-    df.connectDB("deps/rust_stdf_helper/target/rust_test.db")
+    df.connectDB("/Users/nochenon/Documents/GitHub/STDF-Viewer/logs/f1b53d3558944fba91122736ed2ac858.db")
     s = time()
     # print(df.getFileInfo())
-    print(df.getDUTCountDict())
+    # print(df.getDUTCountDict())
     # for _ in range(count):
     # print(df.getDUT_TestInfo(5040, HeadList=[1], SiteList=[-1]))
     
@@ -550,7 +533,7 @@ if __name__ == "__main__":
     
     # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
     # print(df.getDUTIndexFromXY(40, -10, -1))
-    # print(df.getDTR_GDRs())
+    print(df.getDTR_GDRs())
     
     
     e = time()

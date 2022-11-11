@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sat Nov 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -40,14 +40,15 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
         self.color_default = QtGui.QColor("#0096ff")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        if option.state and QtWidgets.QStyle.State_Selected:
-            # font color
-            fgcolor = self.getColor(index, "FG")
-            option.palette.setColor(QtGui.QPalette.HighlightedText, fgcolor)
-            # background color
-            bgcolor = self.combineColors(self.getColor(index, "BG"), self.color_default)
-            # option.palette.setColor(QtGui.QPalette.Highlight, bgcolor)    # change color for listView
-            painter.fillRect(option.rect, bgcolor)    # change color for tableView
+        # if option.state and QtWidgets.QStyle.State_Selected:
+        #     # font color
+        #     fgcolor = self.getColor(index, "FG")
+        #     if fgcolor:
+        #         option.palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, fgcolor)
+        #     # background color
+        #     bgcolor = self.combineColors(self.getColor(index, "BG"), self.color_default)
+        #     # option.palette.setColor(QtGui.QPalette.Highlight, bgcolor)    # change color for listView
+        #     painter.fillRect(option.rect, bgcolor)    # change color for tableView
         QStyledItemDelegate.paint(self, painter, option, index)
 
     def getColor(self, index, pos):
@@ -277,6 +278,26 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
         # return original data otherwise
         return super().data(index, role)
 
+
+class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
+    def __init__(self, parent, fontsize: int) -> None:
+        super().__init__(parent)
+        self.fontsize = fontsize
+        
+    def data(self, index: QtCore.QModelIndex, role: int):        
+        if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
+            if index.column() == 1:
+                return QtCore.Qt.AlignmentFlag.AlignLeft
+            else:
+                # change default aligment to center
+                return QtCore.Qt.AlignmentFlag.AlignCenter
+        
+        if role == QtCore.Qt.ItemDataRole.FontRole:
+            # set default font and size
+            return QtGui.QFont("Courier New", self.fontsize)
+        
+        # return original data otherwise
+        return super().data(index, role)
     
     
 if __name__ == '__main__':

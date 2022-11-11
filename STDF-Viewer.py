@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sat Nov 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -35,7 +35,7 @@ from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.StdfFile import DataInterface
 from deps.MatplotlibWidgets import PlotCanvas, MagCursor
-from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter, ColorSqlQueryModel
+from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter, ColorSqlQueryModel, DatalogSqlQueryModel
 
 
 from deps.uic_stdLoader import stdfLoader
@@ -610,8 +610,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel = QtGui.QStandardItemModel()
         self.ui.dataTable.setModel(self.tmodel)
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
-        # runtime info table
-        self.tmodel_datalog = QtGui.QStandardItemModel()
+        # datalog info table
+        self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
         self.ui.datalogTable.setModel(self.tmodel_datalog)
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
         # test summary table
@@ -751,28 +751,11 @@ class MyWindow(QtWidgets.QMainWindow):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
         
         
-    def updateGDR_DTR_Table(self):
-        # clear
-        self.tmodel_datalog.removeRows(0, self.tmodel_datalog.rowCount())
-        self.tmodel_datalog.removeColumns(0, self.tmodel_datalog.columnCount())
-        
-        fontsize = 13 if isMac else 10
-        headerLabels = [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")]
-        self.tmodel_datalog.setHorizontalHeaderLabels(headerLabels)
+    def updateGDR_DTR_Table(self):        
         header = self.ui.datalogTable.horizontalHeader()
         header.setVisible(True)
         
-        DR_List = self.data_interface.DatabaseFetcher.getDTR_GDRs()
-        
-        for tupleData in DR_List:
-            qitemList = []
-            for i, item in enumerate(tupleData):
-                qitem = QtGui.QStandardItem(item)
-                qitem.setTextAlignment(QtCore.Qt.AlignCenter if i != 1 else QtCore.Qt.AlignLeft)
-                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                qitem.setData(QtGui.QFont("Courier New", fontsize), QtCore.Qt.FontRole)
-                qitemList.append(qitem)
-            self.tmodel_datalog.appendRow(qitemList)
+        self.tmodel_datalog.setQuery(QtSql.QSqlQuery(ss.DATALOG_QUERY, self.db_dut))
                     
         for column in [1, 2]:
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)

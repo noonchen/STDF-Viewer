@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sat Nov 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -53,6 +53,39 @@ DUT_SUMMARY_QUERY = '''SELECT
                                     ELSE 'Unknown' 
                                     END, Flag) AS "DUT Flag"
                         FROM Dut_Info'''
+
+
+# ********** python equivalent ******** #
+# # generate approx location
+# if AfterDUTIndex == 0:
+#     leftStr = "|"
+#     midStr = RecordType
+#     rightStr = "PIR #1"
+# elif isBeforePRR:
+#     leftStr = f"PIR #{AfterDUTIndex}"
+#     midStr = RecordType
+#     rightStr = f"PRR #{AfterDUTIndex}"
+# else:
+#     leftStr = f"PIR #{AfterDUTIndex}"
+#     midStr = f"PRR #{AfterDUTIndex}"
+#     rightStr = RecordType
+DATALOG_QUERY = '''SELECT
+                        RecordType AS "Record Type",
+                        '\n' || Value || '\n' AS "Value",
+                        printf("File%d: %s ··· %s ··· %s",  
+                                Fid,
+                                CASE 
+                                    WHEN AfterDUTIndex == 0 THEN "|" 
+                                    ELSE printf("PIR #%d", AfterDUTIndex) END, 
+                                CASE 
+                                    WHEN isBeforePRR == 1 THEN RecordType 
+                                    ELSE printf("PRR #%d", AfterDUTIndex) END, 
+                                CASE 
+                                    WHEN AfterDUTIndex == 0 THEN "PIR #1" 
+                                    WHEN isBeforePRR == 1 THEN printf("PRR #%d", AfterDUTIndex) 
+                                    ELSE RecordType END) AS "Approx. Location"
+                    FROM
+                        Datalog'''
 
 
 # check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass; treat negative flag (indicate not tested) as pass
