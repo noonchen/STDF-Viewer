@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -163,7 +163,6 @@ class stdReader(QtCore.QObject):
         
     @Slot()
     def readBegin(self):
-        init_interface = False
         di = DataInterface(self.stdPaths)
 
         try:
@@ -175,21 +174,16 @@ class stdReader(QtCore.QObject):
             end = time.time()
             if self.flag.stop:
                 # user terminated...
-                init_interface = False
+                self.dataInterfaceSignal.emit(None)
                 if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False, False, False)
             else:
-                # generated database
-                init_interface = True
-                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
-            
-            # do some data interface preparations
-            if init_interface:
-                di.loadDatabase(databasePath)
                 # send Data_interface object
+                # sqlite cannot be used between thread
+                # thus we need to store the db path and
+                # load database in the main thread
+                di.dbPath = databasePath
                 self.dataInterfaceSignal.emit(di)
-            else:
-                # send None
-                self.dataInterfaceSignal.emit(None)
+                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
                 
         except Exception as e:
             # set stop flag to True to stop rust process

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -124,7 +124,7 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.UI.setupUi(self)
         self.parent = parent
         self.translator = QTranslator(self)
-        self.sd = StyleDelegateForTable_List()
+        self.sd = StyleDelegateForTable_List(self)
         self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = ([], [], [], [], [])
         self.hideSignal = hideSignal
         

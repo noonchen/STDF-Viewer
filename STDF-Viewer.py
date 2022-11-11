@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -29,12 +29,13 @@ import json, urllib.request as rq
 import platform, logging
 import numpy as np
 from base64 import b64decode
-from deps.SharedSrc import *
+from deps.SharedSrc import tab, REC
+import deps.SharedSrc as ss
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.StdfFile import DataInterface
 from deps.MatplotlibWidgets import PlotCanvas, MagCursor
-from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter
+from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter, ColorSqlQueryModel
 
 
 from deps.uic_stdLoader import stdfLoader
@@ -46,7 +47,7 @@ from deps.uic_stdDebug import stdDebugPanel
 
 # pyqt5
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
-from PyQt5 import QtCore, QtWidgets, QtGui
+from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
 from PyQt5.QtCore import Qt, QTranslator, pyqtSignal as Signal, pyqtSlot as Slot
 # pyside2
@@ -77,7 +78,7 @@ setattr(sys, "rootFolder", rootFolder)
 setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
 
 # logger
-init_logger(rootFolder)
+ss.init_logger(rootFolder)
 logger = logging.getLogger("STDF-Viewer")
 
 
@@ -100,7 +101,9 @@ class MyWindow(QtWidgets.QMainWindow):
         sys.excepthook = self.onException
         # data_interface for processing requests by GUI and reading data 
         # from database or files
-        self.data_interface = None        
+        self.data_interface = None
+        # database for dut summary only
+        self.db_dut = QtSql.QSqlDatabase.addDatabase("QSQLITE")
         # used for detecting tab changes
         self.preTab = None             
         # used for detecting site selection changes
@@ -275,7 +278,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # need to rewrite file info table after changing language
         self.updateFileHeader()
         # update flag dictionarys
-        translate_const_dicts(self.tr)
+        ss.translate_const_dicts(self.tr)
     
     
     def dumpConfigFile(self):
@@ -379,6 +382,10 @@ class MyWindow(QtWidgets.QMainWindow):
             msgBox.close()
         
         
+    def getDataInterface(self) -> DataInterface:
+        return self.data_interface
+    
+    
     # TODO
     def getDutSummaryOfIndex(self, dutIndex: int) -> list[str]:
         row = dutIndex - 1
@@ -508,7 +515,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # Append Part ID head & site to the table
             selectedDUTs = self.dutArray[currentMask]
             for dutIndex in selectedDUTs:
-                qitemRow = genQItemList(self.imageFont, 13 if isMac else 10, self.getDutSummaryOfIndex(dutIndex))
+                qitemRow = ss.genQItemList(self.imageFont, 13 if isMac else 10, self.getDutSummaryOfIndex(dutIndex))
                 id_head_site = [qitemRow[i] for i in range(len(hheaderLabels))]     # index0: ID; index1: Head/Site
                 self.tmodel_raw.appendRow(id_head_site)
             # row header
@@ -521,7 +528,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 testDict = self.getData(testTuple, selHeads, selSites)
                 test_data_list = self.stringifyTestData(testDict, valueFormat)
                 test_data_list.pop(0)   # remove test name
-                test_stat_list = [True] * vh_len + list(map(isPass, testDict["flagList"]))
+                test_stat_list = [True] * vh_len + list(map(ss.isPass, testDict["flagList"]))
                 test_flagInfo_list = [""] * vh_len + self.generateDataFloatTips(testDict=testDict)
                 hheaderLabels.append(testDict["TEST_NAME"])  # add test name to header list
                 
@@ -613,7 +620,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.rawDataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.rawDataTable))
         self.ui.rawDataTable.addAction(self.ui.actionReadDutData_TS)   # add context menu for reading dut data
         # dut summary table
-        self.tmodel_dut = QtGui.QStandardItemModel()
+        self.tmodel_dut = ColorSqlQueryModel(self)
         self.proxyModel_tmodel_dut = DutSortFilter()
         self.proxyModel_tmodel_dut.setSourceModel(self.tmodel_dut)
         self.ui.dutInfoTable.setSortingEnabled(True)
@@ -683,7 +690,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                     num = int(numString)
                                 except ValueError:
                                     continue        # skip the invalid site or bin
-                                if isHexColor(hexColor): 
+                                if ss.isHexColor(hexColor): 
                                     oldColorDict[num] = hexColor
                 else:
                     for humanString, param in secDict.items():
@@ -734,44 +741,16 @@ class MyWindow(QtWidgets.QMainWindow):
                 verticalHeader.resizeSection(row, newHeight)
     
     
-    # TODO
     def updateDutSummaryTable(self):
-        # clear
-        self.tmodel_dut.removeRows(0, self.tmodel_dut.rowCount())
-        self.tmodel_dut.removeColumns(0, self.tmodel_dut.columnCount())
-        headerLabels = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
-                        self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("DUT Flag")]
-        if self.containsWafer:
-            headerLabels[-1:-1] = [self.tr("Wafer ID"), "(X, Y)"]    # insert before "DUT Flag"
-        self.tmodel_dut.setHorizontalHeaderLabels(headerLabels)
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
         
-        totalDutCnt = self.dutArray.size
-        self.Row_DutIndexDict = dict(zip(range(totalDutCnt), self.dutArray))
-            
-        # load all duts info into the table, dutArray is ordered and consecutive
-        keyPoints = list(range(5, 106, 5))
-        self.updateStatus(self.tr("Please wait, reading DUT information..."))
-        # get complete dut summary dict from stdf
-        dutSummaryDict = self.DatabaseFetcher.getDUT_Summary()
+        self.tmodel_dut.setQuery(QtSql.QSqlQuery(ss.DUT_SUMMARY_QUERY, self.db_dut))
         
-        for dutIndex in self.dutArray:
-            itemRow = dutSummaryDict[dutIndex] if self.containsWafer else \
-                dutSummaryDict[dutIndex][0:-3]+(dutSummaryDict[dutIndex][-1],)
-            self.tmodel_dut.appendRow(self.genQItemList(itemRow))
-            
-            progress = 100 * dutIndex / totalDutCnt
-            if progress >= keyPoints[0]:
-                self.updateStatus(self.tr("Please wait, reading DUT information {0}%...").format(keyPoints[0]))
-                keyPoints.pop(0)
-        self.updateStatus("")
-        
-        for column in range(header.count()):
+        for column in range(1, header.count()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
         
         
-    # TODO
     def updateGDR_DTR_Table(self):
         # clear
         self.tmodel_datalog.removeRows(0, self.tmodel_datalog.rowCount())
@@ -783,7 +762,7 @@ class MyWindow(QtWidgets.QMainWindow):
         header = self.ui.datalogTable.horizontalHeader()
         header.setVisible(True)
         
-        DR_List = self.DatabaseFetcher.getDTR_GDRs()
+        DR_List = self.data_interface.DatabaseFetcher.getDTR_GDRs()
         
         for tupleData in DR_List:
             qitemList = []
@@ -962,7 +941,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.prepareData([testID], cacheData=True)
             parsedData = self.selData[testID]
             if not failStateChecked:
-                for stat in map(isPass, parsedData["flagList"]):
+                for stat in map(ss.isPass, parsedData["flagList"]):
                     if stat == False:
                         self.failCntDict[testID] = 1
                         return "testFailed"
@@ -1038,7 +1017,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if reDrawTab or forceUpdate:
             # clear all contents in current tab
-            [deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())[::-1]]
+            [ss.deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())[::-1]]
             # add new widget
             qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
             qfigLayout = QtWidgets.QVBoxLayout()
@@ -1069,7 +1048,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 qfigWidget.setLayout(qfigLayout)
                 tabLayout.addWidget(qfigWidget)
                 
-            canvasIndexDict = getCanvasDicts(qfigLayout)    # get current indexes
+            canvasIndexDict = ss.getCanvasDicts(qfigLayout)    # get current indexes
                     
             # delete canvas/toolbars that are not selected
             canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}
@@ -1080,7 +1059,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 # if sites are unselected, remove
                 if (tabType != tab.Bin and (len(selTests) == 0 or not (mp_test_num, mp_pmr, mp_test_name) in selTests)) or (not mp_site in selSites) or (not mp_head in selHeads):
                     # bin don't care about testNum
-                    deleteWidget(qfigLayout.itemAt(index).widget())
+                    ss.deleteWidget(qfigLayout.itemAt(index).widget())
                     if tabType == tab.Trend:
                         matchString = f"trend_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}_{mp_test_name}"
                     elif tabType == tab.Histo:
@@ -1095,7 +1074,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         if key.startswith(matchString):
                             self.cursorDict.pop(key, None)
                     
-            canvasIndexDict = getCanvasDicts(qfigLayout)    # update after deleting some images
+            canvasIndexDict = ss.getCanvasDicts(qfigLayout)    # update after deleting some images
                     
         # generate drawings in trend , histo and bin, but bin doesn't require test items selection
         if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and len(selTests) > 0):
@@ -1106,7 +1085,7 @@ class MyWindow(QtWidgets.QMainWindow):
                         if (head, 0, 0, site) in canvasIndexDict:
                             # no need to draw image for a existed testnum and site
                             continue
-                        calIndex = calculateCanvasIndex(0, head, site, 0, "", canvasIndexDict)
+                        calIndex = ss.calculateCanvasIndex(0, head, site, 0, "", canvasIndexDict)
                         # draw
                         self.genPlot(head, site, (0, 0, ""), tabType, updateTab=True, insertIndex=calIndex)
             else:
@@ -1117,7 +1096,7 @@ class MyWindow(QtWidgets.QMainWindow):
                             if (head, test_num, pmr, site, test_name) in canvasIndexDict:
                                 # no need to draw image for a existed testnum and site
                                 continue
-                            calIndex = calculateCanvasIndex(test_num, head, site, pmr, test_name, canvasIndexDict)
+                            calIndex = ss.calculateCanvasIndex(test_num, head, site, pmr, test_name, canvasIndexDict)
                             # draw
                             self.genPlot(head, site, (test_num, pmr, test_name), tabType, updateTab=True, insertIndex=calIndex)
         # remaining cases are: no test items in tab trend, histo, wafer
@@ -1126,7 +1105,7 @@ class MyWindow(QtWidgets.QMainWindow):
             if tabType in [tab.Trend, tab.Histo, tab.Wafer]:
                 tabLayout = self.tab_dict[tabType]["layout"]
                 # clear current content in the layout in reverse order - no use
-                [deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())]
+                [ss.deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())]
                 if tabType == tab.Trend:
                     matchString = "trend"
                 elif tabType == tab.Histo:
@@ -1152,7 +1131,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # get test value of selected DUTs
             testDict = self.getData(testTuple, selHeads, selSites)
             test_data_list = self.stringifyTestData(testDict, valueFormat)
-            test_stat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
+            test_stat_list = [True] * 5 + list(map(ss.isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
             result = [test_data_list, test_stat_list]
         
         elif "testTuple" not in kargs:
@@ -1231,6 +1210,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 for testTuple in selTests:
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
+                            #TODO
                             rowList = self.prepareStatTableContent(tabType, head=head, site=site, testTuple=testTuple, testRecTypes=testRecTypes)
                             # create QStandardItem and set TextAlignment
                             qitemList = []
@@ -1272,6 +1252,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     color_dict = self.settingParams.hbinColor if binType == "HBIN" else self.settingParams.sbinColor
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
+                            #TODO
                             rowList = self.prepareStatTableContent(tabType, bin=binType, head=head, site=site)
                             if rowList:
                                 # append only if rowList is not empty
@@ -1283,6 +1264,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 for waferIndex, _, _ in selTests:
                     for site in self.getCheckedSites():
                         for head in self.getCheckedHeads():
+                            #TODO
                             rowList = self.prepareStatTableContent(tabType, waferIndex=waferIndex, head=head, site=site)
                             if rowList:
                                 # append only if rowList is not empty
@@ -1419,7 +1401,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if currentTab != tab.Wafer:
             # wafer tab and other tab is separated in the app
             # we don't want to clean trend/histo/bin when we are in wafer tab
-            [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
+            [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
             
             if currentTab == tab.Trend:
                 # clear magic cursor as well, it contains copies of figures
@@ -1444,12 +1426,10 @@ class MyWindow(QtWidgets.QMainWindow):
         # clear stat table
         self.tmodel.removeRows(0, self.tmodel.rowCount())
         # clear tabs' images
-        [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
+        [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
         # clear magic cursor as well, it contains copies of figures
         self.cursorDict = {}
         
-        self.testRecTypeDict = {}
-        self.selData = {}
         self.preTestSelection = set()
         self.preHeadSelection = set()
         self.preSiteSelection = set()
@@ -1466,12 +1446,20 @@ class MyWindow(QtWidgets.QMainWindow):
         if newDI is not None:
             # clear old images & tables
             self.clearAllContents()
-            
+            # close dut summary database if opened
+            if self.db_dut.isOpen():
+                self.db_dut.close()
             # close old data interface
-            if isinstance(self.data_interface, DataInterface):
+            if self.data_interface is not None:
                 self.data_interface.close()
             
+            # working on the new object
             self.data_interface = newDI
+            self.data_interface.loadDatabase()
+            # open new dut summary database
+            self.db_dut.setDatabaseName(self.data_interface.dbPath)
+            if not self.db_dut.open():
+                raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
             # disable/enable wafer tab
             self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
@@ -1543,15 +1531,17 @@ class MyWindow(QtWidgets.QMainWindow):
             self.dutSiteInfo = self.data_interface.dutSiteInfo
             # update UI
             self.settingUI.removeColorBtns()               # remove existing color btns
-            self.settingUI.initColorBtns()
+            self.settingUI.initColorBtns(self.availableSites, 
+                                         self.data_interface.SBIN_dict, 
+                                         self.data_interface.HBIN_dict)
             self.exporter.removeSiteCBs()
-            self.exporter.refreshUI()
+            self.exporter.refreshUI(self.completeTestList)
             self.init_SettingParams()
             self.init_Head_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummaryTable()
             self.updateGDR_DTR_Table()
-            self.updateStatTableContent()
+            # self.updateStatTableContent()
             self.updateTabContent(forceUpdate=True)
 
     

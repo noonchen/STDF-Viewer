@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -34,49 +34,44 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
     """
     Customize highlight style for ListView & TableView
     """
-    color_default = QtGui.QColor("#0096ff")
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.color_default = QtGui.QColor("#0096ff")
 
-    def paint(self, painter, option, index):
-        if option.state & QtWidgets.QStyle.State_Selected:
-            # font color, foreground color
-            # fgcolor = self.getColor(option, index, "FG")
-            option.palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+    def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
+        if option.state and QtWidgets.QStyle.State_Selected:
+            # font color
+            fgcolor = self.getColor(index, "FG")
+            option.palette.setColor(QtGui.QPalette.HighlightedText, fgcolor)
             # background color
-            bgcolor = self.combineColors(self.getColor(option, index, "BG"), self.color_default)
-            option.palette.setColor(QtGui.QPalette.Highlight, bgcolor)    # change color for listView
+            bgcolor = self.combineColors(self.getColor(index, "BG"), self.color_default)
+            # option.palette.setColor(QtGui.QPalette.Highlight, bgcolor)    # change color for listView
             painter.fillRect(option.rect, bgcolor)    # change color for tableView
         QStyledItemDelegate.paint(self, painter, option, index)
 
-    def getColor(self, option, index, pos):
-        qitem = None
+    def getColor(self, index, pos):
         parentWidget = self.parent()
         model = parentWidget.model()
+        dataRole = QtCore.Qt.BackgroundRole if pos == "BG" else QtCore.Qt.ForegroundRole
+        
         # TableView
         if isinstance(parentWidget, QtWidgets.QTableView):
             if isinstance(model, QtCore.QSortFilterProxyModel) or \
                isinstance(model, FlippedProxyModel) or \
                isinstance(model, NormalProxyModel):
                 sourceIndex = model.mapToSource(index)
-                qitem = model.sourceModel().itemFromIndex(sourceIndex)
+                return model.sourceModel().data(sourceIndex, dataRole)
             else:
-                qitem = self.parent().model().itemFromIndex(index)
+                return self.parent().model().data(index, dataRole)
 
         # ListView
         if isinstance(parentWidget, QtWidgets.QListView):
+            # my listView uses proxyModel
             sourceIndex = model.mapToSource(index)
-            row = sourceIndex.row()
-            qitem = self.parent().model().sourceModel().item(row)   # my listView uses proxyModel
+            return self.parent().model().sourceModel().data(sourceIndex, dataRole)
         
-        if qitem:
-            if pos == "BG":
-                if qitem.background() != QtGui.QBrush():
-                        return qitem.background().color()
-            if pos == "FG":
-                if qitem.foreground() != QtGui.QBrush():
-                        return qitem.foreground().color()
-        return option.palette.color(QtGui.QPalette.Base)
-
-    def combineColors(self, c1, c2):
+    def combineColors(self, c1: QtGui.QColor, c2: QtGui.QColor) -> QtGui.QColor:
         c3 = QtGui.QColor()
         c3.setRed(int(c1.red()*0.7 + c2.red()*0.3))
         c3.setGreen(int(c1.green()*0.7 + c2.green()*0.3))
@@ -90,53 +85,55 @@ def getHS(text: str):
     head, site = [int(ele) for ele in l if ele.isdigit()]
     return head << 8 | site
 
-def tryInt(text: str) -> int:
-    try:
-        return int(text)
-    except ValueError:
-        return 0
-
-def getNum(text: str):
-    return tryInt(text.split(" ")[-1])    
 
 class DutSortFilter(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.hsFilterString = QtCore.QRegularExpression(r".*")
+        self.fidColInd = 0
+        self.pidColInd = 1
+        self.hsColInd = 2
+        self.tcntColInd = 3
+        self.ttimColInd = 4
+        self.hbinColInd = 5
+        self.sbinColInd = 6
+        self.widColInd = 7
+        self.xyColInd = 8
+        self.flagColInd = 9
         
     
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
         if left.column() == right.column():
             # get text in the cell
-            textLeft = self.sourceModel().itemData(left)[QtCore.Qt.DisplayRole]
-            textRight = self.sourceModel().itemData(right)[QtCore.Qt.DisplayRole]
-            if left.column() == 0:
-                # sort part id
-                try:
-                    # assume part id is numerice data
+            textLeft = self.sourceModel().data(left, QtCore.Qt.DisplayRole)
+            textRight = self.sourceModel().data(right, QtCore.Qt.DisplayRole)
+            try:
+                if left.column() == 0 or left.column() == 1:
+                    # sort file id || part id
                     return int(textLeft) < int(textRight)
-                except ValueError:
-                    # use default string compare
+                    
+                elif left.column() == self.hsColInd:
+                    # sort head - site
+                    return getHS(textLeft) < getHS(textRight)
+                
+                elif left.column() == 3:
+                    # sort test count
+                    return int(textLeft) < int(textRight)
+                
+                elif left.column() == 4:
+                    # sort test time
+                    return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
+                
+                elif left.column() == 5 or left.column() == 6:
+                    # sort hbin / sbin
+                    return int(textLeft.split(" ")[-1]) < int(textRight.split(" ")[-1])
+
+                elif left.column() == 7 or left.column() == 8 or left.column() == 9:
+                    # sort flag, wafer id, (X, Y)
                     pass
                 
-            elif left.column() == 1:
-                # sort head - site
-                return getHS(textLeft) < getHS(textRight)
-            
-            elif left.column() == 2:
-                # sort test count
-                return tryInt(textLeft) < tryInt(textRight)
-            
-            elif left.column() == 3:
-                # sort test time
-                return tryInt(textLeft.strip("ms")) < tryInt(textRight.strip("ms"))
-            
-            elif left.column() == 4 or left.column() == 5:
-                # sort hbin / sbin
-                return getNum(textLeft) < getNum(textRight)
-
-            elif left.column() == 6 or left.column() == 7 or left.column() == 8:
-                # sort flag, wafer id, (X, Y)
+            except ValueError:
+                # use default string compare
                 pass
             
         return super().lessThan(left, right)
@@ -160,9 +157,9 @@ class DutSortFilter(QSortFilterProxyModel):
 
     
     def filterAcceptsRow(self, source_row: int, source_parent: QtCore.QModelIndex) -> bool:
-        hsIndex = self.sourceModel().index(source_row, 1, source_parent)
+        hsIndex = self.sourceModel().index(source_row, self.hsColInd, source_parent)
         
-        hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex)).hasMatch()
+        hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex, QtCore.Qt.DisplayRole)).hasMatch()
         
         return hsMatched
     
@@ -239,7 +236,6 @@ class NormalProxyModel(QAbstractProxyModel):
         return self.sourceModel().headerData(section, orientation, role)
 
     
-
 class ColorSqlQueryModel(QtSql.QSqlQueryModel):
     def __init__(self, parent) -> None:
         super().__init__(parent)

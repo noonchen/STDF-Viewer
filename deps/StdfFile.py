@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Wed Nov 09 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -92,10 +92,12 @@ class DataInterface:
         self.completeWaferList = []
         
         
-    def loadDatabase(self, dbPath: str):
-        self.DatabaseFetcher.connectDB(dbPath)
+    def loadDatabase(self):
+        if self.dbPath == "":
+            raise ValueError("Invalid database path")
+        
+        self.DatabaseFetcher.connectDB(self.dbPath)
         self.dbConnected = True
-        self.dbPath = dbPath
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
@@ -138,7 +140,7 @@ class DataInterface:
         metaDataList.append(["File Size: ", *list(map(get_file_size, self.stdf.file_paths)) ])
         # dut summary
         dutCntDict = self.DatabaseFetcher.getDUTCountDict()
-        metaDataList.append(["Yield: ", [f"{100*p/t :.2f}%" if t!=0 else "" for (p, t) in zip(dutCntDict["Pass"], dutCntDict["Total"])] ])
+        metaDataList.append(["Yield: ", *[f"{100*p/t :.2f}%" if t!=0 else "" for (p, t) in zip(dutCntDict["Pass"], dutCntDict["Total"])] ])
         metaDataList.append(["DUTs Tested: ", *dutCntDict["Total"] ])
         metaDataList.append(["DUTs Passed: ", *dutCntDict["Pass"] ])
         metaDataList.append(["DUTs Failed: ", *dutCntDict["Failed"] ])

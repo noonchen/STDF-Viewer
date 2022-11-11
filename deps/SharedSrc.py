@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Nov 06 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -34,6 +34,25 @@ settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend"
                    ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 setattr(sys, "CONFIG_NAME", settingNamePair)
+
+
+DUT_SUMMARY_QUERY = '''SELECT
+                            Fid AS "File ID",
+                            PartID AS "Part ID",
+                            'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
+                            TestCount AS "Tests Executed",
+                            TestTime || ' ms' AS "Test Time",
+                            'Bin ' || HBIN AS "Hardware Bin",
+                            'Bin ' || SBIN AS "Software Bin",
+                            WaferIndex AS "Wafer ID",
+                            '(' || XCOORD || ', ' || YCOORD || ')' AS "(X, Y)",
+                            printf("%s - 0x%02X", CASE 
+                                    WHEN Supersede=1 THEN 'Superseded' 
+                                    WHEN Flag & 24 = 0 THEN 'Pass' 
+                                    WHEN Flag & 24 = 8 THEN 'Failed' 
+                                    ELSE 'Unknown' 
+                                    END, Flag) AS "DUT Flag"
+                        FROM Dut_Info'''
 
 
 # check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass; treat negative flag (indicate not tested) as pass

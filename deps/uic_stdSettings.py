@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sat Nov 05 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -362,11 +362,11 @@ class stdfSettings(QtWidgets.QDialog):
                 cB.setParent(None)
     
     
-    def initColorBtns(self):
+    def initColorBtns(self, availableSites: set, SBIN_dict: dict, HBIN_dict: dict):
         # site color picker
         site_color_group = self.settingsUI.site_groupBox
         site_gridLayout = self.settingsUI.gridLayout_site_color
-        for i, siteNum in enumerate([-1]+[i for i in self.parent.availableSites]):
+        for i, siteNum in enumerate([-1]+[i for i in availableSites]):
             siteName = f"Site {siteNum:<2}" if siteNum != -1 else "All Site"
             cB = colorBtn(parent=site_color_group, name=siteName, num=siteNum)
             row = i//3
@@ -376,7 +376,7 @@ class stdfSettings(QtWidgets.QDialog):
         # sbin color picker
         sbin_color_group = self.settingsUI.sbin_groupBox
         sbin_gridLayout = self.settingsUI.gridLayout_sbin_color
-        for i, sbin in enumerate([i for i in sorted(self.parent.SBIN_dict.keys())]):
+        for i, sbin in enumerate([i for i in sorted(SBIN_dict.keys())]):
             binName = f"SBIN {sbin:<2}"
             cB = colorBtn(parent=sbin_color_group, name=binName, num=sbin)
             row = i//3
@@ -386,7 +386,7 @@ class stdfSettings(QtWidgets.QDialog):
         # hbin color picker
         hbin_color_group = self.settingsUI.hbin_groupBox
         hbin_gridLayout = self.settingsUI.gridLayout_hbin_color
-        for i, hbin in enumerate([i for i in sorted(self.parent.HBIN_dict.keys())]):
+        for i, hbin in enumerate([i for i in sorted(HBIN_dict.keys())]):
             binName = f"HBIN {hbin:<2}"
             cB = colorBtn(parent=hbin_color_group, name=binName, num=hbin)
             row = i//3
