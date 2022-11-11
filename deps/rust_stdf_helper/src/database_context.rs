@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Thu Nov 10 2022
+// Last Modified: Sat Nov 12 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -198,14 +198,15 @@ static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO
                                     (?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
-                                Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex, Supersede) 
+                                Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex) 
                             VALUES 
-                                (?,?,?,?,?);";
+                                (?,?,?,?);";
 
 static UPDATE_DUT: &str = "UPDATE Dut_Info SET 
                                 TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, 
                                 HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
-                                WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD 
+                                WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD,
+                                Supersede=:Supersede
                             WHERE 
                                 Fid=:Fid AND DUTIndex=:DUTIndex;";
 

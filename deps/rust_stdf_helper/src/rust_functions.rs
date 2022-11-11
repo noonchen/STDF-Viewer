@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Thu Nov 10 2022
+// Last Modified: Sat Nov 12 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -863,7 +863,6 @@ fn on_pir_rec(
         pir_rec.head_num,
         pir_rec.site_num,
         dut_index,
-        0 // default supersede = false
     ])?;
     Ok(())
 }
@@ -1087,22 +1086,9 @@ fn on_prr_rec(
         false => None,
     };
 
-    // update PRR info to database
-    db_ctx.update_dut(rusqlite::params![
-        prr_rec.num_test,
-        prr_rec.test_t,
-        prr_rec.part_id,
-        prr_rec.hard_bin,
-        prr_rec.soft_bin,
-        prr_rec.part_flg[0],
-        wafer_index,
-        x_coord,
-        y_coord,
-        file_id,
-        dut_index
-    ])?;
-    // check if current dut supersede previous
-    //TODO
+    // check if current dut supersedes previous duts
+    // must do it before updating current PRR
+    // otherwise current dut will be marked as superseded as well
     let supersede_dut = part_flg & 1u8 == 1u8;
     let supersede_die = part_flg & 2u8 == 2u8;
     if supersede_dut {
@@ -1125,6 +1111,26 @@ fn on_prr_rec(
             y_coord
         ])?;
     }
+    
+    // update PRR info to database
+    // 
+    // `supersede` status may have been 
+    // set to 1 by code above, we need
+    // to set it back to 0
+    db_ctx.update_dut(rusqlite::params![
+        prr_rec.num_test,
+        prr_rec.test_t,
+        prr_rec.part_id,
+        prr_rec.hard_bin,
+        prr_rec.soft_bin,
+        prr_rec.part_flg[0],
+        wafer_index,
+        x_coord,
+        y_coord,
+        0, 
+        file_id,
+        dut_index
+    ])?;
     Ok(())
 }
 

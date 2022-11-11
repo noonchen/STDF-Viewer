@@ -27,6 +27,7 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
+from deps.SharedSrc import dutFlagBitInfo, dut_flag_parser
 
 
 
@@ -109,7 +110,8 @@ class DutSortFilter(QSortFilterProxyModel):
             textLeft = self.sourceModel().data(left, QtCore.Qt.DisplayRole)
             textRight = self.sourceModel().data(right, QtCore.Qt.DisplayRole)
             try:
-                if left.column() == 0 or left.column() == 1:
+                if (left.column() == self.fidColInd or 
+                    left.column() == self.pidColInd):
                     # sort file id || part id
                     return int(textLeft) < int(textRight)
                     
@@ -117,19 +119,22 @@ class DutSortFilter(QSortFilterProxyModel):
                     # sort head - site
                     return getHS(textLeft) < getHS(textRight)
                 
-                elif left.column() == 3:
+                elif left.column() == self.tcntColInd:
                     # sort test count
                     return int(textLeft) < int(textRight)
                 
-                elif left.column() == 4:
+                elif left.column() == self.ttimColInd:
                     # sort test time
                     return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
                 
-                elif left.column() == 5 or left.column() == 6:
+                elif (left.column() == self.hbinColInd or 
+                      left.column() == self.sbinColInd):
                     # sort hbin / sbin
                     return int(textLeft.split(" ")[-1]) < int(textRight.split(" ")[-1])
 
-                elif left.column() == 7 or left.column() == 8 or left.column() == 9:
+                elif (left.column() == self.widColInd or 
+                      left.column() == self.xyColInd or 
+                      left.column() == self.flagColInd):
                     # sort flag, wafer id, (X, Y)
                     pass
                 
@@ -270,8 +275,13 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
                     elif dutFlag.startswith("Unknown"): return QtGui.QColor("#FE7B00")
                 
                 elif role == QtCore.Qt.ItemDataRole.ToolTipRole:
-                    #TODO get flag number
-                    if not dutFlag.startswith("Pass"): return "a problematic dut..."
+                    if not dutFlag.startswith("Pass"): 
+                        # get flag number
+                        flag_str = dutFlag.split("-")[-1]
+                        tip = dut_flag_parser(flag_str)
+                        if dutFlag.startswith("Supersede"):
+                            tip = "This dut is replaced by other dut\n" + tip
+                        return tip
                 
                 else:
                     pass
