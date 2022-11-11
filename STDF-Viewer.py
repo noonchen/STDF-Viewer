@@ -163,8 +163,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.toolBar.addAction(self.ui.actionAbout)
         # disable wafer tab in default
         self.ui.tabControl.setTabEnabled(4, False)
-        # close STDF file resources if application is closed
-        # atexit.register(lambda: self.DatabaseFetcher.closeDB())
+        # clean up before exiting
+        atexit.register(self.onExit)
         # a workaround for not canvas not having render attribute
         self.textRender = None
         self.changeLanguage()   # set language after initing subwindow & reading config
@@ -275,10 +275,10 @@ class MyWindow(QtWidgets.QMainWindow):
         _app.installTranslator(self.translatorCode)
         # debugCode
         _app.installTranslator(self.debugPanel.translator_code)
-        # need to rewrite file info table after changing language
-        self.updateFileHeader()
         # update flag dictionarys
         ss.translate_const_dicts(self.tr)
+        # need to rewrite file info table after changing language
+        self.updateFileHeader()        
     
     
     def dumpConfigFile(self):
@@ -382,20 +382,37 @@ class MyWindow(QtWidgets.QMainWindow):
             msgBox.close()
         
         
+    def onExit(self):
+        '''
+        Clean up before closing app
+        '''
+        self.db_dut.close()
+        if self.data_interface:
+            self.data_interface.close()
+        # clean generated database
+        dbFolder = os.path.join(sys.rootFolder, "logs")
+        for f in os.listdir(dbFolder):
+            if f.endswith(".db"):
+                try:
+                    os.remove(os.path.join(dbFolder, f))
+                except:
+                    pass
+    
+    
     def getDataInterface(self) -> DataInterface:
         return self.data_interface
     
     
     # TODO
-    def getDutSummaryOfIndex(self, dutIndex: int) -> list[str]:
-        row = dutIndex - 1
-        dutSumList = [self.tmodel_dut.data(self.tmodel_dut.index(row, col)) for col in range(self.tmodel_dut.columnCount())]
-        if self.containsWafer:
-            return dutSumList
-        else:
-            # insert empty waferIndex & (X,Y) before DUT Flag
-            dutSumList[-1:-1] = ["-", "-"]
-            return dutSumList
+    # def getDutSummaryOfIndex(self, dutIndex: int) -> list[str]:
+    #     row = dutIndex - 1
+    #     dutSumList = [self.tmodel_dut.data(self.tmodel_dut.index(row, col)) for col in range(self.tmodel_dut.columnCount())]
+    #     if self.containsWafer:
+    #         return dutSumList
+    #     else:
+    #         # insert empty waferIndex & (X,Y) before DUT Flag
+    #         dutSumList[-1:-1] = ["-", "-"]
+    #         return dutSumList
     
     
     def showDutDataTable(self, dutIndexes:list):
@@ -427,6 +444,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
   
     
+    #TODO remove if we use pyqtGraph 
     def onInfoBoxChanged(self):
         # update raw data table if:
         # 1. it is activated;
@@ -479,7 +497,6 @@ class MyWindow(QtWidgets.QMainWindow):
                 if testsInTable != set(selTests):
                     updateInfoBox = True
                         
-        #TODO remove if we use pyqtGraph 
         if updateInfoBox:
             if not (len(selTests) > 0 and np.any(currentMask)):
                 # CLEAR rawDataTable in info tab if:
@@ -730,9 +747,11 @@ class MyWindow(QtWidgets.QMainWindow):
                     [qele.setData(qfont, QtCore.Qt.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
-            horizontalHeader.resizeSection(0, 250)
-            horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
-            horizontalHeader.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+            # horizontalHeader.resizeSection(0, 250)
+            horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+            for column in range(1, horizontalHeader.count()):
+                horizontalHeader.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+            
             # resize to content to show all texts, then add additional height to each row
             for row in range(self.tmodel_info.rowCount()):
                 verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.ResizeToContents)

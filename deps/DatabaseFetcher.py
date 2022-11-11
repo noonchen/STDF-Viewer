@@ -69,7 +69,7 @@ class DatabaseFetcher:
         
         self.cursor.execute("SELECT A.Fid, B.wafercnt FROM \
                             (SELECT Fid FROM File_List ) as A \
-                            LEFT JOIN (SELECT Fid, count(*) as wafercnt FROM Wafer_Info) as B \
+                            LEFT JOIN (SELECT Fid, count(*) as wafercnt FROM Wafer_Info GROUP by Fid) as B \
                             on A.Fid = B.Fid \
                             ORDER by A.Fid")
         result = []

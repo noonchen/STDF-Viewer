@@ -27,7 +27,7 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
-from deps.SharedSrc import dutFlagBitInfo, dut_flag_parser
+from deps.SharedSrc import dut_flag_parser
 
 
 

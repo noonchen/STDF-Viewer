@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sat Nov 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -141,11 +141,11 @@ class DataInterface:
         # dut summary
         dutCntDict = self.DatabaseFetcher.getDUTCountDict()
         metaDataList.append(["Yield: ", *[f"{100*p/t :.2f}%" if t!=0 else "" for (p, t) in zip(dutCntDict["Pass"], dutCntDict["Total"])] ])
-        metaDataList.append(["DUTs Tested: ", *dutCntDict["Total"] ])
-        metaDataList.append(["DUTs Passed: ", *dutCntDict["Pass"] ])
-        metaDataList.append(["DUTs Failed: ", *dutCntDict["Failed"] ])
-        metaDataList.append(["DUTs Superseded: ", *dutCntDict["Superseded"] ])
-        metaDataList.append(["DUTs Unknown: ", *dutCntDict["Unknown"] ])
+        metaDataList.append(["DUTs Tested: ", *[str(n) for n in dutCntDict["Total"]] ])
+        metaDataList.append(["DUTs Passed: ", *[str(n) for n in dutCntDict["Pass"]] ])
+        metaDataList.append(["DUTs Failed: ", *[str(n) for n in dutCntDict["Failed"]] ])
+        metaDataList.append(["DUTs Superseded: ", *[str(n) for n in dutCntDict["Superseded"]] ])
+        metaDataList.append(["DUTs Unknown: ", *[str(n) for n in dutCntDict["Unknown"]] ])
         # MIR Record data
         InfoDict = self.DatabaseFetcher.getFileInfo()
         for fn in mirFieldNames:
@@ -170,12 +170,12 @@ class DataInterface:
                 metaDataList.append(["Wafer Center: ", *[f"({x}, {y})" if x is not None and y is not None else "" for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
             if "WF_FLAT" in InfoDict:
                 flat_orient_tuple = InfoDict.pop("WF_FLAT")
-                metaDataList.append(["Wafer Flat Direction: ", *[direction_symbol.get(d, d) if d is not None else "" for d in flat_orient_tuple] ])
+                metaDataList.append(["Wafer Flat Direction: ", *[wafer_direction_name(d) if d is not None else "" for d in flat_orient_tuple] ])
             if "POS_X" in InfoDict and "POS_Y" in InfoDict:
                 pos_x_tuple = InfoDict.pop("POS_X")
                 pos_y_tuple = InfoDict.pop("POS_Y")
                 self.waferOrientation = (pos_x_tuple, pos_y_tuple)
-                metaDataList.append(["Wafer XY Direction: ", *[f"({direction_symbol.get(x_orient, x_orient)}, {direction_symbol.get(y_orient, y_orient)})" if x_orient is not None and y_orient is not None else "" for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+                metaDataList.append(["Wafer XY Direction: ", *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" if x_orient is not None and y_orient is not None else "" for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
         # append other info: ATR, RDR, SDRs, sort names for better display
         for propertyName in sorted(InfoDict.keys()):
             value: tuple = InfoDict[propertyName]

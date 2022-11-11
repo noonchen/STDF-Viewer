@@ -316,6 +316,11 @@ def return_state_parser(RTN_STAT: int) -> str:
         return ""
 
 
+def wafer_direction_name(symbol: str) -> str:
+    global direction_symbol
+    return direction_symbol.get(symbol, symbol)
+
+
 # TODO
 def generateDataFloatTips(testDict: dict) -> list:
     '''testDict should be return by getData()'''
