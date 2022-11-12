@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Nov 12 2022
+# Last Modified: Sun Nov 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -233,9 +233,9 @@ class DatabaseFetcher:
         binType = "HBIN" if isHBIN else "SBIN"
         sql_param = {"HEAD_NUM":head, "SITE_NUM":site}
         if site == -1:
-            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM GROUP by Fid, {binType}'''
+            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND Supersede=0 GROUP by Fid, {binType}'''
         else:
-            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM GROUP by Fid, {binType}'''
+            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM AND Supersede=0 GROUP by Fid, {binType}'''
             
         for fid, bin_num, count in self.cursor.execute(sql, sql_param):
             if bin_num is None: continue
@@ -391,35 +391,40 @@ class DatabaseFetcher:
         return dict(zip( ["xmax", "xmin", "ymax", "ymin"], sqlResult))
     
     
-    #TODO
     def getWaferInfo(self):
+        '''a dict contains wafer info extracted from WRR, use (wafer index, file id) as key '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        waferDict = {}     # key: waferIndex, value: {"WAFER_ID"}
+        waferDict = {}     # key: (waferIndex, fid), value: {"WAFER_ID"}
         sqlResult = self.cursor.execute("SELECT * FROM Wafer_Info ORDER by WaferIndex")
         col = [tup[0] for tup in self.cursor.description]   # column names
+        fid_pos = col.index("Fid")
         waferIndex_pos = col.index("WaferIndex")
         
         for valueList in sqlResult:
-            WaferIndex = valueList[waferIndex_pos]
+            fid = valueList.pop(fid_pos)
+            waferIndex = valueList.pop(waferIndex_pos)
             valueList = ["N/A" if ele is None else ele for ele in valueList]    # Replace all None to N/A
-            waferDict[WaferIndex] = dict(zip(col, valueList))
+            waferDict[(waferIndex, fid)] = dict(zip(col, valueList))
             
         return waferDict
     
     
-    def getWaferCoordsDict(self, waferIndex: int, head: int, site: int, fid: int) -> dict[int, list]:
+    def getWaferCoordsDict(self, waferIndex: int, site: int, fid: int) -> dict[int, list]:
+        '''get xy of all dies in the given wafer and sites, indexed by SBIN, 
+        `head` is not required since a wafer is tested on a single head'''
+        
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         coordsDict: dict[int, list] = {}     # key: sbin, value: coords list
         if site == -1:
             sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND HEAD_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, head, fid)
+                WHERE WaferIndex=? AND Fid=? AND Supersede=0 ORDER by SBIN"
+            sql_param = (waferIndex, fid)
         else:
             sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND HEAD_NUM=? AND SITE_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, head, site, fid)
+                WHERE WaferIndex=? AND SITE_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
+            sql_param = (waferIndex, site, fid)
             
         for SBIN, XCOORD, YCOORD in self.cursor.execute(sql, sql_param):
             coordsDict.setdefault(SBIN, []).append((XCOORD, YCOORD))

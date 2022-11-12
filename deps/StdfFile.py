@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sat Nov 12 2022
+# Last Modified: Sun Nov 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -55,6 +55,13 @@ class StdfFiles:
                 self.file_type.append("orig")
                 self.file_handles.append(open(path, 'rb'))
         
+    def getFileHandle(self, fid: int):
+        if fid < len(self.file_handles):
+            return self.file_handles[fid]
+        else:
+            raise IndexError(f"only {len(self.file_handles)} files opened, \
+                             invalid index {fid}")
+    
     def seek(self, fid: int, offset: int, whence: int = 0):
         self.file_handles[fid].seek(offset, whence)
         
@@ -69,6 +76,13 @@ class StdfFiles:
 
 
 class DataInterface:
+    '''
+    `DataInterface` provides APIs for STDF-Viewer UI to retrieve
+    data from database or underlying file stream.
+    
+    The main purpose is to decouple IO code from GUI logic...
+    '''
+    
     def __init__(self, paths: list[str]):
         self.stdf = StdfFiles(paths)
         self.num_files = len(paths)
@@ -80,7 +94,7 @@ class DataInterface:
         self.availableSites = []
         self.availableHeads = []
         self.testRecTypeDict = {}       # used for get test record type
-        # self.waferInfoDict = {}
+        self.waferInfoDict = {}
         self.failCntDict = {}
         self.dutArrays = []             # complete dut arrays from all files
         self.dutSiteInfo = []           # site of each dut in self.dutArray
@@ -110,6 +124,8 @@ class DataInterface:
         self.availableHeads = self.DatabaseFetcher.getHeadList()        
         # get all MPR test numbers
         self.testRecTypeDict = self.DatabaseFetcher.getTestRecordTypeDict()
+        # wafer info
+        self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
         # update fail cnt dict
         self.failCntDict = self.DatabaseFetcher.getTestFailCnt()
         # for dut masking
@@ -436,7 +452,7 @@ class DataInterface:
         `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
-        `_selectFiles`: currently not in use
+        `_selectFiles`: default read all files, currently not in use
         `floatFormat`: format string for float, e.g. "%.3f"
         
         return a dictionary contains:
@@ -500,109 +516,98 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "HHeader": hHeaderLabels, "Rows": rowList}
     
     
-    # TODO
-    def prepareStatTableContent(self, tabType, **kargs):
-        if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
-            head = kargs["head"]
-            site = kargs["site"]
-            testTuple = kargs["testTuple"]
-            testRecTypes = kargs["testRecTypes"]    # used for determining the format of output list
-            valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
+    def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []):
+        '''
+        Generate HBIN/SBIN distribution of selected heads and sites
+        
+        `selectHeads`: list of selected STDF heads
+        `selectSites`: list of selected STDF sites
+        `_selectFiles`: default read all files, currently not in use
+        
+        return a dictionary contains:
+        `VHeader`: list, vertial header
+        `Rows`: list[list], bin data
+        `isHBIN`: list[bool], bin type indication of each row
+        '''
+        ## VHeader
+        vHeaderLabels = []
+        ## Rows
+        rowList = []
+        ## isHBIN
+        isHbinList = []
+        
+        default_order = [["H", "S"], selectHeads, selectSites, range(self.num_files)]
+        for binType, head, site, fid in itertools.product(*default_order):
+            isHbin: bool = binType == "H"
+            binFullName = "Hardware Bin" if isHbin else "Software Bin"
+            binInfoDict = self.HBIN_dict if isHbin else self.SBIN_dict
 
-            # return data for statistic table
-            testDict = self.getData(testTuple, [head], [site])
-            if testDict:
-                test_num, pmr, test_name = testTuple
-                # basic PTR stats
-                CpkString = "%s" % "∞" if testDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDict["Cpk"]) else valueFormat % testDict["Cpk"])
-                MeanString = valueFormat % testDict["Mean"]
-                MedianString = valueFormat % testDict["Median"]
-                SDevString = valueFormat % testDict["SDev"]
-                MinString = valueFormat % testDict["Min"]
-                MaxString = valueFormat % testDict["Max"]
-                
-                rowList = ["%d / %s / %s" % (test_num, f"Head {head}", "All Sites" if site == -1 else f"Site{site}"),
-                        test_name,
-                        testDict["Unit"],
-                        "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
-                        "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
-                        "%d" % list(map(isPass, testDict["flagList"])).count(False),
-                        CpkString,
-                        MeanString,
-                        MedianString,
-                        SDevString,
-                        MinString,
-                        MaxString]
-                # match the elements of table header
-                if REC.FTR in testRecTypes:
-                    rowList[2:2] = [testDict["VECT_NAM"]] if testDict["recHeader"] == REC.FTR else [""]
-                if REC.MPR in testRecTypes:
-                    rowList[2:2] = [str(pmr), testDict["LOG_NAM"], testDict["PHY_NAM"], testDict["CHAN_NAM"]] if testDict["recHeader"] == REC.MPR else ["", "", "", ""]
-                
-            else:
-                # some weird files might in this case, in which the number of 
-                # test items in different sites are not the same
-                rowList = ["N/A"] * 12
-            return rowList
-        
-        elif tabType == tab.Bin:
-            bin = kargs["bin"]
-            head = kargs["head"]
-            site = kargs["site"]
-            rowList = []
+            vHeaderLabels.append( "{} / Head{} / {}{}".format(binFullName, 
+                                                              head, 
+                                                              "All Sites" if site == -1 else f"Site{site}", 
+                                                              "" if len(self.num_files) == 1 else f" / File{fid}"))
+            isHbinList.append(isHbin)
+            # preparations for calculation
+            binSummary = self.DatabaseFetcher.getBinStats(head, site, isHbin)
+            totalBinCnt = sum([cntList[fid] for _, cntList in binSummary.items()])
+            # iter thru binSummary, calculate percentage of each bin
+            row = []
+            for bin_num in sorted(binSummary.keys()):
+                bin_cnt = binSummary[bin_num][fid]
+                if bin_cnt == 0: 
+                    continue
+                bin_name = binInfoDict.get(bin_num, {}).get("BIN_NAME", "NO NAME")
+                item = ["{}\nBin{}: {:.1f}%".format(bin_name, 
+                                                    bin_num, 
+                                                    100*bin_cnt/totalBinCnt), 
+                        bin_num]
+                row.append(item)
+            rowList.append(row)
             
-            if bin == "HBIN":
-                fullName = self.tr("Hardware Bin")
-                bin_dict = self.HBIN_dict
-            elif bin == "SBIN":
-                fullName = self.tr("Software Bin")
-                bin_dict = self.SBIN_dict
-            
-            binStats = self.DatabaseFetcher.getBinStats(head, site, bin)
-            # binNumList = [item[0] for item in binStats]
-            total = sum([binStats[bin] for bin in binStats.keys()])
-            
-            rowList.append("%s / %s / %s" % (f"{fullName}", f"Head{head}", self.tr("All Sites") if site == -1 else f"Site{site}"))
-            for bin_num in sorted(binStats.keys()):
-                cnt = binStats[bin_num]
-                if cnt == 0: continue
-                item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/total), bin_num]
-                if bin_num in bin_dict:
-                    # add bin name
-                    item[0] = self.tr(bin_dict[bin_num]["BIN_NAME"]) + "\n" + item[0]
-                rowList.append(item)
-                                    
-            return rowList
-        
-        elif tabType == tab.Wafer:
-            waferIndex = kargs["waferIndex"]
-            head = kargs["head"]
-            site = kargs["site"]
-            rowList = []
-            
-            if waferIndex == -1:
-                # -1 indicates stacked map, return empty table
-                return rowList
-            
-            # we need sbin dict to retrieve software bin name
-            bin_dict = self.SBIN_dict
-            
-            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, head, site)
-            total = sum([len(coordList) for coordList in coordsDict.values()])
-            waferID = self.waferInfoDict[waferIndex]["WAFER_ID"]
-            
-            rowList.append("%s / %s / %s" % (f"{waferID}", f"Head{head}", self.tr("All Sites") if site == -1 else f"Site{site}"))
-            for bin_num in sorted(coordsDict.keys()):
-                cnt = len(coordsDict[bin_num])
-                if cnt == 0: continue
-                item = ["Bin%d: %.1f%%"%(bin_num, 100*cnt/total), bin_num]
-                if bin_num in bin_dict:
-                    # add bin name
-                    item[0] = self.tr(bin_dict[bin_num]["BIN_NAME"]) + "\n" + item[0]
-                rowList.append(item)
-                                    
-            return rowList
+        return {"VHeader": vHeaderLabels, "Rows": rowList, "isHBIN": isHbinList}
     
+    
+    def getWaferStatistics(self, waferTuples: list[tuple], selectSites:list[int]):
+        '''
+        Generate wafer statistics and SBIN distribution
+        
+        `waferTuples`: (wafer index, file id)
+        `selectSites`: list of selected STDF sites
+        
+        return a dictionary contains:
+        `VHeader`: list, vertial header
+        `Rows`: list[list], statistic data
+        '''
+        ## VHeader
+        vHeaderLabels = []
+        ## Rows
+        rowList = []
+        for (waferIndex, fid), site in itertools.product(waferTuples, selectSites):
+            if waferIndex == -1:
+                # stacked wafer, only contains fail count info, skip for now...
+                # TODO may be we can calculate some data for stacked wafer?
+                continue
+            
+            waferID = self.waferInfoDict[(waferIndex, fid)]["WAFER_ID"]
+            vHeaderLabels.append("{} / {}{}".format(waferID, 
+                                                    "All Sites" if site == -1 else f"Site{site}", 
+                                                    "" if len(self.num_files) == 1 else f" / File{fid}"))
+            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, site, fid)
+            totalDies = sum([len(coordList) for coordList in coordsDict.values()])
+            row = []
+            for sbin_num in sorted(coordsDict.keys()):
+                sbin_cnt = len(coordsDict[sbin_num])
+                if sbin_cnt == 0: 
+                    continue
+                sbin_name = self.SBIN_dict.get(sbin_num, {}).get("BIN_NAME", "NO NAME")
+                item = ["{}\nBin{}: {:.1f}%".format(sbin_name, 
+                                                    sbin_num, 
+                                                    100*sbin_cnt/totalDies), 
+                        sbin_num]
+                row.append(item)
+            rowList.append(row)
+        
+        return {"VHeader": vHeaderLabels, "Rows": rowList}    
 
 
 if __name__ == "__main__":
