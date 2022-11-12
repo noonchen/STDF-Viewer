@@ -146,37 +146,70 @@ class DatabaseFetcher:
         return HeadList
     
     
-    #TODO
-    def getPinNames(self, testNum:int, testName:str, pinType:str = "RTN"):
-        '''return dict of pmr info'''
+    def getPinNames(self, testNum:int, testName:str, isRTN=True):
+        '''return test pin info of a MPR or FTR, fid is used as the 
+        index of the nested list.
+        
+        PMR -> [list]
+        LOG_NAM -> [list]
+        PHY_NAM -> [list]
+        CHAN_NAM -> [dict]
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        # must keep orignal order of PMR index, it's related to the order of values
+        # Pin_Map: a table that stores all PMR records
+        # TestPin_Map: a table that tracks PMR indexes that are tested in MPR or FTR
+        sql = """
+            SELECT 
+                A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM 
+            FROM 
+                ((SELECT 
+                    ROWID, PMR_INDX 
+                FROM 
+                    TestPin_Map 
+                WHERE 
+                    PIN_TYPE=:PIN_TYPE AND TEST_ID in 
+                        (SELECT 
+                            TEST_ID 
+                        FROM 
+                            Test_Info 
+                        WHERE 
+                            TEST_NUM=:TEST_NUM AND TEST_NAME=:TEST_NAME AND Fid=:Fid)) as A 
+                INNER JOIN 
+                    Pin_Map 
+                ON 
+                    A.PMR_INDX=Pin_Map.PMR_INDX AND Pin_Map.Fid=:Fid)
+            ORDER BY A.ROWID"""
             
         # note: channel name is head-site dependent
-        pinNameDict = {"PMR": [], "LOG_NAM": [], "PHY_NAM": [], "CHAN_NAM": {}}
-        # must keep orignal order of PMR index, it's related to the order of values
-        sql = "SELECT A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM FROM \
-            ((SELECT PMR_INDX FROM TestPin_Map WHERE PIN_TYPE=? AND TEST_ID in \
-                (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) ORDER by ROWID) as A \
-            INNER JOIN \
-            Pin_Map on A.PMR_INDX = Pin_Map.PMR_INDX)"
-        sqlResult = self.cursor.execute(sql, [pinType, testNum, testName])
-        for pmr_index, physical_name, logic_name, HEAD_NUM, SITE_NUM, channel_name in sqlResult:
-            LOG_NAM = "" if logic_name is None else logic_name
-            PHY_NAM = "" if physical_name is None else physical_name
-            CHAN_NAM = "" if channel_name is None else channel_name
-            # same pmr will loop multiple times in multi-site file, use it to detect duplicates
-            # don't use XXX_NAM, since it might be "" even if PMR is different
-            duplicate = pmr_index in pinNameDict["PMR"]
-            
-            if not duplicate:
-                pinNameDict["PMR"].append(pmr_index)
-                pinNameDict["LOG_NAM"].append(LOG_NAM)
-                pinNameDict["PHY_NAM"].append(PHY_NAM)
-            # channel name is vary from site to site
-            if not (HEAD_NUM, SITE_NUM) in pinNameDict["CHAN_NAM"]:
-                pinNameDict["CHAN_NAM"][(HEAD_NUM, SITE_NUM)] = [CHAN_NAM]
-            else:
-                pinNameDict["CHAN_NAM"][(HEAD_NUM, SITE_NUM)].append(CHAN_NAM)
+        pinNameDict = {"PMR": [], "LOG_NAM": [], "PHY_NAM": [], "CHAN_NAM": []}
+        pinType = "RTN" if isRTN else "PGM"
+        params = {"PIN_TYPE": pinType, "TEST_NUM": testNum, "TEST_NAME": testName, "Fid": 0}
+        
+        for fid in range(self.num_files):
+            params["Fid"] = fid
+            sqlResult = self.cursor.execute(sql, params)
+            tmpPMR = []
+            tmpLOG = []
+            tmpPHY = []
+            tmpCHAN = {}
+            for pmr_index, physical_name, logic_name, HEAD_NUM, SITE_NUM, channel_name in sqlResult:
+                LOG_NAM = "" if logic_name is None else logic_name
+                PHY_NAM = "" if physical_name is None else physical_name
+                CHAN_NAM = "" if channel_name is None else channel_name
+                # same pmr will loop multiple times in multi-site file, use it to detect duplicates
+                if pmr_index not in tmpPMR:
+                    tmpPMR.append(pmr_index)
+                    tmpLOG.append(LOG_NAM)
+                    tmpPHY.append(PHY_NAM)
+                # channel name might be different in other sites
+                tmpCHAN.setdefault( (HEAD_NUM, SITE_NUM), []).append(CHAN_NAM)
+            # done with one file, append result
+            pinNameDict["PMR"].append(tmpPMR)
+            pinNameDict["LOG_NAM"].append(tmpLOG)
+            pinNameDict["PHY_NAM"].append(tmpPHY)
+            pinNameDict["CHAN_NAM"].append(tmpCHAN)
             
         return pinNameDict
     
@@ -504,7 +537,7 @@ if __name__ == "__main__":
     from time import time
     count = 1
     df = DatabaseFetcher(3)
-    df.connectDB("/Users/nochenon/Documents/GitHub/STDF-Viewer/logs/f1b53d3558944fba91122736ed2ac858.db")
+    df.connectDB("/Users/nochenon/Documents/GitHub/STDF-Viewer/deps/rust_stdf_helper/target/rust_test.db")
     s = time()
     # print(df.getFileInfo())
     # print(df.getDUTCountDict())
@@ -533,7 +566,8 @@ if __name__ == "__main__":
     
     # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
     # print(df.getDUTIndexFromXY(40, -10, -1))
-    print(df.getDTR_GDRs())
+    # print(df.getDTR_GDRs())
+    print(df.getPinNames(21000, "Continuty_digital_pos:passVolt_mV[1]", True))
     
     
     e = time()
