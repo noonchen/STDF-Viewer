@@ -12,7 +12,7 @@
 #
 
 
-import os, zipfile
+import os, zipfile, itertools
 import numpy as np
 from indexed_gzip import IndexedGzipFile
 from indexed_bzip2 import IndexedBzip2File
@@ -71,7 +71,8 @@ class StdfFiles:
 class DataInterface:
     def __init__(self, paths: list[str]):
         self.stdf = StdfFiles(paths)
-        self.DatabaseFetcher = DatabaseFetcher(len(paths))
+        self.num_files = len(paths)
+        self.DatabaseFetcher = DatabaseFetcher(self.num_files)
         self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
@@ -90,6 +91,11 @@ class DataInterface:
         # all test list or wafers in the database
         self.completeTestList = []
         self.completeWaferList = []
+        # cache for faster access
+        # key: testID, (test_num, test_name)
+        # value: [testDataDict], file id as index, 
+        # if file id doesn't contains testID, testDataDict is an empty dict
+        self.dataCache = {}
         
         
     def loadDatabase(self):
@@ -249,7 +255,9 @@ class DataInterface:
                        
     # TODO
     def prepareData(self, testIDs: list, cacheData: bool = False):
-        '''testID: tuple of test num and test name, for identifying tests'''
+        '''testID: tuple of test num and test name, for identifying tests
+        Read testID data from ALL files
+        '''
         if not cacheData:
             # remove testID that are not selected anymore
             for pre_test_num, _, pre_test_name in self.preTestSelection:
@@ -267,75 +275,85 @@ class DataInterface:
             self.selData[testID] = self.getDataFromOffsets(testInfo)
             
             
-    # TODO
-    def getData(self, testTuple:tuple, selectHeads:list = [], selectSites:list = [], selectDUTs: list = []):
-        # keys in output: TEST_NAME / TEST_NUM / flagList / LL / HL / Unit / dataList / DUTIndex / Min / Max / Median / Mean / SDev / Cpk
-        # pmr is only meanful in MPR, for other records, no use
+# # get mask from selectDUTs
+# selMask = np.zeros(self.dutArray.size, dtype=bool)
+# for dutIndex in selectDUTs:
+# selMask |= (self.dutArray==dutIndex)
+
+    
+    def getTestDataCore(self, testTuple:tuple, dutMask: np.ndarray, FileID: int) -> dict:
+        '''
+        Get parsed data of the given testTuple, test duts are constrained by dutMask and fid.
+        
+        ### avoid calling this function directly, as the data may not be presented in the `dataCache` yet
+        
+        `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
+        `dutMask`: mask for filtering duts of interest from the complete dutArray
+        `FileID`: index of loaded files
+        
+        return a dictionary contains:
+        `TEST_NAME` / `TEST_NUM` / `flagList` / 
+        `LL` / `HL` / `Unit` / `dataList` / `DUTIndex` / 
+        `Min` / `Max` / `Median` / `Mean` / `SDev` / `Cpk`
+        '''
         test_num, pmr, test_name = testTuple
         testID = (test_num, test_name)
-        if not testID in self.selData: raise KeyError(f"{testID} is not prepared")
+        if testID not in self.dataCache: 
+            # if calling this function without prepare data
+            # raise exception
+            raise KeyError(f"{testID} is not prepared!")
         
-        outData = {}
-        # use heads & sites to generate mask by default, if selectDUTs is available, use instead.
-        if len(selectDUTs) == 0:
-            selMask = self.getMaskFromHeadsSites(selectHeads, selectSites)
-        else:
-            # get mask from selectDUTs
-            selMask = np.zeros(self.dutArray.size, dtype=bool)
-            for dutIndex in selectDUTs:
-                selMask |= (self.dutArray==dutIndex)
+        testCache: dict = self.dataCache[testID][FileID]
+        if len(testCache) == 0:
+            # if current file doesn't contain this testID
+            # return empty dict
+            return {}
         
-        recHeader = self.selData[testID]["recHeader"]
+        outData = {}        
+        recHeader = testCache["recHeader"]
         outData["recHeader"] = recHeader
-        # store original for testID-lookup, I'll append pmr to MPR test name for displaying
+        # store original for testID lookup
         outData["TEST_NAME_ORIG"] = test_name
+        # pmr will be add to TEST_NAME for MPR
         outData["TEST_NAME"] = test_name
         outData["TEST_NUM"] = test_num
-        outData["LL"] = self.selData[testID]["LL"]
-        outData["HL"] = self.selData[testID]["HL"]
-        outData["LSpec"] = self.selData[testID]["LSpec"]
-        outData["HSpec"] = self.selData[testID]["HSpec"]
-        outData["Unit"] = self.selData[testID]["Unit"]
-        outData["Scale"] = self.selData[testID]["Scale"]
-        outData["DUTIndex"] = self.dutArray[selMask]
-        outData["flagList"] = self.selData[testID]["flagList"][selMask]
+        outData["LL"] = testCache["LL"]
+        outData["HL"] = testCache["HL"]
+        outData["LSpec"] = testCache["LSpec"]
+        outData["HSpec"] = testCache["HSpec"]
+        outData["Unit"] = testCache["Unit"]
+        outData["Scale"] = testCache["Scale"]
+        outData["DUTIndex"] = self.dutArrays[FileID][dutMask]
+        outData["flagList"] = testCache["flagList"][dutMask]
         
         if recHeader == REC.MPR:
             # append pmr# to test name
             if pmr > 0: outData["TEST_NAME"] = f"{test_name} #{pmr}"
             try:
                 # the index of test value is the same as the index of {pmr} in PMR list
-                dataIndex = self.selData[testID]["PMR_INDX"].index(pmr)
-                # channel name is vary from different sites, get selected (head, site) first
-                channelNameDict = self.selData[testID]["CHAN_NAM"]
-                pinNameKeys = set()
-                if len(selectDUTs) == 0:
-                    # get from heads & sites
-                    [pinNameKeys.add((h, s)) for h in selectHeads for s in (selectSites if not -1 in selectSites else self.availableSites)]
-                else:
-                    # get from selectDUTs
-                    for dutIndex in selectDUTs:
-                        arrIndex = dutIndex - 1     # dutIndex starts from 1
-                        for h, siteL in self.dutSiteInfo.items():
-                            # get site number of dutIndex
-                            s = siteL[arrIndex]
-                            if not np.isnan(s):
-                                # if site number is valid, means dutIndex is in (h, s)
-                                pinNameKeys.add( (h, int(s)) )
-                                break
+                dataIndex = testCache["PMR_INDX"].index(pmr)
+                # channel name differs from sites, get possible (head, site) first
+                channelNameDict = testCache["CHAN_NAM"]
+                hsSet = set()
+                for h, siteArray in self.dutSiteInfo[FileID].items():
+                    dutSite = set(siteArray[dutMask])
+                    # if site number is not nan, means there is a dut in (head, site) 
+                    [hsSet.add( (h, s) ) for s in dutSite if not np.isnan(s)]
+                # push non-empty channel names into a list
                 ChanNames = []
-                for hskey in pinNameKeys:
+                for hskey in hsSet:
                     if hskey in channelNameDict:
-                        # add boundary check to prevent index error, we don't want to enter except clause just because some name cannot find.
+                        # add boundary check to prevent index error, we don't want to hit exception 
+                        # just because some name cannot be found
                         ChanName = channelNameDict[hskey][dataIndex] if len(channelNameDict[hskey]) > dataIndex else ""
                         if ChanName != "":
                             ChanNames.append(ChanName)
 
                 outData["CHAN_NAM"] = ";".join(ChanNames)
-                outData["LOG_NAM"] = self.selData[testID]["LOG_NAM"][dataIndex]
-                outData["PHY_NAM"] = self.selData[testID]["PHY_NAM"][dataIndex]
-                outData["dataList"] = self.selData[testID]["dataList"][dataIndex][selMask]
-                outData["statesList"] = self.selData[testID]["statesList"][dataIndex][selMask]
+                outData["LOG_NAM"] = testCache["LOG_NAM"][dataIndex]
+                outData["PHY_NAM"] = testCache["PHY_NAM"][dataIndex]
+                outData["dataList"] = testCache["dataList"][dataIndex][dutMask]
+                outData["statesList"] = testCache["statesList"][dataIndex][dutMask]
             except (ValueError, IndexError) as e:
                 outData["CHAN_NAM"] = ""
                 outData["LOG_NAM"] = ""
@@ -343,15 +361,15 @@ class DataInterface:
                 outData["dataList"] = np.array([])
                 outData["statesList"] = np.array([])
                 if isinstance(e, IndexError):
-                    self.updateStatus(f"Cannot found test data for PMR {pmr} in MPR test {testID}")
+                    print(f"Cannot found test data of PMR {pmr} in MPR test {testID}")
                 else:
                     if pmr != 0:
                         # pmr != 0 indicates a valid pmr
-                        self.updateStatus(f"PMR {pmr} is not found in {testID}'s PMR list")
+                        print(f"PMR {pmr} is not found in {testID}'s PMR list")
         else:
-            outData["dataList"] = self.selData[testID]["dataList"][selMask]
+            outData["dataList"] = testCache["dataList"][dutMask]
             if recHeader == REC.FTR:
-                outData["VECT_NAM"] = self.selData[testID]["VECT_NAM"]
+                outData["VECT_NAM"] = testCache["VECT_NAM"]
         
         # get statistics
         if outData["dataList"].size > 0 and not np.all(np.isnan(outData["dataList"])):
@@ -359,14 +377,129 @@ class DataInterface:
             outData["Max"] = np.nanmax(outData["dataList"])
             outData["Median"] = np.nanmedian(outData["dataList"])
         else:
-            # these functions throw error on empty array
+            # functions above throw error on empty array,
+            # manually set to nan
             outData["Min"] = np.nan
             outData["Max"] = np.nan
             outData["Median"] = np.nan
                 
         outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LL"], outData["HL"], outData["dataList"])
         return outData
-                
+    
+    
+    def getMaskFromHeadsSites(self, selectHeads:list[int], selectSites:list[int], FileID: int) -> np.ndarray:
+        '''
+        Create an array mask that will work on dutArray
+        and can be used for filtering duts of interest.
+        '''
+        mask = np.zeros(self.dutArrays[FileID], dtype=bool)
+        for head in selectHeads:
+            if -1 in selectSites:
+                # select all sites (site is unsigned int)
+                mask |= (self.dutSiteInfo[FileID][head]>=0)
+                # skip current head, since we have 
+                # all duts selected
+                continue
+            
+            for site in selectSites:
+                mask |= (self.dutSiteInfo[FileID][head]==site)
+        
+        return mask
+        
+    
+    def getTestDataFromHeadSite(self, testTuple: tuple, selectHeads:list[int], selectSites:list[int], FileID: int) -> dict:
+        '''
+        Get parsed data of the given testTuple, test duts are constrained by heads & sites & fid
+        
+        `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
+        `selectHeads`: list of selected STDF heads
+        `selectSites`: list of selected STDF sites
+        `FileID`: index of loaded files
+        
+        return a dictionary contains:
+        see `getTestDataCore`
+        '''
+        # testID -> (test_num, test_name)
+        testID = (testTuple[0], testTuple[-1])
+        # read data from file if not cached
+        if testID not in self.dataCache:
+            self.prepareData([testID])
+        
+        dutMask = self.getMaskFromHeadsSites(selectHeads, selectSites, FileID)
+        return self.getTestDataCore(testTuple, dutMask, FileID)
+    
+    
+    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):
+        '''
+        Generate data of `Test Statistic` table when `Trend`/`Histo`/`Info` tab is activated
+        
+        `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
+        `selectHeads`: list of selected STDF heads
+        `selectSites`: list of selected STDF sites
+        `_selectFiles`: currently not in use
+        `floatFormat`: format string for float, e.g. "%.3f"
+        
+        return a dictionary contains:
+        `VHeader`: list, vertial header
+        `HHeader`: list, horizontal header
+        `Rows`: list[list], statistic data
+        '''
+        ## HHeader
+        hHeaderLabels = ["Test Name", "Unit", "Low Limit", "High Limit", 
+                        "Fail Num", "Cpk", "Average", "Median", 
+                        "St. Dev.", "Min", "Max"]
+        # if MPR or FTR is in selected tests, add columns for them as well
+        testRecTypes = set([self.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in testTuples])
+        containsFTR = REC.FTR in testRecTypes
+        containsMPR = REC.MPR in testRecTypes
+        if containsFTR: hHeaderLabels[1:1] = ["Pattern Name"]
+        if containsMPR: hHeaderLabels[1:1] = ["PMR Index", "Logical Name", "Physical Name", "Channel Name"]
+        ## VHeader
+        vHeaderLabels = []
+        ## Rows
+        rowList = []
+        
+        # TODO Configurable order of rows?
+        default_order = [testTuples, selectHeads, selectSites, range(self.num_files)]
+        for testTup, head, site, fid in itertools.product(*default_order):
+            testDataDict = self.getTestDataFromHeadSite(testTup, [head], [site], fid)
+            # if current file doesn't have testID, 
+            # `testDataDict` will be emtpy
+            if testDataDict:
+                test_num, pmr, test_name = testTup
+                # if there is only one file, hide file index
+                vHeaderLabels.append("{} / Head{} / {}{}".format(test_num, 
+                                                                 head, 
+                                                                 "All Sites" if site == -1 else f"Site{site}",
+                                                                 "" if len(self.num_files) == 1 else f" / File{fid}"))
+                # basic PTR stats
+                CpkString = "%s" % "∞" if testDataDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDataDict["Cpk"]) else floatFormat % testDataDict["Cpk"])                
+                row =  [test_name,
+                        testDataDict["Unit"],
+                        "N/A" if np.isnan(testDataDict["LL"]) else floatFormat % testDataDict["LL"],
+                        "N/A" if np.isnan(testDataDict["HL"]) else floatFormat % testDataDict["HL"],
+                        "%d" % list(map(isPass, testDataDict["flagList"])).count(False),
+                        CpkString,
+                        floatFormat % testDataDict["Mean"],
+                        floatFormat % testDataDict["Median"],
+                        floatFormat % testDataDict["SDev"],
+                        floatFormat % testDataDict["Min"],
+                        floatFormat % testDataDict["Max"]]
+                # match the elements of hHeader
+                if containsFTR:
+                    row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["recHeader"] == REC.FTR else [""]
+                if containsMPR:
+                    row[1:1] = [str(pmr), testDataDict["LOG_NAM"], testDataDict["PHY_NAM"], testDataDict["CHAN_NAM"]] if testDataDict["recHeader"] == REC.MPR else ["", "", "", ""]
+                    
+                rowList.append(row)
+            else:
+                # if this file doesn't contain this
+                # testTup, skip
+                continue
+        
+        return {"VHeader": vHeaderLabels, "HHeader": hHeaderLabels, "Rows": rowList}
+    
+    
     # TODO
     def prepareStatTableContent(self, tabType, **kargs):
         if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
