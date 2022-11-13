@@ -316,19 +316,19 @@ class MyWindow(QtWidgets.QMainWindow):
         self.dumpConfigFile()
     
 
-    def openNewFile(self, f):
-        if not f:
-            f, _typ = QFileDialog.getOpenFileName(self, 
+    def openNewFile(self, files: list[str]):
+        if not files:
+            files, _typ = QFileDialog.getOpenFileNames(self, 
                                                   caption=self.tr("Select a STD File To Open"), 
                                                   directory=self.settingParams.recentFolder,
                                                   filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
         else:
-            f = os.path.normpath(f)
+            files = [f for f in map(os.path.normpath, files) if os.path.isfile(f)]
             
-        if os.path.isfile(f):
+        if files:
             # store folder path
-            self.updateRecentFolder(f)
-            self.callFileLoader([f])
+            self.updateRecentFolder(files[0])
+            self.callFileLoader(files)
               
     
     def onFailMarker(self):
@@ -1539,12 +1539,12 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
         self.statusBar().showMessage(new_msg)
         if info: 
-            QtWidgets.QMessageBox.information(None, self.tr("Info"), new_msg)
+            QtWidgets.QMessageBox.information(self, self.tr("Info"), new_msg)
         elif warning: 
-            QtWidgets.QMessageBox.warning(None, self.tr("Warning"), new_msg)
+            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), new_msg)
             logger.warning(new_msg)
         elif error:
-            QtWidgets.QMessageBox.critical(None, self.tr("Error"), new_msg)
+            QtWidgets.QMessageBox.critical(self, self.tr("Error"), new_msg)
             # sys.exit()
         QApplication.processEvents()
         
@@ -1562,9 +1562,10 @@ class MyWindow(QtWidgets.QMainWindow):
                     
             if (event.type() == QtCore.QEvent.Drop):
                 if event.mimeData().hasUrls():   # if file or link is dropped
-                    url = event.mimeData().urls()[0]   # get first url
+                    urls = event.mimeData().urls()
+                    paths = [url.toLocalFile() for url in urls]
                     event.accept()  # doesnt appear to be needed
-                    self.openNewFile(url.toLocalFile())
+                    self.openNewFile(paths)
                     return True
         return False         
       

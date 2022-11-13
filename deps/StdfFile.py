@@ -113,6 +113,8 @@ class DataInterface:
         # value: [testDataDict], file id as index, 
         # if file id doesn't contains testID, testDataDict is an empty dict
         self.dataCache = {}
+        # cache test pin list and names for MPR
+        self.pinInfoDictCache = {}
         
         
     def loadDatabase(self):
@@ -211,6 +213,11 @@ class DataInterface:
         
 
     def parseDataFromTestInfo(self, testInfo: dict, FileID: int) -> dict:
+        if len(testInfo) == 0:
+            # testInfo might be empty, if this file
+            # doesn't contain selected test item
+            return {}
+        
         raw_offsets = testInfo.pop("Offset")
         raw_lengths = testInfo.pop("BinaryLen")
         recHeader = testInfo["recHeader"]
@@ -235,13 +242,19 @@ class DataInterface:
             testDataDict["dataList"] = parsedMPR["dataList"]
             testDataDict["flagList"] = parsedMPR["flagList"]
             testDataDict["statesList"] = parsedMPR["statesList"]
-            # get MPR pin names
-            pinInfoDict = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
+            # get MPR pin list and names
+            cacheKey = (testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
+            if cacheKey in self.pinInfoDictCache:
+                pinInfoDict = self.pinInfoDictCache[cacheKey]
+            else:
+                # read and cache from database if not found
+                pinInfoDict = self.DatabaseFetcher.getPinNames(*cacheKey)
+                self.pinInfoDictCache[cacheKey] = pinInfoDict
             # if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
-            testDataDict["PMR_INDX"] = pinInfoDict["PMR"]
-            testDataDict["LOG_NAM"] = pinInfoDict["LOG_NAM"]
-            testDataDict["PHY_NAM"] = pinInfoDict["PHY_NAM"]
-            testDataDict["CHAN_NAM"] = pinInfoDict["CHAN_NAM"]
+            testDataDict["PMR_INDX"] = pinInfoDict["PMR"][FileID]
+            testDataDict["LOG_NAM"] = pinInfoDict["LOG_NAM"][FileID]
+            testDataDict["PHY_NAM"] = pinInfoDict["PHY_NAM"][FileID]
+            testDataDict["CHAN_NAM"] = pinInfoDict["CHAN_NAM"][FileID]
         else:
             # send raw bytes to Rust function to parse PTR or FTR records
             parsedXTR = rust_stdf_helper.parse_PTR_FTR_rawList(isPTR, 
@@ -259,7 +272,7 @@ class DataInterface:
         result_hilimit = testInfo["HLimit"] if not isFTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
         result_lospec = testInfo["LSpec"] if not isFTR and testInfo["LSpec"] is not None and (record_flag & 0b00000100 == 0) else np.nan
         result_hispec = testInfo["HSpec"] if not isFTR and testInfo["HSpec"] is not None and (record_flag & 0b00001000 == 0) else np.nan
-        result_unit = testInfo["Unit"] if not isFTR else ""
+        result_unit = testInfo["Unit"] if not isFTR and testInfo["Unit"] is not None else ""
         
         testDataDict["recHeader"] = recHeader
         testDataDict["TEST_NUM"] = testInfo["TEST_NUM"]

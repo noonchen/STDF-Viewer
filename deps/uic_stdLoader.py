@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sun Nov 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -85,6 +85,8 @@ class stdfLoader(QtWidgets.QDialog):
         
     def loadFile(self, stdPaths: list[str]):
         self.closeEventByThread = False    # init at new file
+        self.loaderUI.progressBar.setFormat("0.00%%")
+        self.loaderUI.progressBar.setValue(0)
         # create new thread and move stdReader to the new thread
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
@@ -120,7 +122,7 @@ class stdfLoader(QtWidgets.QDialog):
     @Slot(int)
     def updateProgressBar(self, num):
         if num == 10000:
-            self.loaderUI.progressBar.setFormat("Updating GUI...")
+            self.loaderUI.progressBar.setFormat("Loading database...")
             self.loaderUI.progressBar.setValue(num)
         else:
             # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
@@ -164,6 +166,9 @@ class stdReader(QtCore.QObject):
     @Slot()
     def readBegin(self):
         di = DataInterface(self.stdPaths)
+        sendDI = True
+        showWarning = False
+        finalMsg = ""
 
         try:
             if self.msgSignal: self.msgSignal.emit("Loading STD file...", False, False, False)
@@ -174,16 +179,15 @@ class stdReader(QtCore.QObject):
             end = time.time()
             if self.flag.stop:
                 # user terminated...
-                self.dataInterfaceSignal.emit(None)
-                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False, False, False)
+                sendDI = False
+                finalMsg = "Loading cancelled by user"
             else:
                 # send Data_interface object
                 # sqlite cannot be used between thread
                 # thus we need to store the db path and
                 # load database in the main thread
                 di.dbPath = databasePath
-                self.dataInterfaceSignal.emit(di)
-                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
+                finalMsg = f"Load completed, process time {end - start :.3f} sec"
                 
         except Exception as e:
             # set stop flag to True to stop rust process
@@ -191,14 +195,14 @@ class stdReader(QtCore.QObject):
             self.flag.stop = True
             # clean data interface
             di.close()
-            self.dataInterfaceSignal.emit(None)
             logger.exception("\nError occurred when parsing the file")
-            if self.msgSignal: self.msgSignal.emit(str(e), False, True, False)
+            sendDI = False
+            showWarning = True
+            finalMsg = str(e)
             
-        finally:
-            # parse signal cannot be emitted in finally block
-            # since it will execute before except block
-            self.closeSignal.emit(True)     # close loaderUI
+        self.dataInterfaceSignal.emit(di if sendDI else None)
+        if self.msgSignal: self.msgSignal.emit(finalMsg, False, showWarning, False)
+        self.closeSignal.emit(True)     # close loaderUI
         
 
     

@@ -373,6 +373,13 @@ class DatabaseFetcher:
             self.cursor.execute("SELECT * FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?", [fid, *testID])
             col = [tup[0] for tup in self.cursor.description]
             val = self.cursor.fetchone()
+            if val is None:
+                # when this file doesn't have
+                # (test num, test name), skip and append
+                # empty dictionary
+                result.append({})
+                continue
+            
             testInfo.update(zip(col, val))
             
             # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
