@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Nov 12 2022
+# Last Modified: Sun Nov 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -154,6 +154,14 @@ def isHexColor(color: str) -> bool:
         return False
 
 
+def getProperFontColor(background: QtGui.QColor) -> QtGui.QColor:
+    # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
+    if (background.red()*0.299 + 
+        background.green()*0.587 + 
+        background.blue()*0.114) > 186:
+        return QtGui.QColor("#000000")
+    else:
+        return QtGui.QColor("#FFFFFF")
 
 
 def init_logger(rootFolder):
@@ -373,23 +381,32 @@ def genQItemList(imageFont: str, fontsize: int, dutSumList: list[str]) -> list[Q
     return qitemRow
 
 
-# TODO
-def getTestTuple(test_name_string: str, isWaferName: bool = False) -> tuple:
-    tmpList = test_name_string.split("\t", 2)     # split up to 3 elements
-    numString = tmpList[0].strip("#")    # wafer number begins with "#"
+def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
+    '''
+    Parse string from TestSelection UI into (test num, pmr index, test name)
+    '''
+    # split up to 3 elements
+    tmpList = test_name_string.split("\t", 2)
+    # wafer number begins with "#"
+    numString = tmpList[0].strip("#")
+    # set default PMR index to 0
+    pmr = 0
     nameString = tmpList[-1]
     
     if isWaferName:
-        pmr = 0
         tn = -1 if numString == "-" else int(numString)
     else:
         tn = int(numString)
         if len(tmpList) > 2:
             # a possible MPR test, e.g. [test num, #PMR, test name]
-            # if it's not a MPR, pmr is set to 0
-            pmr = int(tmpList[1].strip("#")) if testRecTypeDict.get((tn, nameString), 0) == REC.MPR else 0
-        else:
-            pmr = 0
+            # try to conver to int
+            try:
+                pmr = int(tmpList[1].strip("#"))
+            except ValueError:
+                # if failed, means the orignal test name
+                # has the pattern of "#%s\t%s"
+                nameString = f"{tmpList[1]}\t{nameString}"
+                
     return (tn, pmr, nameString)
 
 

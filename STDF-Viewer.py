@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Nov 12 2022
+# Last Modified: Sun Nov 13 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -814,22 +814,6 @@ class MyWindow(QtWidgets.QMainWindow):
                 checkedSites.append(site_num)
                 
         return sorted(checkedSites)
-    
-    
-    # TODO
-    def getMaskFromHeadsSites(self, selHeads:list, selSites:list) -> np.ndarray:
-        # get duts of given heads and sites
-        mask = np.zeros(self.dutArray.size, dtype=bool)
-        for head in selHeads:
-            if -1 in selSites:
-                # select all sites (site is unsigned int)
-                mask |= (self.dutSiteInfo[head]>=0)
-                continue
-            
-            for site in selSites:
-                mask |= (self.dutSiteInfo[head]==site)
-        
-        return mask
                     
     
     def getSelectedTests(self) -> list:
@@ -846,13 +830,14 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if selectedIndex:
             for ind in selectedIndex:
-                tnTuple = self.getTestTuple(ind.data(), inWaferTab)
+                tnTuple = ss.parseTestString(ind.data(), inWaferTab)
                 testList.append(tnTuple)
             testList.sort()
         
         return testList
     
     
+    # TODO
     def onSelect(self):
         '''
         This func is called when events occurred in tab, site selection, test selection and wafer selection 
@@ -873,7 +858,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.SearchBox.setDisabled(False)
             self.ui.ClearButton.setDisabled(False)
         
-        if self.dbConnected:
+        if self.data_interface:
             selTests = self.getSelectedTests()
             selSites = self.getCheckedSites()
             selHeads = self.getCheckedHeads()
@@ -884,7 +869,8 @@ class MyWindow(QtWidgets.QMainWindow):
             if (not testNotChanged) and (not currentTab in [tab.Bin, tab.Wafer]): 
                 # get (test_num, test_name)
                 # pmr is not used, since MPR test preparation contains data for all pmr pins
-                self.prepareData([(tup[0], tup[2]) for tup in selTests])
+                # self.prepareData([(tup[0], tup[2]) for tup in selTests])
+                pass
                         
             # update bin chart only if sites changed and previous tab is not bin chart
             updateTab = False
@@ -905,7 +891,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     
             if updateTab:
                 self.updateStatTableContent()       # update table
-                self.updateTabContent()             # update tab
+                # self.updateTabContent()             # update tab
             
             # always update pre selection at last
             self.preHeadSelection = set(selHeads)
@@ -1185,116 +1171,118 @@ class MyWindow(QtWidgets.QMainWindow):
         tabType = self.ui.tabControl.currentIndex()
         # clear table
         self.tmodel.removeRows(0, self.tmodel.rowCount())
-        selTests = self.getSelectedTests()
-        verticalHeader = self.ui.dataTable.verticalHeader()
         
-        if tabType == tab.Trend or tabType == tab.Histo or tabType == tab.Info:
-            # set col headers except Bin Chart
-            headerLabels = [self.tr("Test Name"), self.tr("Unit"), self.tr("Low Limit"), self.tr("High Limit"), 
-                            self.tr("Fail Num"), "Cpk", self.tr("Average"), self.tr("Median"), 
-                            self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
-            # Customize header for MPR & FTR
-            testRecTypes = set([self.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in selTests])
-            if REC.FTR in testRecTypes:
-                headerLabels[1:1] = [self.tr("Pattern Name")]
-            if REC.MPR in testRecTypes:
-                headerLabels[1:1] = [self.tr("PMR Index"), self.tr("Logical Name"), self.tr("Physical Name"), self.tr("Channel Name")]
-                
-            indexOfFail = headerLabels.index(self.tr("Fail Num"))    # used for pickup fail number when iterating
-            indexOfCpk = headerLabels.index("Cpk")
-            self.tmodel.setHorizontalHeaderLabels(headerLabels)     
-            self.ui.dataTable.horizontalHeader().setVisible(True)
+        selTests = self.getSelectedTests()
+        horizontalHeader = self.ui.dataTable.horizontalHeader()
+        verticalHeader = self.ui.dataTable.verticalHeader()
+        floatFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
+        
+        if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
+            d = self.data_interface.getTestStatistics(selTests, 
+                                                      self.getCheckedHeads(), 
+                                                      self.getCheckedSites(), 
+                                                      floatFormat=floatFormat)
+            HHeader = d["HHeader"]
+            indexOfFail = HHeader.index("Fail Num")
+            indexOfCpk = HHeader.index("Cpk")
+
+            for row in d["Rows"]:
+                # create QStandardItem and set TextAlignment
+                qitemList = []
+                for ind, item in enumerate(row):
+                    qitem = QtGui.QStandardItem(item)
+                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
+                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                    if ind == indexOfFail:
+                        if item != "0": 
+                            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                            qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
+                    elif ind == indexOfCpk:
+                        if item != "N/A" and item != "∞":
+                            if float(item) < self.settingParams.cpkThreshold:
+                                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
+                                qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
+                    qitemList.append(qitem)
+                self.tmodel.appendRow(qitemList)
+            
+            # horizontal header setting
+            self.tmodel.setHorizontalHeaderLabels(list(map(self.tr, HHeader)))
+            self.tmodel.setColumnCount(len(HHeader))
+            horizontalHeader.setVisible(True)
+            # vertical header setting
+            # must set AFTER inserting data rows
+            # otherwise there will be empty rows
+            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
+            verticalHeader.setVisible(True)
             verticalHeader.setDefaultSectionSize(25)
- 
-            if selTests:
-                # update data
-                rowHeader = []
-                for testTuple in selTests:
-                    for site in self.getCheckedSites():
-                        for head in self.getCheckedHeads():
-                            #TODO
-                            rowList = self.prepareStatTableContent(tabType, head=head, site=site, testTuple=testTuple, testRecTypes=testRecTypes)
-                            # create QStandardItem and set TextAlignment
-                            qitemList = []
-                            rowHeader.append(rowList.pop(0))    # pop the 1st item as row header
-                            for index in range(len(rowList)):
-                                item  = rowList[index]
-                                qitem = QtGui.QStandardItem(item)
-                                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                                if index == indexOfFail:
-                                    if item != "0": 
-                                        qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                        qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                                elif index == indexOfCpk:
-                                    if item != "N/A" and item != "∞":
-                                        if float(item) < self.settingParams.cpkThreshold:
-                                            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                            qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-                                qitemList.append(qitem)
-                            self.tmodel.appendRow(qitemList)
-                        
-                self.tmodel.setVerticalHeaderLabels(rowHeader)
-                self.ui.dataTable.verticalHeader().setDefaultAlignment(QtCore.Qt.AlignCenter)
-                self.tmodel.setColumnCount(len(headerLabels))
+            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
+            
+            # resize table
             self.resizeCellWidth(self.ui.dataTable)
                 
-        else:
-            # bin or wafer tab
-            self.tmodel.setHorizontalHeaderLabels([])
-            self.ui.dataTable.horizontalHeader().setVisible(False)
-            verticalHeader.setDefaultSectionSize(35)
-            rowHeader = []
-            tableData = []
-            rowColorType = []
-            colSize = 0
+        elif tabType == tab.Bin:
+            d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
+                                                     self.getCheckedSites())
             
-            if tabType == tab.Bin:
-                for binType in ["HBIN", "SBIN"]:
-                    color_dict = self.settingParams.hbinColor if binType == "HBIN" else self.settingParams.sbinColor
-                    for site in self.getCheckedSites():
-                        for head in self.getCheckedHeads():
-                            #TODO
-                            rowList = self.prepareStatTableContent(tabType, bin=binType, head=head, site=site)
-                            if rowList:
-                                # append only if rowList is not empty
-                                tableData.append(rowList)
-                                rowColorType.append(color_dict)
-            else:
-                # wafer tab, only cares sbin
-                color_dict = self.settingParams.sbinColor
-                for waferIndex, _, _ in selTests:
-                    for site in self.getCheckedSites():
-                        for head in self.getCheckedHeads():
-                            #TODO
-                            rowList = self.prepareStatTableContent(tabType, waferIndex=waferIndex, head=head, site=site)
-                            if rowList:
-                                # append only if rowList is not empty
-                                tableData.append(rowList)
-                                rowColorType.append(color_dict)
-
-            for rowList, color_dict in zip(tableData, rowColorType):
+            for row, isHBIN in zip(d["Rows"], d["isHBIN"]):
                 qitemList = []
-                rowHeader.append(rowList[0])    # the 1st item as row header
-                colSize = len(rowList)-1 if len(rowList)-1>colSize else colSize     # get max length
-                for item in rowList[1:]:
-                    qitem = QtGui.QStandardItem(item[0])
+                for dataString, bin_num in row:
+                    qitem = QtGui.QStandardItem(dataString)
                     qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                     qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                     # set color
-                    bin_num = item[1]
+                    color_dict = self.settingParams.hbinColor if isHBIN else self.settingParams.sbinColor
                     bc = QtGui.QColor(color_dict[bin_num])
-                    # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
-                    fc = QtGui.QColor("#000000") if bc.red()*0.299 + bc.green()*0.587 + bc.blue()*0.114 > 186 else QtGui.QColor("#FFFFFF")
+                    fc = ss.getProperFontColor(bc)
                     qitem.setData(bc, QtCore.Qt.BackgroundRole)
                     qitem.setData(fc, QtCore.Qt.ForegroundRole)
                     qitemList.append(qitem)
                 self.tmodel.appendRow(qitemList)
-                    
-            self.tmodel.setVerticalHeaderLabels(rowHeader)
-            self.ui.dataTable.verticalHeader().setDefaultAlignment(QtCore.Qt.AlignCenter)
-            # remove unnecessary blank columns, better than remove columns cuz the latter will cause flicking when updating data
-            self.tmodel.setColumnCount(colSize)
+        
+            # horizontal header setting
+            self.tmodel.setHorizontalHeaderLabels([])
+            # set column size, better than remove columns 
+            # cuz the latter will cause flicking when updating data
+            self.tmodel.setColumnCount(d["maxLen"])
+            horizontalHeader.setVisible(False)
+            # vertical header setting
+            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
+            verticalHeader.setVisible(True)
+            verticalHeader.setDefaultSectionSize(35)
+            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
+            
+            self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
+        
+        else:
+            # wafer tab
+            d = self.data_interface.getWaferStatistics(selTests, 
+                                                       self.getCheckedSites())
+            color_dict = self.settingParams.sbinColor
+            for row in d["Rows"]:
+                qitemList = []
+                for dataString, bin_num in row:
+                    qitem = QtGui.QStandardItem(dataString)
+                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
+                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                    # set color
+                    bc = QtGui.QColor(color_dict[bin_num])
+                    fc = ss.getProperFontColor(bc)
+                    qitem.setData(bc, QtCore.Qt.BackgroundRole)
+                    qitem.setData(fc, QtCore.Qt.ForegroundRole)
+                    qitemList.append(qitem)
+                self.tmodel.appendRow(qitemList)
+        
+            # horizontal header setting
+            self.tmodel.setHorizontalHeaderLabels([])
+            # set column size, better than remove columns 
+            # cuz the latter will cause flicking when updating data
+            self.tmodel.setColumnCount(d["maxLen"])
+            horizontalHeader.setVisible(False)
+            # vertical header setting
+            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
+            verticalHeader.setVisible(True)
+            verticalHeader.setDefaultSectionSize(35)
+            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
             self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
@@ -1543,7 +1531,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateFileHeader()
             self.updateDutSummaryTable()
             self.updateGDR_DTR_Table()
-            # self.updateStatTableContent()
+            self.updateStatTableContent()
             self.updateTabContent(forceUpdate=True)
 
     

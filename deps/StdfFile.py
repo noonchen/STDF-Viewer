@@ -85,11 +85,14 @@ class DataInterface:
     
     def __init__(self, paths: list[str]):
         self.stdf = StdfFiles(paths)
+        self.stdf.open()
         self.num_files = len(paths)
         self.DatabaseFetcher = DatabaseFetcher(self.num_files)
         self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
+        # file byte order, indexed by fid
+        self.fileIsLB = [True for _ in range(self.num_files)]
         
         self.availableSites = []
         self.availableHeads = []
@@ -119,6 +122,7 @@ class DataInterface:
         self.DatabaseFetcher.connectDB(self.dbPath)
         self.dbConnected = True
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
+        self.fileIsLB = self.DatabaseFetcher.getByteOrder()
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
         self.availableHeads = self.DatabaseFetcher.getHeadList()        
@@ -206,52 +210,70 @@ class DataInterface:
         return metaDataList
         
 
-    # TODO
-    def getDataFromOffsets(self, testInfo:dict) -> dict:
-        sel_offset = testInfo.pop("Offset")
-        sel_length = testInfo.pop("BinaryLen")
+    def parseDataFromTestInfo(self, testInfo: dict, FileID: int) -> dict:
+        raw_offsets = testInfo.pop("Offset")
+        raw_lengths = testInfo.pop("BinaryLen")
         recHeader = testInfo["recHeader"]
-        # parse data on-the-fly
-        if recHeader == REC.MPR:
+        isPTR: bool = recHeader == REC.PTR
+        isMPR: bool = recHeader == REC.MPR
+        isFTR: bool = recHeader == REC.FTR
+        # get byte order
+        isLittleEndian = self.fileIsLB[FileID]
+        # read raw bytes from file stream 
+        raw_bytes = rust_stdf_helper.read_rawList(self.stdf.getFileHandle(FileID), raw_offsets, raw_lengths)
+        testDataDict = {}
+        
+        if isMPR:
             pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
             rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
-            testDict = stdf_MPR_Parser(recHeader, pinCount, rsltCount, sel_offset, sel_length, self.std_handle)
+            # send raw bytes to Rust function to parse MPR records
+            parsedMPR = rust_stdf_helper.parse_MPR_rawList(isLittleEndian, 
+                                                           pinCount, 
+                                                           rsltCount, 
+                                                           raw_bytes, 
+                                                           raw_lengths)
+            testDataDict["dataList"] = parsedMPR["dataList"]
+            testDataDict["flagList"] = parsedMPR["flagList"]
+            testDataDict["statesList"] = parsedMPR["statesList"]
+            # get MPR pin names
             pinInfoDict = self.DatabaseFetcher.getPinNames(testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
             # if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
-            testDict["PMR_INDX"] = pinInfoDict["PMR"]
-            testDict["LOG_NAM"] = pinInfoDict["LOG_NAM"]
-            testDict["PHY_NAM"] = pinInfoDict["PHY_NAM"]
-            testDict["CHAN_NAM"] = pinInfoDict["CHAN_NAM"]
-            testDict["statesList"] = np.array(testDict["statesList"], dtype=int)
+            testDataDict["PMR_INDX"] = pinInfoDict["PMR"]
+            testDataDict["LOG_NAM"] = pinInfoDict["LOG_NAM"]
+            testDataDict["PHY_NAM"] = pinInfoDict["PHY_NAM"]
+            testDataDict["CHAN_NAM"] = pinInfoDict["CHAN_NAM"]
         else:
-            testDict = stdf_PFTR_Parser(recHeader, sel_offset, sel_length, self.std_handle)
-            if recHeader == REC.FTR:
-                testDict["VECT_NAM"] = testInfo["VECT_NAM"] if testInfo["VECT_NAM"] is not None else "" 
+            # send raw bytes to Rust function to parse PTR or FTR records
+            parsedXTR = rust_stdf_helper.parse_PTR_FTR_rawList(isPTR, 
+                                                               isLittleEndian, 
+                                                               raw_bytes, 
+                                                               raw_lengths)
+            testDataDict["dataList"] = parsedXTR["dataList"]
+            testDataDict["flagList"] = parsedXTR["flagList"]
+            if isFTR:
+                testDataDict["VECT_NAM"] = testInfo["VECT_NAM"] if testInfo["VECT_NAM"] is not None else "" 
         
         record_flag = testInfo["OPT_FLAG"]
-        result_scale = testInfo["RES_SCAL"] if recHeader != REC.FTR and testInfo["RES_SCAL"] is not None and (record_flag & 0b00000001 == 0) else 0
-        result_lolimit = testInfo["LLimit"] if recHeader != REC.FTR and testInfo["LLimit"] is not None and (record_flag & 0b01010000 == 0) else np.nan
-        result_hilimit = testInfo["HLimit"] if recHeader != REC.FTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
-        result_lospec = testInfo["LSpec"] if recHeader != REC.FTR and testInfo["LSpec"] is not None and (record_flag & 0b00000100 == 0) else np.nan
-        result_hispec = testInfo["HSpec"] if recHeader != REC.FTR and testInfo["HSpec"] is not None and (record_flag & 0b00001000 == 0) else np.nan
+        result_scale = testInfo["RES_SCAL"] if not isFTR and testInfo["RES_SCAL"] is not None and (record_flag & 0b00000001 == 0) else 0
+        result_lolimit = testInfo["LLimit"] if not isFTR and testInfo["LLimit"] is not None and (record_flag & 0b01010000 == 0) else np.nan
+        result_hilimit = testInfo["HLimit"] if not isFTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
+        result_lospec = testInfo["LSpec"] if not isFTR and testInfo["LSpec"] is not None and (record_flag & 0b00000100 == 0) else np.nan
+        result_hispec = testInfo["HSpec"] if not isFTR and testInfo["HSpec"] is not None and (record_flag & 0b00001000 == 0) else np.nan
+        result_unit = testInfo["Unit"] if not isFTR else ""
         
-        result_unit = testInfo["Unit"] if recHeader != REC.FTR else ""
+        testDataDict["recHeader"] = recHeader
+        testDataDict["TEST_NUM"] = testInfo["TEST_NUM"]
+        testDataDict["TEST_NAME"] = testInfo["TEST_NAME"]
+        # For FTR, result_scale is 0, the following code does not change value
+        testDataDict["dataList"] = testDataDict["dataList"] * 10 ** result_scale
+        testDataDict["LL"] = result_lolimit * 10 ** result_scale
+        testDataDict["HL"] = result_hilimit * 10 ** result_scale
+        testDataDict["LSpec"] = result_lospec * 10 ** result_scale
+        testDataDict["HSpec"] = result_hispec * 10 ** result_scale
+        testDataDict["Unit"] = unit_prefix.get(result_scale, "") + result_unit
+        testDataDict["Scale"] = result_scale
         
-        testDict["recHeader"] = recHeader
-        testDict["TEST_NUM"] = testInfo["TEST_NUM"]
-        testDict["TEST_NAME"] = testInfo["TEST_NAME"]
-        testDict["dataList"] = np.array(testDict["dataList"], dtype="float")
-        testDict["flagList"] = np.array(testDict["flagList"], dtype=int)
-                
-        testDict["dataList"] = testDict["dataList"] if recHeader == REC.FTR else testDict["dataList"] * 10 ** result_scale
-        testDict["LL"] = result_lolimit * 10 ** result_scale
-        testDict["HL"] = result_hilimit * 10 ** result_scale
-        testDict["LSpec"] = result_lospec * 10 ** result_scale
-        testDict["HSpec"] = result_hispec * 10 ** result_scale
-        testDict["Unit"] = "" if recHeader == REC.FTR else unit_prefix.get(result_scale, "") + result_unit
-        testDict["Scale"] = result_scale
-        
-        return testDict
+        return testDataDict
     
     
     # TODO
@@ -269,26 +291,26 @@ class DataInterface:
         return (test_data_list, test_passFailStat_list, test_dataInfo_list)
     
                        
-    # TODO
-    def prepareData(self, testIDs: list, cacheData: bool = False):
-        '''testID: tuple of test num and test name, for identifying tests
-        Read testID data from ALL files
+    def prepareData(self, testIDs: list[tuple]):
         '''
-        if not cacheData:
-            # remove testID that are not selected anymore
-            for pre_test_num, _, pre_test_name in self.preTestSelection:
-                pre_testID = (pre_test_num, pre_test_name)
-                if (not pre_testID in testIDs) and (pre_testID in self.selData):
-                    self.selData.pop(pre_testID)
-                
+        Read and parse testID data from ALL files, 
+        then stored in `dataCache`
+        
+        `testIDs`: list of tuple contains test num and test name, for identifying tests
+        '''     
         for testID in testIDs:
             # skip if testID has been read
-            if testID in self.selData:
+            if testID in self.dataCache:
                 continue
             
-            # read the newly selected test num
-            testInfo = self.DatabaseFetcher.getTestInfo_AllDUTs(testID)
-            self.selData[testID] = self.getDataFromOffsets(testInfo)
+            # get test info of `testID` from all files
+            # see `Test_Info` database table for more details
+            testInfoList = self.DatabaseFetcher.getTestInfo_AllDUTs(testID)
+            cache_allFile = []
+            for fid, testInfo in enumerate(testInfoList):
+                cache_allFile.append(self.parseDataFromTestInfo(testInfo, fid))
+            # store parsed data
+            self.dataCache[testID] = cache_allFile
             
             
 # # get mask from selectDUTs
@@ -408,7 +430,7 @@ class DataInterface:
         Create an array mask that will work on dutArray
         and can be used for filtering duts of interest.
         '''
-        mask = np.zeros(self.dutArrays[FileID], dtype=bool)
+        mask = np.zeros(self.dutArrays[FileID].size, dtype=bool)
         for head in selectHeads:
             if -1 in selectSites:
                 # select all sites (site is unsigned int)
@@ -487,7 +509,7 @@ class DataInterface:
                 vHeaderLabels.append("{} / Head{} / {}{}".format(test_num, 
                                                                  head, 
                                                                  "All Sites" if site == -1 else f"Site{site}",
-                                                                 "" if len(self.num_files) == 1 else f" / File{fid}"))
+                                                                 "" if self.num_files == 1 else f" / File{fid}"))
                 # basic PTR stats
                 CpkString = "%s" % "∞" if testDataDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDataDict["Cpk"]) else floatFormat % testDataDict["Cpk"])                
                 row =  [test_name,
@@ -528,6 +550,7 @@ class DataInterface:
         `VHeader`: list, vertial header
         `Rows`: list[list], bin data
         `isHBIN`: list[bool], bin type indication of each row
+        `maxLen`: maximum column length
         '''
         ## VHeader
         vHeaderLabels = []
@@ -535,6 +558,8 @@ class DataInterface:
         rowList = []
         ## isHBIN
         isHbinList = []
+        ## maxLen
+        maxLen = 0
         
         default_order = [["H", "S"], selectHeads, selectSites, range(self.num_files)]
         for binType, head, site, fid in itertools.product(*default_order):
@@ -545,7 +570,7 @@ class DataInterface:
             vHeaderLabels.append( "{} / Head{} / {}{}".format(binFullName, 
                                                               head, 
                                                               "All Sites" if site == -1 else f"Site{site}", 
-                                                              "" if len(self.num_files) == 1 else f" / File{fid}"))
+                                                              "" if self.num_files == 1 else f" / File{fid}"))
             isHbinList.append(isHbin)
             # preparations for calculation
             binSummary = self.DatabaseFetcher.getBinStats(head, site, isHbin)
@@ -563,8 +588,9 @@ class DataInterface:
                         bin_num]
                 row.append(item)
             rowList.append(row)
+            maxLen = max(maxLen, len(row))
             
-        return {"VHeader": vHeaderLabels, "Rows": rowList, "isHBIN": isHbinList}
+        return {"VHeader": vHeaderLabels, "Rows": rowList, "isHBIN": isHbinList, "maxLen": maxLen}
     
     
     def getWaferStatistics(self, waferTuples: list[tuple], selectSites:list[int]):
@@ -577,11 +603,15 @@ class DataInterface:
         return a dictionary contains:
         `VHeader`: list, vertial header
         `Rows`: list[list], statistic data
+        `maxLen`: maximum column length
         '''
         ## VHeader
         vHeaderLabels = []
         ## Rows
         rowList = []
+        ## maxLen
+        maxLen = 0
+        
         for (waferIndex, fid), site in itertools.product(waferTuples, selectSites):
             if waferIndex == -1:
                 # stacked wafer, only contains fail count info, skip for now...
@@ -591,7 +621,7 @@ class DataInterface:
             waferID = self.waferInfoDict[(waferIndex, fid)]["WAFER_ID"]
             vHeaderLabels.append("{} / {}{}".format(waferID, 
                                                     "All Sites" if site == -1 else f"Site{site}", 
-                                                    "" if len(self.num_files) == 1 else f" / File{fid}"))
+                                                    "" if self.num_files == 1 else f" / File{fid}"))
             coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, site, fid)
             totalDies = sum([len(coordList) for coordList in coordsDict.values()])
             row = []
@@ -606,8 +636,9 @@ class DataInterface:
                         sbin_num]
                 row.append(item)
             rowList.append(row)
+            maxLen = max(maxLen, len(row))
         
-        return {"VHeader": vHeaderLabels, "Rows": rowList}    
+        return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}    
 
 
 if __name__ == "__main__":

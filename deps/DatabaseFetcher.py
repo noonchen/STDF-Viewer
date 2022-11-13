@@ -81,6 +81,24 @@ class DatabaseFetcher:
         return result
     
     
+    def getByteOrder(self) -> list[bool]:
+        '''
+        return a list of isLittleEndian?, indexed by file id 
+        '''
+        if self.cursor is None: raise RuntimeError()
+        
+        sql = '''SELECT 
+                    (CASE WHEN Value="Little endian" 
+                    THEN 1 
+                    ELSE 0 END) AS "IsLB" 
+                FROM 
+                    File_Info 
+                WHERE Field="BYTE_ORD" 
+                ORDER BY Fid'''
+        
+        return list(map(lambda rslt: rslt[0]==1, self.cursor.execute(sql)))
+    
+    
     def getTestItemsList(self):
         '''return test_num + (pmr) + testname list in db in original order here'''
         if self.cursor is None: raise RuntimeError("No database is connected")
@@ -364,7 +382,7 @@ class DatabaseFetcher:
             # get offset & length, insert -1 if testNum is not presented in a DUT
             totalDutCnt = self.dutArrays[fid].size
             tmp_oft = np.full(totalDutCnt, -1, dtype=np.int64)
-            tmp_biL = np.empty(totalDutCnt, -1, dtype=np.int32)
+            tmp_biL = np.full(totalDutCnt, -1, dtype=np.int32)
             
             sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
                 WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?) AND \
@@ -401,7 +419,8 @@ class DatabaseFetcher:
         fid_pos = col.index("Fid")
         waferIndex_pos = col.index("WaferIndex")
         
-        for valueList in sqlResult:
+        for valueTuple in sqlResult:
+            valueList = list(valueTuple)
             fid = valueList.pop(fid_pos)
             waferIndex = valueList.pop(waferIndex_pos)
             valueList = ["N/A" if ele is None else ele for ele in valueList]    # Replace all None to N/A
@@ -572,7 +591,8 @@ if __name__ == "__main__":
     # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
     # print(df.getDUTIndexFromXY(40, -10, -1))
     # print(df.getDTR_GDRs())
-    print(df.getPinNames(21000, "Continuty_digital_pos:passVolt_mV[1]", True))
+    # print(df.getPinNames(21000, "Continuty_digital_pos:passVolt_mV[1]", True))
+    print(df.getByteOrder())
     
     
     e = time()
