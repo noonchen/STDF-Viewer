@@ -140,7 +140,7 @@ class DatabaseFetcher:
             
         WaferList = ["-\tStacked Wafer Map"]
         for row in self.cursor.execute("SELECT Fid, WaferIndex, WAFER_ID from Wafer_Info ORDER by WaferIndex"):
-            WaferList.append(f"File{row[0]}\t#{row[1]}\t{row[2]}")
+            WaferList.append(f"File{row[0]}-#{row[1]}\t{row[2]}")
         return WaferList
     
     
@@ -420,10 +420,9 @@ class DatabaseFetcher:
         waferIndex_pos = col.index("WaferIndex")
         
         for valueTuple in sqlResult:
-            valueList = list(valueTuple)
-            fid = valueList.pop(fid_pos)
-            waferIndex = valueList.pop(waferIndex_pos)
-            valueList = ["N/A" if ele is None else ele for ele in valueList]    # Replace all None to N/A
+            fid = valueTuple[fid_pos]
+            waferIndex = valueTuple[waferIndex_pos]
+            valueList = ["N/A" if ele is None else ele for ele in valueTuple]    # Replace all None to N/A
             waferDict[(waferIndex, fid)] = dict(zip(col, valueList))
             
         return waferDict

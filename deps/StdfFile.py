@@ -597,7 +597,7 @@ class DataInterface:
         '''
         Generate wafer statistics and SBIN distribution
         
-        `waferTuples`: (wafer index, file id)
+        `waferTuples`: (wafer index, file id, wafer name)
         `selectSites`: list of selected STDF sites
         
         return a dictionary contains:
@@ -612,7 +612,8 @@ class DataInterface:
         ## maxLen
         maxLen = 0
         
-        for (waferIndex, fid), site in itertools.product(waferTuples, selectSites):
+        for waferTuple, site in itertools.product(waferTuples, selectSites):
+            waferIndex, fid, _ = waferTuple
             if waferIndex == -1:
                 # stacked wafer, only contains fail count info, skip for now...
                 # TODO may be we can calculate some data for stacked wafer?

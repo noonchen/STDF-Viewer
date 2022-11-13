@@ -383,20 +383,36 @@ def genQItemList(imageFont: str, fontsize: int, dutSumList: list[str]) -> list[Q
 
 def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
     '''
-    Parse string from TestSelection UI into (test num, pmr index, test name)
+    Parse string from 
+        `TestSelection` UI into (test num, pmr index, test name)
+        `WaferSelection` UI into (wafer index, file id, wafer name)
     '''
-    # split up to 3 elements
-    tmpList = test_name_string.split("\t", 2)
-    # wafer number begins with "#"
-    numString = tmpList[0].strip("#")
-    # set default PMR index to 0
-    pmr = 0
-    nameString = tmpList[-1]
-    
     if isWaferName:
-        tn = -1 if numString == "-" else int(numString)
+        # split up to 2 elements
+        tmpList = test_name_string.split("\t", 1)
+        waferIndex = -1
+        fid = -1
+        wafer_name = tmpList[-1]
+        
+        if tmpList[0] == "-":
+            # stacked wafer, use default value
+            pass
+        else:
+            # other have a pattern "File{}-#{}"
+            fileStr, waferindStr = tmpList[0].split("-")
+            waferIndex = int(waferindStr.strip("#"))
+            fid = int(fileStr.strip("File"))
+            
+        return (waferIndex, fid, wafer_name)
+    
     else:
-        tn = int(numString)
+        # split up to 3 elements
+        tmpList = test_name_string.split("\t", 2)
+        test_num = int(tmpList[0])
+        # set default PMR index to 0
+        pmr = 0
+        test_name = tmpList[-1]
+        
         if len(tmpList) > 2:
             # a possible MPR test, e.g. [test num, #PMR, test name]
             # try to conver to int
@@ -405,9 +421,9 @@ def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
             except ValueError:
                 # if failed, means the orignal test name
                 # has the pattern of "#%s\t%s"
-                nameString = f"{tmpList[1]}\t{nameString}"
+                test_name = f"{tmpList[1]}\t{test_name}"
                 
-    return (tn, pmr, nameString)
+        return (test_num, pmr, test_name)
 
 
 def stringifyTestData(testDict: dict, valueFormat: str) -> list:
