@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sat Nov 12 2022
+// Last Modified: Sun Nov 13 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -1111,10 +1111,10 @@ fn on_prr_rec(
             y_coord
         ])?;
     }
-    
+
     // update PRR info to database
-    // 
-    // `supersede` status may have been 
+    //
+    // `supersede` status may have been
     // set to 1 by code above, we need
     // to set it back to 0
     db_ctx.update_dut(rusqlite::params![
@@ -1127,7 +1127,7 @@ fn on_prr_rec(
         wafer_index,
         x_coord,
         y_coord,
-        0, 
+        0,
         file_id,
         dut_index
     ])?;
@@ -1286,22 +1286,10 @@ fn on_wrr_rec(
         wrr_rec.head_num,
         wafer_index,
         wrr_rec.part_cnt,
-        match wrr_rec.rtst_cnt != u32::MAX {
-            true => Some(wrr_rec.rtst_cnt),
-            false => None,
-        },
-        match wrr_rec.abrt_cnt != u32::MAX {
-            true => Some(wrr_rec.abrt_cnt),
-            false => None,
-        },
-        match wrr_rec.good_cnt != u32::MAX {
-            true => Some(wrr_rec.good_cnt),
-            false => None,
-        },
-        match wrr_rec.func_cnt != u32::MAX {
-            true => Some(wrr_rec.func_cnt),
-            false => None,
-        },
+        wrr_rec.rtst_cnt,
+        wrr_rec.abrt_cnt,
+        wrr_rec.good_cnt,
+        wrr_rec.func_cnt,
         wrr_rec.wafer_id,
         wrr_rec.fabwf_id,
         wrr_rec.frame_id,
@@ -1350,22 +1338,10 @@ fn on_pcr_rec(
         pcr_rec.head_num,
         pcr_rec.site_num,
         pcr_rec.part_cnt,
-        match pcr_rec.rtst_cnt != u32::MAX {
-            true => Some(pcr_rec.rtst_cnt),
-            false => None,
-        },
-        match pcr_rec.abrt_cnt != u32::MAX {
-            true => Some(pcr_rec.abrt_cnt),
-            false => None,
-        },
-        match pcr_rec.good_cnt != u32::MAX {
-            true => Some(pcr_rec.good_cnt),
-            false => None,
-        },
-        match pcr_rec.func_cnt != u32::MAX {
-            true => Some(pcr_rec.func_cnt),
-            false => None,
-        },
+        pcr_rec.rtst_cnt,
+        pcr_rec.abrt_cnt,
+        pcr_rec.good_cnt,
+        pcr_rec.func_cnt,
     ])?;
     Ok(())
 }

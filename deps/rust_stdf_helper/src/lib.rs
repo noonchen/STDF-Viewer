@@ -33,6 +33,14 @@ impl From<Error> for StdfHelperError {
     }
 }
 
+impl From<std::io::Error> for StdfHelperError {
+    fn from(err: std::io::Error) -> Self {
+        StdfHelperError {
+            msg: err.to_string(),
+        }
+    }
+}
+
 impl From<StdfHelperError> for PyErr {
     fn from(err: StdfHelperError) -> Self {
         PyException::new_err(err.msg)
@@ -532,14 +540,27 @@ fn generate_database(
     // sending parsing work to
     // other threads.
     // one file per thread
-    for (fid, (fpath, thread_tx)) in stdf_paths.clone()
+    for (fid, (fpath, thread_tx)) in stdf_paths
+        .clone()
         .into_iter()
         .zip(thread_txes.into_iter())
         .enumerate()
     {
-        let handle = thread::spawn(move || {
-            let file_size = get_file_size(&fpath).unwrap() as f32;
-            let mut stdf_reader = StdfReader::new(fpath).unwrap();
+        let handle = thread::spawn(move || -> Result<(), StdfHelperError> {
+            let file_size = get_file_size(&fpath)? as f32;
+            if file_size == 0.0 {
+                return Err(StdfHelperError {
+                    msg: format!("Empty file detected!\n\n{}", &fpath),
+                });
+            }
+            let mut stdf_reader = match StdfReader::new(&fpath) {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(StdfHelperError {
+                        msg: format!("Cannot parse this file:\n{}\n\nMessage:\n{}", &fpath, e),
+                    })
+                }
+            };
             for raw_rec in stdf_reader.get_rawdata_iter() {
                 let raw_rec = match raw_rec {
                     Ok(r) => r,
@@ -556,6 +577,7 @@ fn generate_database(
                     break;
                 }
             }
+            Ok(())
         });
         thread_handles.push(handle);
     }
@@ -571,7 +593,7 @@ fn generate_database(
     if is_valid_progress_signal || is_valid_stop {
         // start another thread for updating stop signal
         // and sending progress back to python
-        let gil_th = thread::spawn(move || {
+        let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
             loop {
                 let current_progress = total_progress_copy.load(Ordering::Relaxed);
                 // sleep for 100ms
@@ -604,6 +626,7 @@ fn generate_database(
                     break;
                 }
             }
+            Ok(())
         });
         thread_handles.push(gil_th);
     }
@@ -618,10 +641,7 @@ fn generate_database(
 
         // store file paths to database
         for (fid, fpath) in stdf_paths.iter().enumerate() {
-            db_ctx.insert_file_name(rusqlite::params![
-                fid,
-                fpath
-            ])?;
+            db_ctx.insert_file_name(rusqlite::params![fid, fpath])?;
         }
 
         let mut record_tracker = RecordTracker::new();
@@ -667,7 +687,7 @@ fn generate_database(
 
         // join threads
         for handle in thread_handles {
-            handle.join().unwrap();
+            handle.join().unwrap()?;
         }
         // finalize database
         db_ctx.finalize()?;

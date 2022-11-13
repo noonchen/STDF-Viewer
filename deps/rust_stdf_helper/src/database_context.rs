@@ -191,7 +191,7 @@ static UPDATE_FILE_LIST: &str = "UPDATE File_List SET
                                     Product_ID=:Product_ID, Flow_ID=:Flow_ID
                                 WHERE 
                                     Fid=:Fid";
-                                    
+
 static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
