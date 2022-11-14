@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Nov 13 2022
+// Last Modified: Mon Nov 14 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -11,6 +11,7 @@
 
 use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use zip::ZipArchive;
 use rust_stdf::*;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -1662,6 +1663,10 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
         let mut buffer = [0u8; 4];
         fp.read_exact(&mut buffer)?;
         Ok(u32::from_le_bytes(buffer).into())
+    } else if file_path.ends_with(".zip") {
+        let mut za = ZipArchive::new(fp)?;
+        let fst_file = za.by_index(0)?;
+        Ok(fst_file.size())
     } else {
         // binary file
         Ok(fp.metadata()?.len())

@@ -63,11 +63,6 @@ fn analyze_stdf_file(
         return Err(PyOSError::new_err("empty file detected"));
     }
 
-    let mut reader = match StdfReader::new(filepath) {
-        Ok(r) => r,
-        Err(e) => return Err(PyOSError::new_err(e.to_string())),
-    };
-
     let data_signal: Py<PyAny> = data_signal.into();
     let progress_signal: Py<PyAny> = progress_signal.into();
     let stop_flag: Py<PyAny> = stop_flag.into();
@@ -106,6 +101,11 @@ fn analyze_stdf_file(
     let mut wafer_cnt = 0;
 
     py.allow_threads(|| {
+        let mut reader = match StdfReader::new(filepath) {
+            Ok(r) => r,
+            Err(e) => return Err(PyOSError::new_err(e.to_string())),
+        };
+
         for rec in reader.get_rawdata_iter() {
             if stop_flag_rust {
                 break;
