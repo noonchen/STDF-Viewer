@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Mon Nov 14 2022
+// Last Modified: Thu Nov 17 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -11,11 +11,11 @@
 
 use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
-use zip::ZipArchive;
 use rust_stdf::*;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::{fs, io};
+use zip::ZipArchive;
 
 pub struct RecordTracker {
     // file id, test num, test name -> unique test id (map size)
@@ -331,19 +331,40 @@ impl RecordTracker {
     #[inline(always)]
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
-        let test_id =
-            match self
-                .id_map
-                .get(&(file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string()))
-            {
-                Some(id) => Ok(*id),
-                None => Err(StdfHelperError {
-                    msg: format!(
-                    "File[{}]: test num [{}] test name [{}] in TSR is not seen in any PTR/FTR/MPR ",
-                    file_id, tsr_rec.test_num, tsr_rec.test_nam
-                ),
-                }),
-            }?;
+        let test_id = match self.id_map.get(&(
+            file_id,
+            tsr_rec.test_num,
+            tsr_rec.test_nam.to_string(),
+        )) {
+            Some(id) => Ok(*id),
+            None => {
+                // in some stdf files, the test name in TSR might be different
+                // in PTR/MPR/FTR, in this case, we should find the test id that
+                // file id and test number matched
+                match self
+                    .id_map
+                    .keys()
+                    .find(|&key| key.0 == file_id && key.1 == tsr_rec.test_num)
+                {
+                    Some(key) => {
+                        println!("TSR: [{}\t{}] matches no records in File[{}], use test name [{}] instead", 
+                        tsr_rec.test_num, tsr_rec.test_nam, file_id, &key.2);
+                        // this unwrap is infallible
+                        Ok(*self.id_map.get(key).unwrap())
+                    }
+                    None => {
+                        // if fild id and test number cannot match any key,
+                        // report this error
+                        Err(StdfHelperError {
+                            msg: format!(
+                                "Test number [{}] in TSR matches no records in File[{}]",
+                                tsr_rec.test_num, file_id
+                            ),
+                        })
+                    }
+                }
+            }
+        }?;
         // update fail cnt hashmap, only when fail cnt is valid
         if tsr_rec.fail_cnt != u32::MAX {
             if let Some(cnt) = self.test_fail_count.get_mut(&test_id) {
@@ -1323,7 +1344,7 @@ fn on_tsr_rec(
     // in this case, I have to manually consume
     // this error for compatibility.
     if let Err(e) = tracker.tsr_detected(file_id, &tsr_rec) {
-        println!("Manually consumed TSR error: {}", e.msg);
+        println!("TSR warning: {}", e.msg);
     }
     Ok(())
 }

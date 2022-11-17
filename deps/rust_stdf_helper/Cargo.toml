@@ -1,6 +1,6 @@
 [package]
 name = "rust_stdf_helper"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 
 [profile.release]
@@ -14,7 +14,7 @@ name = "rust_stdf_helper"
 
 [dependencies]
 pyo3 = { version = "0.17.1", features = ["extension-module"] }
-rust-stdf = { version = "0.3.0", features = [ "zipfile", "serialize" ] }
+rust-stdf = { version = "0.3.1", features = [ "zipfile", "serialize" ] }
 rusqlite = { version = "0.28.0", features = ["bundled"]}
 ndarray = { version = "0.15.6", features = ["rayon"] }
 zip = { version = "0.6.3", default-features = false, features = ["deflate", "bzip2"] }

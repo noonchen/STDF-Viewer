@@ -630,20 +630,21 @@ dependencies = [
 
 [[package]]
 name = "rust-stdf"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ede49eb6c90837649e86c5833641eef898c075596cbc989b1064c6e9b07766"
+checksum = "b15114b6d8dcca94a2f3705e9f24a0ed5cbdf008c8470690e016e28e25856b6e"
 dependencies = [
  "bzip2",
  "flate2",
  "serde",
  "smart-default",
+ "struct-field-names-as-array",
  "zip",
 ]
 
 [[package]]
 name = "rust_stdf_helper"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "hex",
@@ -698,6 +699,17 @@ name = "smart-default"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "133659a15339456eeeb07572eb02a91c91e9815e9cbc89566944d2c8d3efdbf6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "struct-field-names-as-array"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f9a5b81f3941efcfba306e1134bd5c930265a3c3177d645acb44638a230f1fe"
 dependencies = [
  "proc-macro2",
  "quote",
