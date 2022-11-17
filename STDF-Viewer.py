@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Nov 13 2022
+# Last Modified: Thu Nov 17 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1232,10 +1232,11 @@ class MyWindow(QtWidgets.QMainWindow):
                     qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                     # set color
                     color_dict = self.settingParams.hbinColor if isHBIN else self.settingParams.sbinColor
-                    bc = QtGui.QColor(color_dict[bin_num])
-                    fc = ss.getProperFontColor(bc)
-                    qitem.setData(bc, QtCore.Qt.BackgroundRole)
-                    qitem.setData(fc, QtCore.Qt.ForegroundRole)
+                    if bin_num != -1:
+                        bc = QtGui.QColor(color_dict[bin_num])
+                        fc = ss.getProperFontColor(bc)
+                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
+                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
                     qitemList.append(qitem)
                 self.tmodel.appendRow(qitemList)
         
@@ -1265,10 +1266,11 @@ class MyWindow(QtWidgets.QMainWindow):
                     qitem.setTextAlignment(QtCore.Qt.AlignCenter)
                     qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                     # set color
-                    bc = QtGui.QColor(color_dict[bin_num])
-                    fc = ss.getProperFontColor(bc)
-                    qitem.setData(bc, QtCore.Qt.BackgroundRole)
-                    qitem.setData(fc, QtCore.Qt.ForegroundRole)
+                    if bin_num != -1:
+                        bc = QtGui.QColor(color_dict[bin_num])
+                        fc = ss.getProperFontColor(bc)
+                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
+                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
                     qitemList.append(qitem)
                 self.tmodel.appendRow(qitemList)
         

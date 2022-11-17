@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Nov 13 2022
+# Last Modified: Thu Nov 17 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -359,6 +359,32 @@ class DatabaseFetcher:
             cntDict["Superseded"][fid] = count
             
         return cntDict
+    
+    
+    def getDUTCountOnConditions(self, head: int, site: int, waferid: int, fid: int):
+        '''return a list of dut counts in order of [Pass|Failed|Unknown|Superseded] on the given condition'''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        head_cond = "" if head == -1 else f" AND HEAD_NUM={head}"
+        site_cond = "" if site == -1 else f" AND SITE_NUM={site}"
+        wfid_cond = "" if waferid == -1 else f" AND WaferIndex={waferid}"
+        file_cond = "" if fid == -1 else f" AND Fid={fid}"
+        
+        counts = []
+        # pass duts
+        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24=0{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+            counts.append(count)
+        # fail duts
+        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 8{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+            counts.append(count)
+        # unknown duts
+        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){head_cond}{site_cond}{wfid_cond}{file_cond}"):
+            counts.append(count)
+        # superseded duts
+        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=1{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+            counts.append(count)
+            
+        return counts
     
     
     def getTestInfo_AllDUTs(self, testID: tuple) -> list[dict]:
