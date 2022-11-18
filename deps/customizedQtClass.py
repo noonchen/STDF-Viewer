@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Fri Nov 18 2022
+# Last Modified: Sat Nov 19 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -27,7 +27,11 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
-from deps.SharedSrc import dut_flag_parser, getProperFontColor
+from deps.SharedSrc import (dut_flag_parser, 
+                            test_flag_parser, 
+                            return_state_parser, 
+                            getProperFontColor, REC, isPass)
+import numpy as np
 
 
 
@@ -310,6 +314,221 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         return super().data(index, role)
     
     
+class TestDataTableModel(QtCore.QAbstractTableModel):
+    '''
+    Model for TestDataTable
+    '''
+    def __init__(self):
+        super().__init__()
+        self.testData = {}
+        self.testInfo = {}
+        self.dutIndMap = []
+        self.hheader_base = []
+        self.vheader_base = []
+        self.testLists = []
+        self.vheader_ext = []
+        self.font = QtGui.QFont()
+        self.floatFormat = "%f"
+        
+    def setTestData(self, testData: dict):
+        self.testData = testData
+        
+    def setTestInfo(self, testInfo: dict):
+        self.testInfo = testInfo
+        
+    def setDutIndexMap(self, dutIndMap: list):
+        self.dutIndMap = dutIndMap
+        
+    def setHHeaderBase(self, hheaderBase: list):
+        self.hheader_base = hheaderBase
+        
+    def setVHeaderBase(self, vheaderBase: list):
+        self.vheader_base = vheaderBase
+        
+    def setTestLists(self, testLists: list):
+        self.testLists = testLists
+        
+    def setVHeaderExt(self, vheader_ext: list):
+        self.vheader_ext = vheader_ext
+        
+    def setFont(self, font: QtGui.QFont):
+        self.font = font
+        
+    def setFloatFormat(self, floatFormat: str):
+        self.floatFormat = floatFormat
+        
+    def data(self, index: QModelIndex, role: int):
+        '''
+        divide table into 4 sections
+        blank    | test info (limit/unit)
+        ------------------------------
+        dut info | test data
+        '''
+        try:
+            # upper left corner contains no info
+            if index.row() < len(self.vheader_base) and index.column() < len(self.hheader_base):
+                if role == Qt.ItemDataRole.DisplayRole:
+                    return ""
+                if role == Qt.ItemDataRole.BackgroundRole:
+                    return QtGui.QColor("#0F80FF7F")
+                # prevent fall below
+                return None
+            
+            # upper right corner contains test info
+            if index.row() < len(self.vheader_base):
+                if role == Qt.ItemDataRole.DisplayRole:
+                    test_index = index.column() - len(self.hheader_base)
+                    if index.row() == 0:
+                        # test number
+                        return "%d" % self.testInfo[self.testLists[test_index]][1]
+                    if index.row() == 1:
+                        # high limit
+                        hl = self.testInfo[self.testLists[test_index]][2]
+                        return "N/A" if np.isnan(hl) else self.floatFormat % hl
+                    if index.row() == 2:
+                        # low limit
+                        ll = self.testInfo[self.testLists[test_index]][3]
+                        return "N/A" if np.isnan(ll) else self.floatFormat % ll
+                    if index.row() == 3:
+                        # unit
+                        return self.testInfo[self.testLists[test_index]][4]
+                if role == Qt.ItemDataRole.BackgroundRole:
+                    return QtGui.QColor("#0F80FF7F")
+                if role == Qt.ItemDataRole.TextAlignmentRole:
+                    return Qt.AlignmentFlag.AlignCenter
+                return None
+
+            #TODO lower left contains dut info
+            if index.row() >= len(self.vheader_base) and index.column() < len(self.hheader_base):
+                if role == Qt.ItemDataRole.DisplayRole:
+                    if index.column() == 0:
+                        # part id
+                        return "test id"
+                    if index.column() == 1:
+                        # head-site
+                        return "head-site"
+                if role == Qt.ItemDataRole.ForegroundRole:
+                    # red only if failed
+                    return QtGui.QColor("#000000")
+                if role == Qt.ItemDataRole.BackgroundRole:
+                    # red only if failed
+                    return QtGui.QColor("#FFFFFF")
+                if role == Qt.ItemDataRole.FontRole:
+                    return self.font
+                if role == Qt.ItemDataRole.TextAlignmentRole:
+                    return Qt.AlignmentFlag.AlignCenter
+                if role == Qt.ItemDataRole.ToolTipRole:
+                    return None
+                return None
+                    
+            # lower right contains test data
+            if index.row() >= len(self.vheader_base):
+                # get test data indexes
+                test_index = index.column() - len(self.hheader_base)
+                fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
+                fid = int(fileStr.strip("File"))
+                dutIndex = int(dutIndStr.strip("#"))
+                # dict is empty if current fid doesn't contains `self.testLists[test_index]`
+                data_test_file: dict = self.testData[self.testLists[test_index]][fid]
+                data_ind = self.dutIndMap[fid].get(dutIndex, -1)
+                
+                if role == Qt.ItemDataRole.DisplayRole:
+                    if data_ind == -1 or len(data_test_file) == 0:
+                        # test not exist in current file
+                        return "Not Tested"
+                    recHeader = data_test_file["recHeader"]
+                    if recHeader == REC.FTR:
+                        data = data_test_file["dataList"][data_ind]
+                        return "Not Tested" if np.isnan(data) else f"Test Flag: {int(data)}"
+                    elif recHeader == REC.PTR:
+                        data = data_test_file["dataList"][data_ind]
+                        return "Not Tested" if np.isnan(data) else self.floatFormat % data
+                    else:
+                        # MPR
+                        if data_test_file["dataList"].size == 0:
+                            # No PMR related and no test data in MPR, use test flag instead
+                            flag = data_test_file["flagList"][data_ind]
+                            return "Not Tested" if flag < 0 else f"Test Flag: {flag}"
+                        else:
+                            data = data_test_file["dataList"][data_ind]
+                            return "Not Tested" if np.isnan(data) else self.floatFormat % data
+                
+                if role == Qt.ItemDataRole.ForegroundRole:
+                    # only if failed
+                    if (data_ind != -1 and 
+                        len(data_test_file) != 0 and 
+                        not isPass(data_test_file["flagList"][data_ind])):
+                        return QtGui.QColor("#FFFFFF")
+                
+                if role == Qt.ItemDataRole.BackgroundRole:
+                    # only if failed
+                    if (data_ind != -1 and 
+                        len(data_test_file) != 0 and 
+                        not isPass(data_test_file["flagList"][data_ind])):
+                        return QtGui.QColor("#CC0000")
+                
+                if role == Qt.ItemDataRole.TextAlignmentRole:
+                    return Qt.AlignmentFlag.AlignCenter
+                
+                if role == Qt.ItemDataRole.ToolTipRole:
+                    if data_ind == -1 or len(data_test_file) == 0:
+                        return None
+                    recHeader = data_test_file["recHeader"]
+                    flag = data_test_file["flagList"][data_ind]
+                    flagTip = test_flag_parser(flag)
+                    if recHeader == REC.MPR:
+                        RTNStat = data_test_file["statesList"][data_ind]
+                        statTip = return_state_parser(RTNStat)
+                        return "\n".join([t for t in [statTip, flagTip] if t])
+                    else:
+                        # PTR & FTR
+                        if flagTip:
+                            return flagTip
+        
+        except (IndexError, KeyError):
+            pass
+            
+        return None
+    
+    def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        if index.row() >= len(self.vheader_base):
+            return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        else:
+            return Qt.ItemFlag.ItemIsEnabled
+        
+    def rowCount(self, parent=None) -> int:
+        return len(self.vheader_base) + len(self.vheader_ext)
+    
+    def columnCount(self, parent=None) -> int:
+        # test names use as column header
+        return len(self.hheader_base) + len(self.testLists)
+    
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        
+        try:
+            addPadding = lambda s: f"  {s}  "
+            if orientation == Qt.Orientation.Horizontal:
+                if section < len(self.hheader_base):
+                    return addPadding(self.hheader_base[section])
+                else:
+                    # get test name index by minus base length
+                    test_index = section - len(self.hheader_base)
+                    test_name = self.testInfo[self.testLists[test_index]][0]
+                    return addPadding(test_name)
+                    
+            if orientation == Qt.Orientation.Vertical:
+                if section < len(self.vheader_base):
+                    return self.vheader_base[section]
+                else:
+                    ext_index = section - len(self.vheader_base)
+                    return self.vheader_ext[ext_index]
+            
+        except (IndexError, KeyError):
+            return ""
+
+
 class TestStatisticTableModel(QtCore.QAbstractTableModel):
     '''
     content: 2D list of strings, contains data like test num, cpk, etc.

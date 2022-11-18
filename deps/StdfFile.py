@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Fri Nov 18 2022
+# Last Modified: Sat Nov 19 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -478,6 +478,56 @@ class DataInterface:
         
         dutMask = self.getMaskFromHeadsSites(selectHeads, selectSites, FileID)
         return self.getTestDataCore(testTuple, dutMask, FileID)
+    
+    
+    def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []) -> dict:
+        '''
+        Get all required test data for TestDataTable display
+        
+        `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
+        `selectHeads`: list of selected STDF heads
+        `selectSites`: list of selected STDF sites
+        `_selectFiles`: default read all files, currently not in use
+        `floatFormat`: format string for float, e.g. "%.3f"
+        
+        return a dictionary contains:
+        `VHeader`: dut index as vertical header
+        `TestLists`: testTuples, for ordering
+        `Data`: dict, key: testTuple, value: list of dicts from `getTestDataCore`
+        `TestInfo`: dict, key: testTuple, value: list of info
+        `dut2ind`: list of maps, dutIndex to list index
+        '''
+        data = {}
+        testInfo = {}
+        dutIndexDict = {}
+        for testTup, fid in itertools.product(testTuples, range(self.num_files)):
+            test_fid = self.getTestDataFromHeadSite(testTup, selectHeads, selectSites, fid)
+            if ("TEST_NAME" in test_fid) and (testTup not in testInfo):
+                testInfo[testTup] = [test_fid.pop("TEST_NAME"), 
+                                     test_fid.pop("TEST_NUM"),
+                                     test_fid.pop("HL"),
+                                     test_fid.pop("LL"),
+                                     test_fid.pop("Unit")]
+            if ("DUTIndex" in test_fid) and (fid not in dutIndexDict):
+                dutIndexDict[fid] = test_fid.pop("DUTIndex")
+            data.setdefault(testTup, []).append(test_fid)
+        
+        vheader = []
+        dut2ind = []
+        for fid in range(self.num_files):
+            if fid in dutIndexDict:
+                vheader.extend(map(lambda i: f"File{fid} #{i}", dutIndexDict[fid]))
+                dut2ind.append(dict(zip(dutIndexDict[fid], 
+                                        range(len(dutIndexDict[fid]))
+                                        )))
+            else:
+                dut2ind.append({})
+                
+        return {"VHeader": vheader, 
+                "TestLists": testTuples, 
+                "Data": data, 
+                "TestInfo": testInfo, 
+                "dut2ind": dut2ind}
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):

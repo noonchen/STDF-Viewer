@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Nov 18 2022
+# Last Modified: Sat Nov 19 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -39,6 +39,7 @@ from deps.customizedQtClass import (StyleDelegateForTable_List,
                                     DutSortFilter, 
                                     ColorSqlQueryModel, 
                                     DatalogSqlQueryModel, 
+                                    TestDataTableModel, 
                                     TestStatisticTableModel, 
                                     BinWaferTableModel)
 
@@ -159,7 +160,7 @@ class MyWindow(QtWidgets.QMainWindow):
                          tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer}}
         # init callback for UI component
         self.ui.tabControl.currentChanged.connect(self.onSelect)
-        self.ui.infoBox.currentChanged.connect(self.onInfoBoxChanged)
+        self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
         # add a toolbar action at the right side
         self.ui.spaceWidgetTB = QtWidgets.QWidget()
         self.ui.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding))
@@ -446,135 +447,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.showDutDataTable(selectedDutIndex)
             else:
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
-  
-    
-    #TODO remove if we use pyqtGraph 
-    def onInfoBoxChanged(self):
-        # update raw data table if:
-        # 1. it is activated;
-        # 2. dut list changed (site & head selection changed);
-        # 3. test num selection changed;
-        # 4. tab changed
-        updateInfoBox = False
-        selHeads = []
-        selSites = []
-        selTests = []
-        currentMask = np.array([])
-
-        if self.ui.infoBox.currentIndex() == 2:              # raw data table activated
-            selTests = self.getSelectedTests()
-            selSites = self.getCheckedSites()
-            selHeads = self.getCheckedHeads()
-            currentMask = self.getMaskFromHeadsSites(selHeads, selSites)
-            
-            # test num selection changed
-            # MPR test will be splited into several items with same test name
-            # use (test number, pmr) to determine the changes in test selection
-            testChanged = (self.preTestSelection != set(selTests))
-            # dut list changed
-            dutChanged = np.any(currentMask != self.getMaskFromHeadsSites(self.preHeadSelection, self.preSiteSelection))
-            if testChanged or dutChanged:   
-                updateInfoBox = True
-            elif self.tmodel_raw.columnCount() == 0:
-                updateInfoBox = True
-            else:
-                # if user switches to the raw table from other tabs or boxes 
-                # tn & dut is unchanged, but previous raw table content might be different than current selection
-                # we also need to update the table
-                testsInTable = set()
-                for col in range(2, self.tmodel_raw.columnCount()):     # raw col count == 0 or >= 3, thus index=2 is safe
-                    tn = int(self.tmodel_raw.item(0, col).text())
-                    colHeader = self.tmodel_raw.horizontalHeaderItem(col).text()
-                    if (tn, colHeader) not in self.testRecTypeDict:
-                        # I append pmr to the testname if it's MPR, 
-                        # colheader is not likely a valid test name
-                        # only MPR will hit this case
-                        # colHeader: TestName #pmr
-                        tmpList = colHeader.split(" #")
-                        testName = tmpList[0].strip()
-                        pmr = int(tmpList[-1])
-                    else:
-                        testName = colHeader
-                        pmr = 0
-                    testsInTable.add( (tn, pmr, testName) )
-                
-                if testsInTable != set(selTests):
-                    updateInfoBox = True
-                        
-        if updateInfoBox:
-            if not (len(selTests) > 0 and np.any(currentMask)):
-                # CLEAR rawDataTable in info tab if:
-                # 1. no test item is selected
-                # 2. no duts selected (mask == all False)
-                self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
-                self.tmodel_raw.removeColumns(0, self.tmodel_raw.columnCount())
-                return
-            """
-            1st col: Part ID
-            2nd col: site
-            3rd+ col: test items
-            """
-            hheaderLabels = [self.tr("Part ID"), self.tr("Test Head - Site")]
-            vheaderLabels_base = [self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")]
-            vh_len = len(vheaderLabels_base)
-            # clear raw data table
-            self.tmodel_raw.removeColumns(0, self.tmodel_raw.columnCount())
-            self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
-            
-            # Create the qitem for blank space
-            def newBlankItem():
-                blank_item = QtGui.QStandardItem("")
-                blank_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                blank_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                blank_item.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
-                return blank_item
-                        
-            # Append (vh_len) rows of blank items first
-            for _ in range(vh_len):
-                self.tmodel_raw.appendRow([newBlankItem() for _ in range(len(hheaderLabels))])
-                
-            # Append Part ID head & site to the table
-            selectedDUTs = self.dutArray[currentMask]
-            for dutIndex in selectedDUTs:
-                qitemRow = ss.genQItemList(self.imageFont, 13 if isMac else 10, self.getDutSummaryOfIndex(dutIndex))
-                id_head_site = [qitemRow[i] for i in range(len(hheaderLabels))]     # index0: ID; index1: Head/Site
-                self.tmodel_raw.appendRow(id_head_site)
-            # row header
-            vheaderLabels = vheaderLabels_base + ["#%d"%(i+1) for i in range(len(selectedDUTs))]
-            
-            valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-            # Append Test data
-            for testTuple in selTests:
-                # get test value of selected DUTs
-                testDict = self.getData(testTuple, selHeads, selSites)
-                test_data_list = self.stringifyTestData(testDict, valueFormat)
-                test_data_list.pop(0)   # remove test name
-                test_stat_list = [True] * vh_len + list(map(ss.isPass, testDict["flagList"]))
-                test_flagInfo_list = [""] * vh_len + self.generateDataFloatTips(testDict=testDict)
-                hheaderLabels.append(testDict["TEST_NAME"])  # add test name to header list
-                
-                qitemCol = []
-                for i, (item, stat, flagInfo) in enumerate(zip(test_data_list, test_stat_list, test_flagInfo_list)):
-                    qitem = QtGui.QStandardItem(item)
-                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                    # mark red when failed, flag == False == Fail
-                    if stat == False: 
-                        qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                        qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                    if flagInfo != "":
-                        qitem.setToolTip(flagInfo)
-                    if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
-                    qitemCol.append(qitem)
-                self.tmodel_raw.appendColumn(qitemCol)
-                        
-            self.tmodel_raw.setHorizontalHeaderLabels(hheaderLabels)
-            self.tmodel_raw.setVerticalHeaderLabels(vheaderLabels)
-            self.ui.rawDataTable.horizontalHeader().setVisible(True)
-            self.ui.rawDataTable.verticalHeader().setVisible(True)
-                        
-            self.resizeCellWidth(self.ui.rawDataTable, stretchToFit=False)
-    
+      
     
     def enableDragDrop(self):
         for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
@@ -636,9 +509,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
         self.ui.datalogTable.setModel(self.tmodel_datalog)
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
-        # test summary table
-        self.tmodel_raw = QtGui.QStandardItemModel()
-        self.ui.rawDataTable.setModel(self.tmodel_raw)
+        # test data table
+        self.tmodel_data = TestDataTableModel()
+        self.ui.rawDataTable.setModel(self.tmodel_data)
         self.ui.rawDataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.rawDataTable))
         self.ui.rawDataTable.addAction(self.ui.actionReadDutData_TS)   # add context menu for reading dut data
         # dut summary table
@@ -896,7 +769,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     
             if updateTab:
                 self.updateStatTableContent()       # update table
-                # self.updateTabContent()             # update tab
+                self.updateTabContent()             # update tab
             
             # always update pre selection at last
             self.preHeadSelection = set(selHeads)
@@ -971,6 +844,35 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateModelContent(self.sim_list, self.completeTestList)
     
     
+    def updateTestDataTable(self):
+        # update test data table if:
+        # 1. it is activated;
+        # 2. dut list changed (site & head selection changed);
+        # 3. test num selection changed;
+        # 4. tab changed
+        if self.ui.infoBox.currentIndex() != 2:
+            # do nothing if test data table is not selected
+            return
+
+        d = self.data_interface.getTestDataTableContent(self.getSelectedTests(), 
+                                                        self.getCheckedHeads(), 
+                                                        self.getCheckedSites())
+        self.tmodel_data.setTestData(d["Data"])
+        self.tmodel_data.setTestInfo(d["TestInfo"])
+        self.tmodel_data.setDutIndexMap(d["dut2ind"])
+        self.tmodel_data.setTestLists(d["TestLists"])
+        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
+        self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
+        self.tmodel_data.setVHeaderExt(d["VHeader"])
+        self.tmodel_data.setFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
+        self.tmodel_data.setFloatFormat("%%.%d%s" % (self.settingParams.dataPrecision, 
+                                                     self.settingParams.dataNotation))
+        self.tmodel_data.layoutChanged.emit()
+        hheaderview = self.ui.rawDataTable.horizontalHeader()
+        hheaderview.setVisible(True)
+        hheaderview.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.ui.rawDataTable.verticalHeader().setVisible(True)
+    
                 
     def updateTabContent(self, forceUpdate=False):
         '''
@@ -992,9 +894,10 @@ class MyWindow(QtWidgets.QMainWindow):
         
         # update Test Data table in info tab only when test items are selected
         if tabType == tab.Info:
-            self.onInfoBoxChanged()
+            self.updateTestDataTable()
             return
-        
+        #TODO
+        return
         '''
         ***This following code is used for finding the index of the new image to add or old image to delete.***
                 
@@ -1205,7 +1108,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dataTable.setModel(self.tmodel)
             self.tmodel.layoutChanged.emit()
             # resize table
-            self.resizeCellWidth(self.ui.dataTable)
+            # self.resizeCellWidth(self.ui.dataTable)
                 
         else:
             if tabType == tab.Bin:
@@ -1229,7 +1132,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # activate bin wafer model
             self.ui.dataTable.setModel(self.bwmodel)
             self.bwmodel.layoutChanged.emit()
-            self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
+            # self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
     def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
@@ -1327,12 +1230,7 @@ class MyWindow(QtWidgets.QMainWindow):
             cursor.updatePrecision(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             
             
-    def clearOtherTab(self, currentTab):
-        # if currentTab != tab.Info:
-        #     # clear raw data table
-        #     self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
-        #     self.tmodel_raw.removeColumns(0, self.tmodel_raw.columnCount())
-        
+    def clearOtherTab(self, currentTab):        
         # clear other tabs' images
         if currentTab != tab.Wafer:
             # wafer tab and other tab is separated in the app
@@ -1356,11 +1254,6 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def clearAllContents(self):
-        # clear raw data table
-        self.tmodel_raw.removeRows(0, self.tmodel_raw.rowCount())
-        self.tmodel_raw.removeColumns(0, self.tmodel_raw.columnCount())
-        # clear stat table
-        self.tmodel.removeRows(0, self.tmodel.rowCount())
         # clear tabs' images
         [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
         # clear magic cursor as well, it contains copies of figures
