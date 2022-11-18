@@ -39,6 +39,7 @@ from deps.customizedQtClass import (StyleDelegateForTable_List,
                                     DutSortFilter, 
                                     ColorSqlQueryModel, 
                                     DatalogSqlQueryModel, 
+                                    TestStatisticTableModel, 
                                     BinWaferTableModel)
 
 from deps.uic_stdLoader import stdfLoader
@@ -627,7 +628,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
     def init_DataTable(self):
         # statistic table
-        self.tmodel = QtGui.QStandardItemModel()
+        self.tmodel = TestStatisticTableModel()
         self.bwmodel = BinWaferTableModel()
         self.ui.dataTable.setModel(self.tmodel)
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
@@ -1179,8 +1180,6 @@ class MyWindow(QtWidgets.QMainWindow):
         floatFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         
         if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
-            # clear table
-            self.tmodel.removeRows(0, self.tmodel.rowCount())
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
@@ -1190,38 +1189,19 @@ class MyWindow(QtWidgets.QMainWindow):
             indexOfFail = HHeader.index("Fail Num")
             indexOfCpk = HHeader.index("Cpk")
 
-            for row in d["Rows"]:
-                # create QStandardItem and set TextAlignment
-                qitemList = []
-                for ind, item in enumerate(row):
-                    qitem = QtGui.QStandardItem(item)
-                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                    if ind == indexOfFail:
-                        if item != "0": 
-                            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                            qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                    elif ind == indexOfCpk:
-                        if item != "N/A" and item != "∞":
-                            if float(item) < self.settingParams.cpkThreshold:
-                                qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                                qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-                    qitemList.append(qitem)
-                self.tmodel.appendRow(qitemList)
-            
-            # horizontal header setting
-            self.tmodel.setHorizontalHeaderLabels(list(map(self.tr, HHeader)))
+            self.tmodel.setContent(d["Rows"])
             self.tmodel.setColumnCount(len(HHeader))
+            self.tmodel.setFailCpkIndex(indexOfFail, indexOfCpk)
+            self.tmodel.setCpkThreshold(self.settingParams.cpkThreshold)
+            self.tmodel.setHHeader(list(map(self.tr, HHeader)))
+            self.tmodel.setVHeader(d["VHeader"])
+            
             horizontalHeader.setVisible(True)
-            # vertical header setting
-            # must set AFTER inserting data rows
-            # otherwise there will be empty rows
-            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
             verticalHeader.setVisible(True)
             verticalHeader.setDefaultSectionSize(25)
             verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
             
-            # activate test model
+            # activate test statistc model
             self.ui.dataTable.setModel(self.tmodel)
             self.tmodel.layoutChanged.emit()
             # resize table

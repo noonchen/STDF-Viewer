@@ -310,7 +310,101 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         return super().data(index, role)
     
     
+class TestStatisticTableModel(QtCore.QAbstractTableModel):
+    '''
+    content: 2D list of strings, contains data like test num, cpk, etc.
+    '''
+    def __init__(self):
+        super().__init__()
+        self.content = []
+        self.hheader = []
+        self.vheader = []
+        self.colLen = 0
+        self.indexOfFail = 0
+        self.indexOfCpk = 0
+        self.cpkThreshold = 0.0
+        
+    def setContent(self, content: list):
+        self.content = content
+        
+    def setFailCpkIndex(self, failInd: int, CpkInd: int):
+        self.indexOfFail = failInd
+        self.indexOfCpk = CpkInd
+        
+    def setCpkThreshold(self, threshold: float):
+        self.cpkThreshold = threshold
+        
+    def setColumnCount(self, colLen: int):
+        self.colLen = colLen
+        
+    def setHHeader(self, hheader: list):
+        self.hheader = hheader
+        
+    def setVHeader(self, vheader: list):
+        self.vheader = vheader
+        
+    def data(self, index: QModelIndex, role: int):
+        dataString = ""
+        try:
+            dataString: str = self.content[index.row()][index.column()]
+        except IndexError:
+            return None
+        
+        if role == Qt.ItemDataRole.DisplayRole:
+            return dataString
+        
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignCenter
+        
+        if role == Qt.ItemDataRole.BackgroundRole:
+            if index.column() == self.indexOfFail and dataString != "0": 
+                return QtGui.QColor("#CC0000")
+            if index.column() == self.indexOfCpk and (dataString not in ["N/A", "∞"]) and float(dataString) < self.cpkThreshold:
+                return QtGui.QColor("#FE7B00")
+        
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if index.column() == self.indexOfFail and dataString != "0": 
+                return QtGui.QColor("#FFFFFF")
+            if index.column() == self.indexOfCpk and (dataString not in ["N/A", "∞"]) and float(dataString) < self.cpkThreshold:
+                return QtGui.QColor("#FFFFFF")
+        
+        return None
+    
+    def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        try:
+            self.content[index.row()][index.column()]
+            return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        except IndexError:
+            return Qt.ItemFlag.NoItemFlags
+        
+    def rowCount(self, parent=None) -> int:
+        return len(self.content)
+    
+    def columnCount(self, parent=None) -> int:
+        return self.colLen
+    
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        
+        if orientation == Qt.Orientation.Horizontal:
+            header = self.hheader
+        else:
+            header = self.vheader
+            
+        try:
+            return header[section]
+        except IndexError:
+            return ""
+
+
 class BinWaferTableModel(QtCore.QAbstractTableModel):
+    '''
+    content: 2D list of tuple ("Display String", bin_number, isHBIN), 
+            if bin_num is -1, indicating it's not related to HBIN or SBIN, 
+            use default background color, 
+            otherwise use HBIN or SBIN color stored in color_dict.
+    '''
     def __init__(self):
         super().__init__()
         self.content = []
