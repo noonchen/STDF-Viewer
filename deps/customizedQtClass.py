@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sat Nov 12 2022
+# Last Modified: Fri Nov 18 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -27,7 +27,7 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
-from deps.SharedSrc import dut_flag_parser
+from deps.SharedSrc import dut_flag_parser, getProperFontColor
 
 
 
@@ -309,6 +309,88 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         # return original data otherwise
         return super().data(index, role)
     
+    
+class BinWaferTableModel(QtCore.QAbstractTableModel):
+    def __init__(self):
+        super().__init__()
+        self.content = []
+        self.hheader = []
+        self.vheader = []
+        self.hbin_color = {}
+        self.sbin_color = {}
+        self.colLen = 0
+        
+    def setContent(self, content: list):
+        self.content = content
+        
+    def setColorDict(self, hbin_color: dict, sbin_color: dict):
+        self.hbin_color = hbin_color
+        self.sbin_color = sbin_color
+    
+    def setColumnCount(self, colLen: int):
+        self.colLen = colLen
+        
+    def setHHeader(self, hheader: list):
+        self.hheader = hheader
+        
+    def setVHeader(self, vheader: list):
+        self.vheader = vheader
+        
+    def data(self, index: QModelIndex, role: int):
+        item = ("", -1, False)
+        try:
+            item: tuple = self.content[index.row()][index.column()]
+        except IndexError:
+            return None
+        # unpack
+        dataString, bin_num, isHbin = item
+        
+        if role == Qt.ItemDataRole.DisplayRole:
+            return dataString
+        
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignCenter
+        
+        if role == Qt.ItemDataRole.BackgroundRole:
+            if bin_num != -1:
+                color_dict = self.hbin_color if isHbin else self.sbin_color
+                return QtGui.QColor(color_dict[bin_num])
+        
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if bin_num != -1:
+                color_dict = self.hbin_color if isHbin else self.sbin_color
+                background = QtGui.QColor(color_dict[bin_num])
+                return getProperFontColor(background)
+        
+        return None
+    
+    def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        try:
+            self.content[index.row()][index.column()]
+            return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        except IndexError:
+            return Qt.ItemFlag.NoItemFlags
+        
+    def rowCount(self, parent=None) -> int:
+        return len(self.content)
+    
+    def columnCount(self, parent=None) -> int:
+        return self.colLen
+    
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        
+        if orientation == Qt.Orientation.Horizontal:
+            header = self.hheader
+        else:
+            header = self.vheader
+            
+        try:
+            return header[section]
+        except IndexError:
+            return ""
+        
     
 if __name__ == '__main__':
     testStrings = ['Site 1', 'Site 10', 'Site 100', 'Site 2', 'Site 22']

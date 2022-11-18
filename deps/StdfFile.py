@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Thu Nov 17 2022
+# Last Modified: Fri Nov 18 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -561,16 +561,13 @@ class DataInterface:
         
         return a dictionary contains:
         `VHeader`: list, vertial header
-        `Rows`: list[list], bin data
-        `isHBIN`: list[bool], bin type indication of each row
+        `Rows`: 2D list, element = (data, bin_num, isHBIN)
         `maxLen`: maximum column length
         '''
         ## VHeader
         vHeaderLabels = []
         ## Rows
         rowList = []
-        ## isHBIN
-        isHbinList = []
         ## maxLen
         maxLen = 0
         
@@ -584,32 +581,33 @@ class DataInterface:
                                                               binFullName, 
                                                               head, 
                                                               "All Sites" if site == -1 else f"Site{site}"))
-            isHbinList.append(isHbin)
+            # isHbinList.append(isHbin)
             # preparations for calculation
             binSummary = self.DatabaseFetcher.getBinStats(head, site, isHbin)
             totalBinCnt = sum([cntList[fid] for _, cntList in binSummary.items()])
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(head, site, -1, fid)
-            row.append([f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1])
-            row.append([f"Total: {sum(counts)}", -1])
+            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, False))
+            row.append((f"Total: {sum(counts)}", -1, False))
             for (n, c) in zip(["Pass", "Failed", "Unknown", "Superseded"], counts):
-                row.append([f"{n}: {c}", -1])
+                row.append((f"{n}: {c}", -1, False))
             # iter thru binSummary, calculate percentage of each bin
             for bin_num in sorted(binSummary.keys()):
                 bin_cnt = binSummary[bin_num][fid]
                 if bin_cnt == 0: 
                     continue
                 bin_name = binInfoDict.get(bin_num, {}).get("BIN_NAME", "NO NAME")
-                item = ["{}\nBin{}: {:.1f}%".format(bin_name, 
+                item = ("{}\nBin{}: {:.1f}%".format(bin_name, 
                                                     bin_num, 
                                                     100*bin_cnt/totalBinCnt), 
-                        bin_num]
+                        bin_num,
+                        isHbin)
                 row.append(item)
             rowList.append(row)
             maxLen = max(maxLen, len(row))
             
-        return {"VHeader": vHeaderLabels, "Rows": rowList, "isHBIN": isHbinList, "maxLen": maxLen}
+        return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}
     
     
     def getWaferStatistics(self, waferTuples: list[tuple], selectSites:list[int]):
@@ -621,7 +619,7 @@ class DataInterface:
         
         return a dictionary contains:
         `VHeader`: list, vertial header
-        `Rows`: list[list], statistic data
+        `Rows`: 2D list, element = (data, bin_num, isHBIN)
         `maxLen`: maximum column length
         '''
         ## VHeader
@@ -646,25 +644,26 @@ class DataInterface:
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(-1, site, waferIndex, fid)
-            row.append([f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1])
-            row.append([f"Total: {sum(counts)}", -1])
+            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, False))
+            row.append((f"Total: {sum(counts)}", -1, False))
             for (n, c) in zip(["Pass", "Failed", "Unknown", "Superseded"], counts):
-                row.append([f"{n}: {c}", -1])
+                row.append((f"{n}: {c}", -1, False))
             # add wafer infos
             for k in ["WAFER_ID", "FABWF_ID", "FRAME_ID", "MASK_ID"]:
                 v = self.waferInfoDict[(waferIndex, fid)].get(k, "")
                 if v != "":
-                    row.append([f"{k}: {v}", -1])
+                    row.append((f"{k}: {v}", -1, False))
             # soft bin only
             for sbin_num in sorted(coordsDict.keys()):
                 sbin_cnt = len(coordsDict[sbin_num])
                 if sbin_cnt == 0: 
                     continue
                 sbin_name = self.SBIN_dict.get(sbin_num, {}).get("BIN_NAME", "NO NAME")
-                item = ["{}\nBin{}: {:.1f}%".format(sbin_name, 
+                item = ("{}\nBin{}: {:.1f}%".format(sbin_name, 
                                                     sbin_num, 
                                                     100*sbin_cnt/totalDies), 
-                        sbin_num]
+                        sbin_num,
+                        False)
                 row.append(item)
             rowList.append(row)
             maxLen = max(maxLen, len(row))

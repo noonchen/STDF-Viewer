@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Nov 17 2022
+# Last Modified: Fri Nov 18 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -35,8 +35,11 @@ from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.StdfFile import DataInterface
 from deps.MatplotlibWidgets import PlotCanvas, MagCursor
-from deps.customizedQtClass import StyleDelegateForTable_List, DutSortFilter, ColorSqlQueryModel, DatalogSqlQueryModel
-
+from deps.customizedQtClass import (StyleDelegateForTable_List, 
+                                    DutSortFilter, 
+                                    ColorSqlQueryModel, 
+                                    DatalogSqlQueryModel, 
+                                    BinWaferTableModel)
 
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
@@ -625,6 +628,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def init_DataTable(self):
         # statistic table
         self.tmodel = QtGui.QStandardItemModel()
+        self.bwmodel = BinWaferTableModel()
         self.ui.dataTable.setModel(self.tmodel)
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
         # datalog info table
@@ -1133,7 +1137,7 @@ class MyWindow(QtWidgets.QMainWindow):
         return result
         
     
-    def resizeCellWidth(self, tableView, stretchToFit = True):
+    def resizeCellWidth(self, tableView: QtWidgets.QTableView, stretchToFit = True):
         # set column width
         header = tableView.horizontalHeader()
         rowheader = tableView.verticalHeader()
@@ -1169,15 +1173,15 @@ class MyWindow(QtWidgets.QMainWindow):
             
     def updateStatTableContent(self):
         tabType = self.ui.tabControl.currentIndex()
-        # clear table
-        self.tmodel.removeRows(0, self.tmodel.rowCount())
-        
         selTests = self.getSelectedTests()
         horizontalHeader = self.ui.dataTable.horizontalHeader()
         verticalHeader = self.ui.dataTable.verticalHeader()
         floatFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
         
         if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
+            # clear table
+            self.tmodel.removeRows(0, self.tmodel.rowCount())
+            # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
                                                       self.getCheckedSites(), 
@@ -1217,74 +1221,34 @@ class MyWindow(QtWidgets.QMainWindow):
             verticalHeader.setDefaultSectionSize(25)
             verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
             
+            # activate test model
+            self.ui.dataTable.setModel(self.tmodel)
+            self.tmodel.layoutChanged.emit()
             # resize table
             self.resizeCellWidth(self.ui.dataTable)
                 
-        elif tabType == tab.Bin:
-            d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
-                                                     self.getCheckedSites())
-            
-            for row, isHBIN in zip(d["Rows"], d["isHBIN"]):
-                qitemList = []
-                for dataString, bin_num in row:
-                    qitem = QtGui.QStandardItem(dataString)
-                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                    # set color
-                    color_dict = self.settingParams.hbinColor if isHBIN else self.settingParams.sbinColor
-                    if bin_num != -1:
-                        bc = QtGui.QColor(color_dict[bin_num])
-                        fc = ss.getProperFontColor(bc)
-                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
-                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
-                    qitemList.append(qitem)
-                self.tmodel.appendRow(qitemList)
-        
-            # horizontal header setting
-            self.tmodel.setHorizontalHeaderLabels([])
-            # set column size, better than remove columns 
-            # cuz the latter will cause flicking when updating data
-            self.tmodel.setColumnCount(d["maxLen"])
-            horizontalHeader.setVisible(False)
-            # vertical header setting
-            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
-            verticalHeader.setVisible(True)
-            verticalHeader.setDefaultSectionSize(35)
-            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
-            
-            self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
-        
         else:
-            # wafer tab
-            d = self.data_interface.getWaferStatistics(selTests, 
-                                                       self.getCheckedSites())
-            color_dict = self.settingParams.sbinColor
-            for row in d["Rows"]:
-                qitemList = []
-                for dataString, bin_num in row:
-                    qitem = QtGui.QStandardItem(dataString)
-                    qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                    qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                    # set color
-                    if bin_num != -1:
-                        bc = QtGui.QColor(color_dict[bin_num])
-                        fc = ss.getProperFontColor(bc)
-                        qitem.setData(bc, QtCore.Qt.BackgroundRole)
-                        qitem.setData(fc, QtCore.Qt.ForegroundRole)
-                    qitemList.append(qitem)
-                self.tmodel.appendRow(qitemList)
+            if tabType == tab.Bin:
+                d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
+                                                         self.getCheckedSites())
+            else:
+                # wafer tab
+                d = self.data_interface.getWaferStatistics(selTests, 
+                                                           self.getCheckedSites())
+            self.bwmodel.setContent(d["Rows"])
+            self.bwmodel.setColumnCount(d["maxLen"])
+            self.bwmodel.setHHeader([])
+            self.bwmodel.setVHeader(d["VHeader"])
+            self.bwmodel.setColorDict(self.settingParams.hbinColor, self.settingParams.sbinColor)
         
-            # horizontal header setting
-            self.tmodel.setHorizontalHeaderLabels([])
-            # set column size, better than remove columns 
-            # cuz the latter will cause flicking when updating data
-            self.tmodel.setColumnCount(d["maxLen"])
             horizontalHeader.setVisible(False)
-            # vertical header setting
-            self.tmodel.setVerticalHeaderLabels(d["VHeader"])
             verticalHeader.setVisible(True)
             verticalHeader.setDefaultSectionSize(35)
             verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
+            
+            # activate bin wafer model
+            self.ui.dataTable.setModel(self.bwmodel)
+            self.bwmodel.layoutChanged.emit()
             self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
