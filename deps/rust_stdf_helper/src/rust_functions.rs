@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Thu Nov 17 2022
+// Last Modified: Sun Nov 20 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -418,18 +418,12 @@ pub fn process_incoming_record(
     rec_info: (usize, ByteOrder, u64, usize, StdfRecord),
 ) -> Result<(), StdfHelperError> {
     // unpack info
-    let (file_id, order, offset, data_len, rec) = rec_info;
+    let (file_id, order, _offset, _data_len, rec) = rec_info;
     match rec {
         // // rec type 15
-        StdfRecord::PTR(ptr_rec) => {
-            on_ptr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ptr_rec)?
-        }
-        StdfRecord::MPR(mpr_rec) => {
-            on_mpr_rec(db_ctx, rec_tracker, file_id, offset, data_len, mpr_rec)?
-        }
-        StdfRecord::FTR(ftr_rec) => {
-            on_ftr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ftr_rec)?
-        }
+        StdfRecord::PTR(ptr_rec) => on_ptr_rec(db_ctx, rec_tracker, file_id, ptr_rec)?,
+        StdfRecord::MPR(mpr_rec) => on_mpr_rec(db_ctx, rec_tracker, file_id, mpr_rec)?,
+        StdfRecord::FTR(ftr_rec) => on_ftr_rec(db_ctx, rec_tracker, file_id, ftr_rec)?,
         // StdfRecord::STR(str_rec) => str_rec.read_from_bytes(raw_data, order),
         // // rec type 5
         StdfRecord::PIR(pir_rec) => on_pir_rec(db_ctx, rec_tracker, file_id, pir_rec)?,
@@ -894,8 +888,6 @@ fn on_ptr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
     ptr_rec: PTR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
@@ -907,8 +899,13 @@ fn on_ptr_rec(
         ptr_rec.test_num,
         &ptr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    // insert ptr result
+    db_ctx.insert_ptr_data(rusqlite::params![
+        dut_index,
+        test_id,
+        ptr_rec.result,
+        ptr_rec.test_flg[0]
+    ])?;
 
     // if test id is not presented in llimit/hlimit hashmap
     if !tracker.update_default_limits(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit) {
@@ -972,8 +969,6 @@ fn on_mpr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
     mpr_rec: MPR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
@@ -985,8 +980,18 @@ fn on_mpr_rec(
         mpr_rec.test_num,
         &mpr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    // insert mpr data
+    // serialize result array and stat array using hex
+    let rslt_hex =
+        hex::encode_upper({ unsafe { std::mem::transmute::<&[f32], &[u8]>(&mpr_rec.rtn_rslt) } });
+    let stat_hex = hex::encode_upper(mpr_rec.rtn_stat);
+    db_ctx.insert_mpr_data(rusqlite::params![
+        dut_index,
+        test_id,
+        rslt_hex,
+        stat_hex,
+        mpr_rec.test_flg[0]
+    ])?;
 
     // FTR doesn't have high/low limit, but we can still use this hashmap to check
     // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
@@ -1027,8 +1032,6 @@ fn on_ftr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
     ftr_rec: FTR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
@@ -1040,8 +1043,8 @@ fn on_ftr_rec(
         ftr_rec.test_num,
         &ftr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    // insert ftr test flag
+    db_ctx.insert_ftr_data(rusqlite::params![dut_index, test_id, ftr_rec.test_flg[0]])?;
 
     // FTR doesn't have high/low limit, but we can still use this hashmap to check
     // if this test id has been saved, to avoid duplicate rows in the sqlite3 database

@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sat Nov 12 2022
+// Last Modified: Sun Nov 20 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -17,7 +17,9 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 DROP TABLE IF EXISTS Dut_Info;
                                 DROP TABLE IF EXISTS Dut_Counts;
                                 DROP TABLE IF EXISTS Test_Info;
-                                DROP TABLE IF EXISTS Test_Offsets;
+                                DROP TABLE IF EXISTS PTR_Data;
+                                DROP TABLE IF EXISTS MPR_Data;
+                                DROP TABLE IF EXISTS FTR_Data;
                                 DROP TABLE IF EXISTS Bin_Info;
                                 DROP TABLE IF EXISTS Wafer_Info;
                                 DROP TABLE IF EXISTS Pin_Map;
@@ -106,12 +108,26 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         SEQ_NAME TEXT,
                                                         PRIMARY KEY (Fid, TEST_NUM, TEST_NAME)) WITHOUT ROWID;
                                                         
-                                CREATE TABLE IF NOT EXISTS Test_Offsets (
+                                CREATE TABLE IF NOT EXISTS PTR_Data (
                                                         DUTIndex INTEGER,
                                                         TEST_ID INTEGER, 
-                                                        Offset INTEGER,
-                                                        BinaryLen INTEGER,
+                                                        RESULT REAL,
+                                                        TEST_FLAG INTEGER,
                                                         PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
+
+                                CREATE TABLE IF NOT EXISTS MPR_Data (
+                                                        DUTIndex INTEGER,
+                                                        TEST_ID INTEGER, 
+                                                        RTN_RSLT TEXT,
+                                                        RTN_STAT TEXT,
+                                                        TEST_FLAG INTEGER,
+                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
+                                                            
+                                CREATE TABLE IF NOT EXISTS FTR_Data (
+                                                        DUTIndex INTEGER,
+                                                        TEST_ID INTEGER, 
+                                                        TEST_FLAG INTEGER,
+                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;                                                            
                                                         
                                 CREATE TABLE IF NOT EXISTS Bin_Info (
                                                         Fid INTEGER,
@@ -228,10 +244,20 @@ static UPDATE_SUPERSEDE_DIE: &str = "UPDATE Dut_Info SET
                                         XCOORD=:XCOORD AND
                                         YCOORD=:YCOORD;";
 
-static INSERT_TEST_REC: &str = "INSERT OR REPLACE INTO 
-                                    Test_Offsets 
+static INSERT_PTR_DATA: &str = "INSERT OR REPLACE INTO 
+                                    PTR_Data 
                                 VALUES 
-                                    (:DUTIndex, :TEST_ID, :Offset ,:BinaryLen);";
+                                    (:DUTIndex, :TEST_ID, :RESULT, :TEST_FLAG);";
+
+static INSERT_MPR_DATA: &str = "INSERT OR REPLACE INTO 
+                                    MPR_Data 
+                                VALUES 
+                                    (:DUTIndex, :TEST_ID, :RTN_RSLT, :RTN_STAT, :TEST_FLAG);";
+
+static INSERT_FTR_DATA: &str = "INSERT OR REPLACE INTO 
+                                    FTR_Data 
+                                VALUES 
+                                    (:DUTIndex, :TEST_ID, :TEST_FLAG);";
 
 static INSERT_TEST_INFO: &str = "INSERT INTO 
                                     Test_Info 
@@ -334,7 +360,9 @@ pub struct DataBaseCtx<'con> {
     update_dut_stmt: Statement<'con>,
     update_supersede_dut_stmt: Statement<'con>,
     update_supersede_die_stmt: Statement<'con>,
-    insert_test_rec_stmt: Statement<'con>,
+    insert_ptr_data_stmt: Statement<'con>,
+    insert_mpr_data_stmt: Statement<'con>,
+    insert_ftr_data_stmt: Statement<'con>,
     insert_test_info_stmt: Statement<'con>,
     update_fail_count_stmt: Statement<'con>,
     insert_hbin_stmt: Statement<'con>,
@@ -360,7 +388,9 @@ impl<'con> DataBaseCtx<'con> {
         let update_dut_stmt = conn.prepare(UPDATE_DUT)?;
         let update_supersede_dut_stmt = conn.prepare(UPDATE_SUPERSEDE_DUT)?;
         let update_supersede_die_stmt = conn.prepare(UPDATE_SUPERSEDE_DIE)?;
-        let insert_test_rec_stmt = conn.prepare(INSERT_TEST_REC)?;
+        let insert_ptr_data_stmt = conn.prepare(INSERT_PTR_DATA)?;
+        let insert_mpr_data_stmt = conn.prepare(INSERT_MPR_DATA)?;
+        let insert_ftr_data_stmt = conn.prepare(INSERT_FTR_DATA)?;
         let insert_test_info_stmt = conn.prepare(INSERT_TEST_INFO)?;
         let update_fail_count_stmt = conn.prepare(UPDATE_FAIL_COUNT)?;
         let insert_hbin_stmt = conn.prepare(INSERT_HBIN)?;
@@ -384,7 +414,9 @@ impl<'con> DataBaseCtx<'con> {
             update_dut_stmt,
             update_supersede_dut_stmt,
             update_supersede_die_stmt,
-            insert_test_rec_stmt,
+            insert_ptr_data_stmt,
+            insert_mpr_data_stmt,
+            insert_ftr_data_stmt,
             insert_test_info_stmt,
             update_fail_count_stmt,
             insert_hbin_stmt,
@@ -474,8 +506,20 @@ impl<'con> DataBaseCtx<'con> {
     }
 
     #[inline(always)]
-    pub fn insert_test_rec(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
-        self.insert_test_rec_stmt.execute(p)?;
+    pub fn insert_ptr_data(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_ptr_data_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn insert_mpr_data(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_mpr_data_stmt.execute(p)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn insert_ftr_data(&mut self, p: &[&dyn ToSql]) -> Result<(), StdfHelperError> {
+        self.insert_ftr_data_stmt.execute(p)?;
         Ok(())
     }
 
@@ -541,7 +585,9 @@ impl<'con> DataBaseCtx<'con> {
         self.insert_file_info_stmt.finalize()?;
         self.insert_dut_stmt.finalize()?;
         self.update_dut_stmt.finalize()?;
-        self.insert_test_rec_stmt.finalize()?;
+        self.insert_ptr_data_stmt.finalize()?;
+        self.insert_mpr_data_stmt.finalize()?;
+        self.insert_ftr_data_stmt.finalize()?;
         self.insert_test_info_stmt.finalize()?;
         self.update_fail_count_stmt.finalize()?;
         self.insert_hbin_stmt.finalize()?;
