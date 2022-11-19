@@ -496,6 +496,7 @@ class DataInterface:
         `Data`: dict, key: testTuple, value: list of dicts from `getTestDataCore`
         `TestInfo`: dict, key: testTuple, value: list of info
         `dut2ind`: list of maps, dutIndex to list index
+        `dutInfo`: list of maps, dutIndex to info tuple
         '''
         data = {}
         testInfo = {}
@@ -513,6 +514,7 @@ class DataInterface:
             data.setdefault(testTup, []).append(test_fid)
         
         vheader = []
+        dutInfo = []
         dut2ind = []
         for fid in range(self.num_files):
             if fid in dutIndexDict:
@@ -520,14 +522,21 @@ class DataInterface:
                 dut2ind.append(dict(zip(dutIndexDict[fid], 
                                         range(len(dutIndexDict[fid]))
                                         )))
+                # add dict of dut index -> (part id, head site, dut flag)
+                dutInfo.append(self.DatabaseFetcher.getDUTInfoOnCondition(selectHeads, 
+                                                                          selectSites, 
+                                                                          fid))
             else:
+                # fid doesn't contain any tests in testTuples
                 dut2ind.append({})
+                dutInfo.append({})
                 
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
                 "Data": data, 
                 "TestInfo": testInfo, 
-                "dut2ind": dut2ind}
+                "dut2ind": dut2ind,
+                "dutInfo": dutInfo}
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):

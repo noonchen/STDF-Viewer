@@ -268,7 +268,7 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
                 if role == QtCore.Qt.ItemDataRole.ForegroundRole:
                     if dutFlag.startswith("Fail") or dutFlag.startswith("Supersede"):
                         # set to font color to white
-                        return QtGui.QColor("#FFFFFF")                        
+                        return QtGui.QColor("#FFFFFF")
                 
                 elif role == QtCore.Qt.ItemDataRole.BackgroundColorRole:
                     # mark fail row as red
@@ -323,6 +323,7 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
         self.testData = {}
         self.testInfo = {}
         self.dutIndMap = []
+        self.dutInfoMap = []
         self.hheader_base = []
         self.vheader_base = []
         self.testLists = []
@@ -338,6 +339,9 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
         
     def setDutIndexMap(self, dutIndMap: list):
         self.dutIndMap = dutIndMap
+        
+    def setDutInfoMap(self, dutInfo: list):
+        self.dutInfoMap = dutInfo
         
     def setHHeaderBase(self, hheaderBase: list):
         self.hheader_base = hheaderBase
@@ -398,27 +402,47 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                     return Qt.AlignmentFlag.AlignCenter
                 return None
 
-            #TODO lower left contains dut info
+            # lower left contains dut info
             if index.row() >= len(self.vheader_base) and index.column() < len(self.hheader_base):
+                # get test data indexes
+                test_index = index.column() - len(self.hheader_base)
+                fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
+                fid = int(fileStr.strip("File"))
+                dutIndex = int(dutIndStr.strip("#"))
+                partId, hsStr, flagStr = self.dutInfoMap[fid][dutIndex]
+                
                 if role == Qt.ItemDataRole.DisplayRole:
                     if index.column() == 0:
                         # part id
-                        return "test id"
+                        return partId
                     if index.column() == 1:
                         # head-site
-                        return "head-site"
+                        return hsStr
                 if role == Qt.ItemDataRole.ForegroundRole:
-                    # red only if failed
-                    return QtGui.QColor("#000000")
+                    if flagStr.startswith("Fail") or flagStr.startswith("Supersede"):
+                        # set to font color to white
+                        return QtGui.QColor("#FFFFFF")
+
                 if role == Qt.ItemDataRole.BackgroundRole:
-                    # red only if failed
-                    return QtGui.QColor("#FFFFFF")
+                    # mark fail row as red
+                    if flagStr.startswith("Fail"): return QtGui.QColor("#CC0000")
+                    # mark superseded row as gray
+                    elif flagStr.startswith("Supersede"): return QtGui.QColor("#D0D0D0")
+                    # mark unknown as orange
+                    elif flagStr.startswith("Unknown"): return QtGui.QColor("#FE7B00")
+                
                 if role == Qt.ItemDataRole.FontRole:
                     return self.font
                 if role == Qt.ItemDataRole.TextAlignmentRole:
                     return Qt.AlignmentFlag.AlignCenter
                 if role == Qt.ItemDataRole.ToolTipRole:
-                    return None
+                    if not flagStr.startswith("Pass"): 
+                        # get flag number
+                        numStr = flagStr.split("-")[-1]
+                        tip = dut_flag_parser(numStr)
+                        if flagStr.startswith("Supersede"):
+                            tip = "This dut is replaced by other dut\n" + tip
+                        return tip
                 return None
                     
             # lower right contains test data

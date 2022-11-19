@@ -860,6 +860,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setTestData(d["Data"])
         self.tmodel_data.setTestInfo(d["TestInfo"])
         self.tmodel_data.setDutIndexMap(d["dut2ind"])
+        self.tmodel_data.setDutInfoMap(d["dutInfo"])
         self.tmodel_data.setTestLists(d["TestLists"])
         self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
@@ -870,7 +871,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
-        hheaderview.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        # FIXME: resize to contents causes laggy
+        # hheaderview.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         self.ui.rawDataTable.verticalHeader().setVisible(True)
     
                 

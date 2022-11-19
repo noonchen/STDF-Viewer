@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Thu Nov 17 2022
+# Last Modified: Sat Nov 19 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -507,37 +507,44 @@ class DatabaseFetcher:
         return failDieDistribution
     
     
-    #TODO
-    def getDUTIndexFromBin(self, head:int, site:int, bin:int, binType:str = "HBIN") -> list:
+    def getDUTIndexFromBin(self, head: int, site: int, bin: int, isHBIN: bool = True, fileId: int = -1) -> list:
+        '''
+        returns list[ (File ID, DutIndex) ] that is in BIN{bin}
+        '''        
         if self.cursor is None: raise RuntimeError("No database is connected")
-        if binType != "HBIN" and binType != "SBIN": raise RuntimeError("binType should be HBIN or SBIN")
+        
+        ext_condition = ""
+        if site != -1:
+            ext_condition += f" AND SITE_NUM={site}"
+        if fileId != -1:
+            ext_condition += f" AND Fid={fileId}"
+        binType = "HBIN" if isHBIN else "SBIN"
         
         dutIndexList = []
-        if site == -1:
-            sql = f"SELECT DUTIndex FROM Dut_Info \
-                WHERE {binType}=? AND HEAD_NUM=?"
-            sql_param = (bin, head)
-        else:
-            sql = f"SELECT DUTIndex FROM Dut_Info \
-                WHERE {binType}=? AND HEAD_NUM=? AND SITE_NUM=?"
-            sql_param = (bin, head, site)
+        sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {binType}={bin} AND HEAD_NUM={head} {ext_condition}"
             
-        for dutIndex, in self.cursor.execute(sql, sql_param):
-            dutIndexList.append(dutIndex)
+        for fid, dutIndex, in self.cursor.execute(sql):
+            dutIndexList.append( (fid, dutIndex) )
         
         return dutIndexList
     
     
-    #TODO
-    def getDUTIndexFromXY(self, x:int, y:int, wafer_num:int) -> list:
+    def getDUTIndexFromXY(self, x: int, y: int, wafer_num: int, fileId: int) -> list[tuple]:
+        '''
+        returns list[ (File ID, DutIndex) ] that in (X, Y)
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         dutIndexList = []
-        sql = "SELECT DUTIndex FROM Dut_Info WHERE XCOORD=? AND YCOORD=?" + ("" if wafer_num == -1 else " AND WaferIndex=?")
-        sql_param = [x, y] + ([] if wafer_num == -1 else [wafer_num])
+        if wafer_num == -1:
+            # for stacked wafermap, ignore `fileId`
+            # since we need to get dut index from all files
+            sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y}"
+        else:
+            sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y} AND WaferIndex={wafer_num} AND Fid={fileId}"
             
-        for dutIndex, in self.cursor.execute(sql, sql_param):
-            dutIndexList.append(dutIndex)
+        for fid, dutIndex, in self.cursor.execute(sql):
+            dutIndexList.append((fid, dutIndex))
         
         return dutIndexList
     
@@ -587,6 +594,39 @@ class DatabaseFetcher:
             DR_List.append((RecordType, Value, ApproxLoc))
             
         return DR_List
+    
+    
+    def getDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileId: int) -> dict:
+        '''
+        return a dict of dutIndex -> (part id, head-site, dut flag)
+        '''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        if len(heads) == 0 or len(sites) == 0:
+            return {}
+        
+        head_condition = f" AND HEAD_NUM in ({','.join(map(str, heads))})"
+        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({','.join(map(str, sites))})"
+        
+        sql = f'''SELECT
+                    DUTIndex,
+                    PartID AS "Part ID",
+                    'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
+                    printf("%s - 0x%02X", CASE 
+                            WHEN Supersede=1 THEN 'Superseded' 
+                            WHEN Flag & 24 = 0 THEN 'Pass' 
+                            WHEN Flag & 24 = 8 THEN 'Failed' 
+                            ELSE 'Unknown' 
+                            END, Flag) AS "DUT Flag"
+                FROM Dut_Info WHERE Fid={fileId}{head_condition}{site_condition}
+                ORDER By DUTIndex'''
+        
+        info = {}
+        for dutIndex, partId, hsStr, flagStr in self.cursor.execute(sql):
+            info[dutIndex] = (partId, hsStr, flagStr)
+            
+        return info
+            
 
 
 if __name__ == "__main__":
