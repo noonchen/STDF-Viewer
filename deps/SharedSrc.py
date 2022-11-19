@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Nov 13 2022
+# Last Modified: Sat Nov 19 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -37,14 +37,14 @@ setattr(sys, "CONFIG_NAME", settingNamePair)
 
 
 DUT_SUMMARY_QUERY = '''SELECT
-                            Fid AS "File ID",
+                            Dut_Info.Fid AS "File ID",
                             PartID AS "Part ID",
                             'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
                             TestCount AS "Tests Executed",
                             TestTime || ' ms' AS "Test Time",
                             'Bin ' || HBIN AS "Hardware Bin",
                             'Bin ' || SBIN AS "Software Bin",
-                            WaferIndex AS "Wafer ID",
+                            wf.WAFER_ID AS "Wafer ID",
                             '(' || XCOORD || ', ' || YCOORD || ')' AS "(X, Y)",
                             printf("%s - 0x%02X", CASE 
                                     WHEN Supersede=1 THEN 'Superseded' 
@@ -52,7 +52,12 @@ DUT_SUMMARY_QUERY = '''SELECT
                                     WHEN Flag & 24 = 8 THEN 'Failed' 
                                     ELSE 'Unknown' 
                                     END, Flag) AS "DUT Flag"
-                        FROM Dut_Info'''
+                        FROM (Dut_Info 
+                            LEFT JOIN (SELECT 
+                                            Fid, WaferIndex, WAFER_ID 
+                                        FROM 
+                                            Wafer_Info) AS "wf" 
+                            ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)'''
 
 
 # ********** python equivalent ******** #
