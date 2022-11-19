@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -25,7 +25,10 @@
 
 
 import subprocess, os, platform
-from .customizedQtClass import StyleDelegateForTable_List, FlippedProxyModel, NormalProxyModel
+from .customizedQtClass import (StyleDelegateForTable_List, 
+                                FlippedProxyModel, 
+                                NormalProxyModel, 
+                                TestDataTableModel)
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
 from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog, QPushButton
@@ -46,87 +49,16 @@ from .ui.stdfViewer_dutDataUI import Ui_dutData
 # from .ui.stdfViewer_dutDataUI_side6 import Ui_dutData
 
 
-
-class signal(QtCore.QObject):
-    hideSignal = Signal()
-    
-    
-
-class DutDataReader(QtWidgets.QWidget):
+        
+class DutDataDisplayer(QtWidgets.QDialog):
     def __init__(self, parent):
-        super().__init__()
-        self.UI = Ui_loadingUI()
-        self.UI.setupUi(self)
-        self.parent = parent
-        self.translator = QTranslator(self)
-        self.selectedDutIndex = []
-                
-        self.stopFlag = False
-        self.signal = signal()
-        self.signal.hideSignal.connect(self.hide)
-        self.tableUI = dutDataDisplayer(self, self.signal.hideSignal)
-        
-    
-    def setDutIndexes(self, selectedDutIndex:list):
-        self.selectedDutIndex = selectedDutIndex      # selected indexes of dut info table
-    
-    
-    def start(self):
-        # init every start
-        self.setWindowTitle(self.tr("Reading DUT data"))
-        self.UI.progressBar.setFormat("%p%")
-        self.stopFlag = False
-        self.show()
-        
-        self.test_number_tuple_List = [self.parent.getTestTuple(ele) for ele in self.parent.completeTestList]
-        self.total = len(self.test_number_tuple_List)
-        dutInfo = [self.parent.getDutSummaryOfIndex(i) for i in self.selectedDutIndex]
-        # get dut flag info for showing tips
-        dutFlagAsString = [dutSumList[-1].split("-")[-1] for dutSumList in dutInfo]
-        dutFlagInfo = [self.parent.dut_flag_parser(ele) for ele in dutFlagAsString]
-        # test data section
-        dutData = []
-        dutStat = []
-        testFlagInfo = []
-        #TODO maybe we can optimize by ordering the seek positions?
-        for i, testTuple in enumerate(self.test_number_tuple_List):
-            if self.stopFlag: return
-
-            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, testTuple)
-            dutData.append(dutData_perTest)
-            dutStat.append(stat_perTest)
-            testFlagInfo.append(flagInfo_perTest)
-            
-            self.updateProgressBar(int(100 * (i+1) / self.total))
-            QApplication.processEvents()    # force refresh UI to update progress bar
-        self.UI.progressBar.setFormat(self.tr("Filling table with data..."))
-        QApplication.processEvents()
-        self.tableUI.setContent((dutInfo, dutFlagInfo, dutData, dutStat, testFlagInfo))
-        self.tableUI.showUI()
-        self.close()
-            
-        
-    def closeEvent(self, event):
-        # close by clicking X
-        self.stopFlag = True
-        event.accept()
-             
-                    
-    def updateProgressBar(self, num):
-        self.UI.progressBar.setValue(num)
-      
-        
-        
-class dutDataDisplayer(QtWidgets.QDialog):
-    def __init__(self, parent, hideSignal: Signal):
-        super().__init__()
+        super().__init__(parent)
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
-        self.parent = parent
         self.translator = QTranslator(self)
         self.sd = StyleDelegateForTable_List(self)
-        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = ([], [], [], [], [])
-        self.hideSignal = hideSignal
+        self.textFont = QtGui.QFont()
+        self.floatFormat = "%f"
         
         self.transposeBtn = QPushButton("T")
         self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
@@ -140,99 +72,54 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.init_Table()
         
         
-    def setContent(self, content):
-        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = content
+    def setTextFont(self, font: QtGui.QFont):
+        self.textFont = font
+        
+        
+    def setFloatFormat(self, floatFormat: str):
+        self.floatFormat = floatFormat
+        
+        
+    def setContent(self, content: dict):
+        '''
+        see StdfFile.py -> DataInterface -> getDutSummaryWithTestDataCore
+        for details of `content`
+        '''
+        self.tmodel.setTestData(content["Data"])
+        self.tmodel.setTestInfo(content["TestInfo"])
+        self.tmodel.setDutIndexMap(content["dut2ind"])
+        self.tmodel.setDutInfoMap(content["dutInfo"])
+        self.tmodel.setTestLists(content["TestLists"])
+        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Test Head - Site"), 
+                                    self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), 
+                                    self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
+        self.tmodel.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
+        self.tmodel.setVHeaderExt(content["VHeader"])
+        self.tmodel.setFont(self.textFont)
+        self.tmodel.setFloatFormat(self.floatFormat)
+        # emit signal to show data
+        self.tmodel.layoutChanged.emit()
         
     
     def showUI(self):
-        self.refresh_Table()
-        self.hideSignal.emit()
         self.exec_()
         
         
     def init_Table(self):
-        self.tmodel = QtGui.QStandardItemModel()
+        self.tmodel = TestDataTableModel()
         # proxy model for normal display & transpose
-        self.flipModel = FlippedProxyModel()
-        self.normalModel = NormalProxyModel()
-        self.flipModel.setSourceModel(self.tmodel)
-        self.normalModel.setSourceModel(self.tmodel)
+        # self.flipModel = FlippedProxyModel()
+        # self.normalModel = NormalProxyModel()
+        # self.flipModel.setSourceModel(self.tmodel)
+        # self.normalModel.setSourceModel(self.tmodel)
         # use normal model as default
-        self.activeModel = self.normalModel
-        self.UI.tableView_dutData.setModel(self.activeModel)
+        # self.activeModel = self.normalModel
+        self.UI.tableView_dutData.setModel(self.tmodel)
         self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
         self.sd.setParent(self.UI.tableView_dutData)
         self.UI.tableView_dutData.setItemDelegate(self.sd)    
 
-
-    def refresh_Table(self):
-        self.activeModel.layoutAboutToBeChanged.emit()
-        # clear
-        self.tmodel.removeColumns(0, self.tmodel.columnCount())
-        self.tmodel.removeRows(0, self.tmodel.rowCount())
-        # header
-        hh = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"),
-              self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"),
-              self.tr("DUT Flag")] + [tmp[0] for tmp in self.dutData]
-        vh_base = [self.tr("Test Number"), self.tr("HiLimit"), self.tr("LoLimit"), self.tr("Unit")]
-        vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
-        vh_len = len(vh_base)
-
-        # append value
-        # get dut pass/fail list
-        statIndex = hh.index(self.tr("DUT Flag"))
-        self.dutFlagInfo = [""] * vh_len + self.dutFlagInfo     # prepend empty tips for non-data cell
-        dutStatus = ["P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
-        for col_tuple in zip(*self.dutInfo):
-            tmpCol = [""] * vh_len + list(col_tuple)
-            qitemCol = []
-            for i, (item, flagCap, dutTip) in enumerate(zip(tmpCol, dutStatus, self.dutFlagInfo)):
-                qitem = QtGui.QStandardItem(item)
-                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
-                # use first letter to check dut status
-                if flagCap == "P":
-                    pass
-                elif flagCap == "F": 
-                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                else:
-                    qitem.setData(QtGui.QColor("#000000"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-                if dutTip != "":
-                    qitem.setToolTip(dutTip)
-                qitemCol.append(qitem)
-            self.tmodel.appendColumn(qitemCol)
-        
-        for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.testFlagInfo):
-            qitemCol = []
-            for i, (item, stat, flagInfo) in enumerate(zip(dataCol, statCol, flagInfoCol)):    # remove 1st element: test name
-                if i == 0: continue     # skip test name
-                qitem = QtGui.QStandardItem(item)
-                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                if stat == False:
-                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                if flagInfo != "":
-                    qitem.setToolTip(flagInfo)
-                if i <= vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
-                qitemCol.append(qitem)                        
-            self.tmodel.appendColumn(qitemCol)
-        
-        self.tmodel.setHorizontalHeaderLabels(hh)
-        self.tmodel.setVerticalHeaderLabels(vh)
-        self.UI.tableView_dutData.horizontalHeader().setVisible(True)
-        self.UI.tableView_dutData.verticalHeader().setVisible(True)        
-        # resize cells
-        header = self.UI.tableView_dutData.horizontalHeader()
-        for column in range(header.model().columnCount()):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
-        # emit signal to show data
-        self.activeModel.layoutChanged.emit()
-        
         
     def onTransposeTable(self):
         if self.activeModel == self.normalModel:

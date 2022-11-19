@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sat Nov 19 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -318,7 +318,7 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
     
 class TestDataTableModel(QtCore.QAbstractTableModel):
     '''
-    Model for TestDataTable
+    Model for TestDataTable and DutDataTable
     '''
     def __init__(self):
         super().__init__()
@@ -373,10 +373,6 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
         try:
             # upper left corner contains no info
             if index.row() < len(self.vheader_base) and index.column() < len(self.hheader_base):
-                if role == Qt.ItemDataRole.DisplayRole:
-                    return ""
-                if role == Qt.ItemDataRole.BackgroundRole:
-                    return QtGui.QColor("#0F80FF7F")
                 # prevent fall below
                 return None
             
@@ -411,15 +407,15 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                 fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
                 fid = int(fileStr.strip("File"))
                 dutIndex = int(dutIndStr.strip("#"))
-                partId, hsStr, flagStr = self.dutInfoMap[fid][dutIndex]
+                # dut info can be 3-element or 10-element
+                # depending on which table is using this model
+                dutInfoTup = self.dutInfoMap[fid][dutIndex]
+                # flag string is always the last element
+                flagStr = dutInfoTup[-1]
                 
                 if role == Qt.ItemDataRole.DisplayRole:
-                    if index.column() == 0:
-                        # part id
-                        return partId
-                    if index.column() == 1:
-                        # head-site
-                        return hsStr
+                    return dutInfoTup[index.column()]
+
                 if role == Qt.ItemDataRole.ForegroundRole:
                     if flagStr.startswith("Fail") or flagStr.startswith("Supersede"):
                         # set to font color to white
@@ -518,9 +514,13 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
     
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         if index.row() >= len(self.vheader_base):
+            # dut info + data section
             return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
-        else:
+        elif index.column() >= len(self.hheader_base):
+            # test info section
             return Qt.ItemFlag.ItemIsEnabled
+        else:
+            return Qt.ItemFlag.NoItemFlags
         
     def rowCount(self, parent=None) -> int:
         return len(self.vheader_base) + len(self.vheader_ext)

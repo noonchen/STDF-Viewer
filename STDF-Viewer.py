@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Nov 19 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -47,7 +47,7 @@ from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings, SettingParams
-from deps.uic_stdDutData import DutDataReader
+from deps.uic_stdDutData import DutDataDisplayer
 from deps.uic_stdDebug import stdDebugPanel
 
 # pyqt5
@@ -134,7 +134,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
         self.settingUI = stdfSettings(self)
-        self.dutDataReader = DutDataReader(self)
+        self.dutDataDisplayer = DutDataDisplayer(self)
         self.debugPanel = stdDebugPanel(self)
         # update icons for actions and widgets
         self.updateIcons()
@@ -163,7 +163,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
         # add a toolbar action at the right side
         self.ui.spaceWidgetTB = QtWidgets.QWidget()
-        self.ui.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding))
+        self.ui.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, 
+                                                                  QtWidgets.QSizePolicy.Policy.Expanding))
         self.ui.toolBar.addWidget(self.ui.spaceWidgetTB)
         self.ui.toolBar.addAction(self.ui.actionAbout)
         # disable wafer tab in default
@@ -227,8 +228,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.exporter.translatorUI.loadFromData(transDict["English"])
             self.exporter.translatorCode.loadFromData(transDict["English"])
             self.settingUI.translator.loadFromData(transDict["English"])
-            self.dutDataReader.translator.loadFromData(transDict["English"])
-            self.dutDataReader.tableUI.translator.loadFromData(transDict["English"])
+            self.dutDataDisplayer.translator.loadFromData(transDict["English"])
             self.debugPanel.translator.loadFromData(transDict["English"])
             self.debugPanel.translator_code.loadFromData(transDict["English"])
             
@@ -241,8 +241,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.exporter.translatorUI.loadFromData(transDict["exportUI_zh_CN"])
             self.exporter.translatorCode.loadFromData(transDict["exportCode_zh_CN"])
             self.settingUI.translator.loadFromData(transDict["settingUI_zh_CN"])
-            self.dutDataReader.translator.loadFromData(transDict["dutDataCode_zh_CN"])
-            self.dutDataReader.tableUI.translator.loadFromData(transDict["dutDataUI_zh_CN"])
+            self.dutDataDisplayer.translator.loadFromData(transDict["dutDataUI_zh_CN"])
             self.debugPanel.translator.loadFromData(transDict["debugUI_zh_CN"])
             self.debugPanel.translator_code.loadFromData(transDict["debugCode_zh_CN"])
             
@@ -265,15 +264,13 @@ class MyWindow(QtWidgets.QMainWindow):
         _app.installTranslator(self.settingUI.translator)
         self.settingUI.settingsUI.retranslateUi(self.settingUI)
         # dutTableUI
-        _app.installTranslator(self.dutDataReader.tableUI.translator)
-        self.dutDataReader.tableUI.UI.retranslateUi(self.dutDataReader.tableUI)
+        _app.installTranslator(self.dutDataDisplayer.translator)
+        self.dutDataDisplayer.UI.retranslateUi(self.dutDataDisplayer)
         # debugUI
         _app.installTranslator(self.debugPanel.translator)
         self.debugPanel.dbgUI.retranslateUi(self.debugPanel)
         # failmarker
         _app.installTranslator(self.failmarker.translator)
-        # dutData
-        _app.installTranslator(self.dutDataReader.translator)
         # exporterCode
         _app.installTranslator(self.exporter.translatorCode)
         # mainCode
@@ -408,21 +405,13 @@ class MyWindow(QtWidgets.QMainWindow):
         return self.data_interface
     
     
-    # TODO
-    # def getDutSummaryOfIndex(self, dutIndex: int) -> list[str]:
-    #     row = dutIndex - 1
-    #     dutSumList = [self.tmodel_dut.data(self.tmodel_dut.index(row, col)) for col in range(self.tmodel_dut.columnCount())]
-    #     if self.containsWafer:
-    #         return dutSumList
-    #     else:
-    #         # insert empty waferIndex & (X,Y) before DUT Flag
-    #         dutSumList[-1:-1] = ["-", "-"]
-    #         return dutSumList
-    
-    
-    def showDutDataTable(self, dutIndexes:list):
-        self.dutDataReader.setDutIndexes(dutIndexes)
-        self.dutDataReader.start()
+    def showDutDataTable(self, selectedDutIndexes: list):
+        # always update style in case user changed them in the setting
+        self.dutDataDisplayer.setTextFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
+        self.dutDataDisplayer.setFloatFormat("%%.%d%s" % (self.settingParams.dataPrecision, 
+                                                          self.settingParams.dataNotation))
+        self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
+        self.dutDataDisplayer.showUI()
         
     
     def onReadDutData_DS(self):
@@ -438,8 +427,8 @@ class MyWindow(QtWidgets.QMainWindow):
                 dutIndex = self.tmodel_dut.data( self.tmodel_dut.index(srcRow, 0), Qt.ItemDataRole.DisplayRole )
                 fid = self.tmodel_dut.data( self.tmodel_dut.index(srcRow, 1), Qt.ItemDataRole.DisplayRole )
                 selectedDutIndex.append( (fid, dutIndex) )
-            #TODO
-            # self.showDutDataTable(sorted(selectedDutIndex))
+            
+            self.showDutDataTable(selectedDutIndex)
 
 
     def onReadDutData_TS(self):
@@ -458,8 +447,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     selectedDutIndex.append(dutIndex)
             
             if selectedDutIndex:
-                print(selectedDutIndex)
-                # self.showDutDataTable(selectedDutIndex)
+                self.showDutDataTable(selectedDutIndex)
             else:
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
       

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Nov 19 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -146,6 +146,8 @@ mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time", "Sta
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+
+
 # check if a hex color string
 def isHexColor(color: str) -> bool:
     '''Check if a given str is a valid hex color #RRGGBB[AA]'''
@@ -187,7 +189,6 @@ def init_logger(rootFolder):
     [os.remove(allLogFiles[i]) for i in range(len(allLogFiles)-5)] if len(allLogFiles) > 5 else []
 
 
-
 def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
     '''return mean, sdev and Cpk of given data series, 
     discarding np.nan values'''
@@ -210,10 +211,12 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
         Cpk = CP - abs(mean - U)/(3 * sdev)
     return mean, sdev, Cpk
 
+
 def deleteWidget(w2delete: QtWidgets.QWidget):
     '''delete QWidget and release its memory'''
     w2delete.setParent(None)
     w2delete.deleteLater()
+
 
 def getCanvasDicts(qfigLayout: QtWidgets.QBoxLayout) -> dict:
     '''Read canvas info (tn, head, site) from the layout 
@@ -228,6 +231,7 @@ def getCanvasDicts(qfigLayout: QtWidgets.QBoxLayout) -> dict:
         mp_test_name = mp_widget.test_name
         canvasIndexDict[(mp_head, mp_test_num, mp_pmr, mp_site, mp_test_name)] = index
     return canvasIndexDict
+
 
 def calculateCanvasIndex(_test_num: int, _head: int, _site: int, _pmr: int, _test_name: str, canvasIndexDict: dict):
     '''Given test info (tn, head, site) and calculate the proper index
@@ -333,58 +337,6 @@ def return_state_parser(RTN_STAT: int) -> str:
 def wafer_direction_name(symbol: str) -> str:
     global direction_symbol
     return direction_symbol.get(symbol, symbol)
-
-
-# TODO
-def generateDataFloatTips(testDict: dict) -> list:
-    '''testDict should be return by getData()'''
-    validRTNStatList = False
-    # data info used in floating tips
-    dataTips = []
-    test_flagInfo_list = list(map(test_flag_parser, testDict["flagList"]))
-    # test name of MPR test is different from orignal after getData(), must use orignal name here
-    testID = (testDict["TEST_NUM"], testDict["TEST_NAME_ORIG"])
-    if testRecTypeDict[testID] == REC.MPR:
-        # for MPR tests, add description of RTN_STAT and flag
-        statInfo_list = list(map(return_state_parser, testDict["statesList"]))
-        # length of STAT should be the same as flagList, unless MPR doesn't contain any RTN_STAT
-        validRTNStatList = len(statInfo_list) == len(test_flagInfo_list)
-        
-    if validRTNStatList:
-        # don't join empty string
-        dataTips = ["\n".join([text for text in statFlagTuple if text]) for statFlagTuple in zip(statInfo_list, test_flagInfo_list)]
-    else:
-        # for others, add flag info only (TODO FTR currently not supported, although it contains RTN..)
-        dataTips = test_flagInfo_list
-    return dataTips
-
-
-def genQItemList(imageFont: str, fontsize: int, dutSumList: list[str]) -> list[QtGui.QStandardItem]:
-    '''Convert a str list to a QStandardItem list'''
-    qitemRow = []
-    # fontsize = 13 if isMac else 10
-    dutStatus, dutFlagString = dutSumList[-1].split("-")
-    dutFail = dutStatus.startswith("Failed")
-    dutUnknown = (dutStatus == "" or dutStatus.startswith("Unknown"))
-    flagInfo = dut_flag_parser(dutFlagString)
-    
-    for item in dutSumList:
-        qitem = QtGui.QStandardItem(item)
-        qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-        qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-        qitem.setData(QtGui.QFont(imageFont, fontsize), QtCore.Qt.FontRole)
-        # mark red when failed
-        if dutFail: 
-            qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-            qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-        # mark orange when unknown
-        if dutUnknown: 
-            qitem.setData(QtGui.QColor("#000000"), QtCore.Qt.ForegroundRole)
-            qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-        if flagInfo != "":
-            qitem.setToolTip(flagInfo)
-        qitemRow.append(qitem)
-    return qitemRow
 
 
 def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:

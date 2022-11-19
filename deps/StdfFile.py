@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sat Nov 19 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -480,6 +480,25 @@ class DataInterface:
         return self.getTestDataCore(testTuple, dutMask, FileID)
     
     
+    def getTestDataFromDutMask(self, testTuple: tuple, dutMask: np.ndarray, FileID: int) -> dict:
+        '''
+        Get parsed data of the given testTuple, test duts are constrained by heads & sites & fid
+        
+        `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
+        `dutMask`: mask for filtering duts of interest from the complete dutArray
+        
+        return a dictionary contains:
+        see `getTestDataCore`
+        '''
+        # testID -> (test_num, test_name)
+        testID = (testTuple[0], testTuple[-1])
+        # read data from file if not cached
+        if testID not in self.dataCache:
+            self.prepareData([testID])
+        
+        return self.getTestDataCore(testTuple, dutMask, FileID)
+    
+    
     def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []) -> dict:
         '''
         Get all required test data for TestDataTable display
@@ -488,7 +507,6 @@ class DataInterface:
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
         `_selectFiles`: default read all files, currently not in use
-        `floatFormat`: format string for float, e.g. "%.3f"
         
         return a dictionary contains:
         `VHeader`: dut index as vertical header
@@ -523,9 +541,9 @@ class DataInterface:
                                         range(len(dutIndexDict[fid]))
                                         )))
                 # add dict of dut index -> (part id, head site, dut flag)
-                dutInfo.append(self.DatabaseFetcher.getDUTInfoOnCondition(selectHeads, 
-                                                                          selectSites, 
-                                                                          fid))
+                dutInfo.append(self.DatabaseFetcher.getPartialDUTInfoOnCondition(selectHeads, 
+                                                                                 selectSites, 
+                                                                                 fid))
             else:
                 # fid doesn't contain any tests in testTuples
                 dut2ind.append({})
@@ -537,6 +555,83 @@ class DataInterface:
                 "TestInfo": testInfo, 
                 "dut2ind": dut2ind,
                 "dutInfo": dutInfo}
+    
+    
+    def getDutSummaryWithTestDataCore(self, testTuples: list[tuple], dutMaskDict: dict) -> dict:
+        '''
+        Get all required test data for Dut Data Table or Report generator. Differ
+        from `getTestDataTableContent`, `dutInfo` returned by this function is "full version",
+        same as dut summary table, file id and dut of interest are determined by user's 
+        selection on the GUI. 
+        This function will always return dut info even if `testsTuples` is empty. 
+        
+        `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
+        `dutMaskDict`: dict, key: file id, value: dut mask
+        
+        return a dictionary contains:
+        `VHeader`: dut index as vertical header
+        `TestLists`: testTuples, for ordering
+        `Data`: dict, key: testTuple, value: list of dicts from `getTestDataCore`
+        `TestInfo`: dict, key: testTuple, value: list of info
+        `dut2ind`: list of maps, dutIndex to list index
+        `dutInfo`: list of maps, dutIndex to dut summary
+        '''
+        data = {}
+        testInfo = {}
+        for testTup, fid in itertools.product(testTuples, sorted(dutMaskDict.keys())):
+            dutMask = dutMaskDict[fid]
+            test_fid = self.getTestDataFromDutMask(testTup, dutMask, fid)
+            if ("TEST_NAME" in test_fid) and (testTup not in testInfo):
+                testInfo[testTup] = [test_fid.pop("TEST_NAME"), 
+                                     test_fid.pop("TEST_NUM"),
+                                     test_fid.pop("HL"),
+                                     test_fid.pop("LL"),
+                                     test_fid.pop("Unit")]
+                # already obtained the dutMask, no need to 
+                # use `DUTIndex` key, beside it would never
+                # run if `testTuples` is empty
+                test_fid.pop("DUTIndex")
+            data.setdefault(testTup, []).append(test_fid)
+        
+        vheader = []
+        dutInfo = []
+        dut2ind = []
+        dutIndexDict = {}
+        for fid in sorted(dutMaskDict.keys()):
+            dutMask = dutMaskDict[fid]
+            # get duts of interest from mask
+            dutArray = self.dutArrays[fid][dutMask]
+            dutIndexDict[fid] = dutArray
+            vheader.extend(map(lambda i: f"File{fid} #{i}", dutArray))
+            dut2ind.append(dict(zip(dutArray, range(len(dutArray)))))
+            # add dict of dut index -> (part id, head site, dut flag)
+            dutInfo.append(self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutArray, fid))
+                
+        return {"VHeader": vheader, 
+                "TestLists": testTuples, 
+                "Data": data, 
+                "TestInfo": testInfo, 
+                "dut2ind": dut2ind,
+                "dutInfo": dutInfo}
+        
+        
+    def getDutDataDisplayerContent(self, selectedDutIndex: list) -> dict:
+        '''
+        Wrapper of `getDutSummaryWithTestDataCore`, converts selectedDutIndex
+        to dutMaskDict
+        
+        return a dict, see `getDutSummaryWithTestDataCore`
+        '''
+        testTuples = [parseTestString(t, False) for t in self.completeTestList]
+        dutMaskDict = {}
+        for fid, dutIndex in selectedDutIndex:
+            if fid not in dutMaskDict:
+                # init a mask
+                dutMaskDict[fid] = np.full(self.dutArrays[fid].size, False, dtype=bool)
+            # update mask
+            dutMaskDict[fid] |= (self.dutArrays[fid] == dutIndex)
+        
+        return self.getDutSummaryWithTestDataCore(testTuples, dutMaskDict)
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):

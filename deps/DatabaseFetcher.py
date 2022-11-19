@@ -596,7 +596,7 @@ class DatabaseFetcher:
         return DR_List
     
     
-    def getDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileId: int) -> dict:
+    def getPartialDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileId: int) -> dict:
         '''
         return a dict of dutIndex -> (part id, head-site, dut flag)
         '''
@@ -627,6 +627,22 @@ class DatabaseFetcher:
             
         return info
             
+    
+    def getFullDUTInfoFromDutArray(self, dutArray: np.ndarray, fid: int) -> dict:
+        '''
+        return a dict of dutIndex -> full dut info
+        '''
+        file_condition = f" WHERE Dut_Info.Fid={fid}"
+        # dutArray might be too long to be sqlite params
+        # use dict for faster filtering
+        info = dict(zip(dutArray, [() for _ in range(len(dutArray))]))
+        for dutIndex, *full_tup in self.cursor.execute(DUT_SUMMARY_QUERY + file_condition):
+            if dutIndex in info:
+                # this is the dut in `dutArray`, store
+                # result in the dict
+                info[dutIndex] = full_tup
+        
+        return info
 
 
 if __name__ == "__main__":
