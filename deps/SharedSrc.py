@@ -37,6 +37,7 @@ setattr(sys, "CONFIG_NAME", settingNamePair)
 
 
 DUT_SUMMARY_QUERY = '''SELECT
+                            DUTIndex,
                             Dut_Info.Fid AS "File ID",
                             PartID AS "Part ID",
                             'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
@@ -75,10 +76,10 @@ DUT_SUMMARY_QUERY = '''SELECT
 #     midStr = f"PRR #{AfterDUTIndex}"
 #     rightStr = RecordType
 DATALOG_QUERY = '''SELECT
+                        Fid as "File ID",
                         RecordType AS "Record Type",
                         '\n' || Value || '\n' AS "Value",
-                        printf("File%d: %s ··· %s ··· %s",  
-                                Fid,
+                        printf("%s ··· %s ··· %s",  
                                 CASE 
                                     WHEN AfterDUTIndex == 0 THEN "|" 
                                     ELSE printf("PIR #%d", AfterDUTIndex) END, 

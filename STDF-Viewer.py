@@ -431,20 +431,35 @@ class MyWindow(QtWidgets.QMainWindow):
         if selectedRows:
             # since we used proxy model in DUT summary, the selectedRows is from proxy model
             # it should be converted back to source model rows first
-            getSourceIndex = lambda pIndex: self.proxyModel_tmodel_dut.mapToSource(pIndex)
-            # TODO: instead of retrieving dut index, we need to get rowid from Dut_Info table
-            selectedDutIndex = [self.Row_DutIndexDict[getSourceIndex(r).row()] for r in selectedRows]   # if row(s) is selected, self.Row_DutIndexDict is already updated in self.prepareDataForDUTSummary()
-            self.showDutDataTable(sorted(selectedDutIndex))
+            getSourceRow = lambda pIndex: self.proxyModel_tmodel_dut.mapToSource(pIndex).row()
+            selectedDutIndex = []
+            for r in selectedRows:
+                srcRow = getSourceRow(r)
+                dutIndex = self.tmodel_dut.data( self.tmodel_dut.index(srcRow, 0), Qt.ItemDataRole.DisplayRole )
+                fid = self.tmodel_dut.data( self.tmodel_dut.index(srcRow, 1), Qt.ItemDataRole.DisplayRole )
+                selectedDutIndex.append( (fid, dutIndex) )
+            #TODO
+            # self.showDutDataTable(sorted(selectedDutIndex))
 
 
     def onReadDutData_TS(self):
         # context menu callback for Test summary
         selectedRows = self.ui.rawDataTable.selectionModel().selectedIndexes()
         if selectedRows:
-            allDutIndexes = [r.row()-3 for r in selectedRows]    # row4 is dutIndex 1
-            selectedDutIndex = sorted([i for i in set(allDutIndexes) if i > 0])     # remove duplicates and invalid dutIndex (e.g. header rows)
+            # parse dut index from row header
+            vhmodel = self.ui.rawDataTable.verticalHeader().model()
+            selectedDutIndex = []
+            for r in selectedRows:
+                hRow = r.row()
+                label: str = vhmodel.headerData(hRow, Qt.Orientation.Vertical, Qt.ItemDataRole.DisplayRole)
+                fStr, dutStr = label.split(" ")
+                dutIndex = (int(fStr.strip("File")), int(dutStr.strip("#")))
+                if dutIndex not in selectedDutIndex:
+                    selectedDutIndex.append(dutIndex)
+            
             if selectedDutIndex:
-                self.showDutDataTable(selectedDutIndex)
+                print(selectedDutIndex)
+                # self.showDutDataTable(selectedDutIndex)
             else:
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
       
@@ -647,6 +662,14 @@ class MyWindow(QtWidgets.QMainWindow):
         for column in range(1, header.count()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
         
+        # always hide dut index column
+        self.ui.dutInfoTable.hideColumn(0)
+        # hide file id column if 1 file is opened
+        if self.data_interface.num_files <= 1:
+            self.ui.dutInfoTable.hideColumn(1)
+        else:
+            self.ui.dutInfoTable.showColumn(1)
+        
         
     def updateGDR_DTR_Table(self):        
         header = self.ui.datalogTable.horizontalHeader()
@@ -654,9 +677,15 @@ class MyWindow(QtWidgets.QMainWindow):
         
         self.tmodel_datalog.setQuery(QtSql.QSqlQuery(ss.DATALOG_QUERY, self.db_dut))
                     
-        for column in [1, 2]:
+        for column in [2, 3]:
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
         self.ui.datalogTable.resizeRowsToContents()
+        
+        # hide file id column if 1 file is opened
+        if self.data_interface.num_files <= 1:
+            self.ui.datalogTable.hideColumn(0)
+        else:
+            self.ui.datalogTable.showColumn(0)
         
         
     def clearSearchBox(self):
@@ -715,7 +744,6 @@ class MyWindow(QtWidgets.QMainWindow):
         return testList
     
     
-    # TODO
     def onSelect(self):
         '''
         This func is called when events occurred in tab, site selection, test selection and wafer selection 
@@ -740,36 +768,25 @@ class MyWindow(QtWidgets.QMainWindow):
             selTests = self.getSelectedTests()
             selSites = self.getCheckedSites()
             selHeads = self.getCheckedHeads()
-            hsNotChanged = (self.preHeadSelection == set(selHeads) and self.preSiteSelection == set(selSites))
-            testNotChanged = (self.preTestSelection == set(selTests))
+            headSiteChanged = (self.preHeadSelection != set(selHeads) or self.preSiteSelection != set(selSites))
+            testSelChanged = (self.preTestSelection != set(selTests))
             
-            # prepare the data for plot and table, skip in Bin & Wafer tab to save time
-            if (not testNotChanged) and (not currentTab in [tab.Bin, tab.Wafer]): 
-                # get (test_num, test_name)
-                # pmr is not used, since MPR test preparation contains data for all pmr pins
-                # self.prepareData([(tup[0], tup[2]) for tup in selTests])
-                pass
-                        
-            # update bin chart only if sites changed and previous tab is not bin chart
-            updateTab = False
-            if hsNotChanged:
-                # head & site selection is not changed
+            if headSiteChanged:
+                updateTab = True
+                if currentTab == tab.Info:
+                    # filter dut summary table if in Info tab and head & site changed
+                    self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
+            else:
                 if currentTab == tab.Bin and self.preTab == tab.Bin:
-                    # do not update
+                    # head site not changed, and user doesn't switch from Bin tab
                     updateTab = False
                 else:
-                    # in case tab or test num changed
-                    updateTab = True
-            else:
-                # head & site selection is changed
-                updateTab = True
-                # filter dut summary table if in Info tab and head & site changed
-                if currentTab == tab.Info:
-                    self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
+                    # update if test selections changed
+                    updateTab = testSelChanged
                     
             if updateTab:
-                self.updateStatTableContent()       # update table
-                self.updateTabContent()             # update tab
+                self.updateStatTableContent()   # update statistic table
+                self.updateTabContent()         # update tab
             
             # always update pre selection at last
             self.preHeadSelection = set(selHeads)

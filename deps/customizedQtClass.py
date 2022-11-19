@@ -96,16 +96,17 @@ class DutSortFilter(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.hsFilterString = QtCore.QRegularExpression(r".*")
-        self.fidColInd = 0
-        self.pidColInd = 1
-        self.hsColInd = 2
-        self.tcntColInd = 3
-        self.ttimColInd = 4
-        self.hbinColInd = 5
-        self.sbinColInd = 6
-        self.widColInd = 7
-        self.xyColInd = 8
-        self.flagColInd = 9
+        self.dutIndexInd = 0
+        self.fidColInd = 1
+        self.pidColInd = 2
+        self.hsColInd = 3
+        self.tcntColInd = 4
+        self.ttimColInd = 5
+        self.hbinColInd = 6
+        self.sbinColInd = 7
+        self.widColInd = 8
+        self.xyColInd = 9
+        self.flagColInd = 10
         
     
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
@@ -300,7 +301,8 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         
     def data(self, index: QtCore.QModelIndex, role: int):        
         if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
-            if index.column() == 1:
+            if index.column() == 2:
+                # left align `Value` column for better display
                 return QtCore.Qt.AlignmentFlag.AlignLeft
             else:
                 # change default aligment to center
