@@ -272,9 +272,9 @@ impl RecordTracker {
                 // new test_id, insert into map
                 // if scale is None, use 0 instead, for
                 // it have no effect on the result
-                let scale = scale.unwrap_or(0) as i32;
-                self.scale_map.insert(test_id, scale);
-                (false, scale)
+                let s = scale.unwrap_or(0) as i32;
+                self.scale_map.insert(test_id, s);
+                (false, s)
             }
         }
     }
@@ -1130,15 +1130,15 @@ fn on_ftr_rec(
             20, // FTR sub code
             ftr_rec.test_txt,
             None::<i8>,
-            None::<f32>,
-            None::<f32>,
+            f32::NAN,
+            f32::NAN,
             "", // unit
-            ftr_rec.opt_flag,
+            ftr_rec.opt_flag[0],
             -1,               // fail cnt, default -1
             ftr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
             ftr_rec.pgm_icnt, // RSLT for MPR, or PGM for FTR
-            None::<f32>,
-            None::<f32>,
+            f32::NAN,
+            f32::NAN,
             ftr_rec.vect_nam,                     // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
