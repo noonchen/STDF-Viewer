@@ -982,8 +982,12 @@ fn on_mpr_rec(
     )?;
     // insert mpr data
     // serialize result array and stat array using hex
-    let rslt_hex =
-        hex::encode_upper({ unsafe { std::mem::transmute::<&[f32], &[u8]>(&mpr_rec.rtn_rslt) } });
+    let rslt_hex = hex::encode_upper({
+        unsafe {
+            let u8ptr = std::mem::transmute::<*const _, *const u8>(mpr_rec.rtn_rslt.as_ptr());
+            std::slice::from_raw_parts(u8ptr, mpr_rec.rtn_rslt.len() * 4)
+        }
+    });
     let stat_hex = hex::encode_upper(mpr_rec.rtn_stat);
     db_ctx.insert_mpr_data(rusqlite::params![
         dut_index,
