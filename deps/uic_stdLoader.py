@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Nov 13 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -40,7 +40,7 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 
 # from .cystdf import stdfDataRetriever     # cython version
 import rust_stdf_helper
-from deps.StdfFile import DataInterface
+from deps.DataInterface import DataInterface
 
 
 logger = logging.getLogger("STDF Viewer")
