@@ -21,3 +21,4 @@ zip = { version = "0.6.3", default-features = false, features = ["deflate", "bzi
 numpy = "0.17.2"
 chrono = "0.4.22"
 hex = "0.4.3"
+lazy_static = "1.4.0"

@@ -11,15 +11,61 @@
 
 use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use lazy_static::lazy_static;
 use rust_stdf::*;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::{fs, io};
 use zip::ZipArchive;
 
+lazy_static! {
+    static ref UNIT_PREFIX: HashMap<i32, &'static str> = HashMap::from([
+        (15, "f"),
+        (12, "p"),
+        (9, "n"),
+        (6, "u"),
+        (3, "m"),
+        (2, "%"),
+        (0, ""),
+        (-3, "K"),
+        (-6, "M"),
+        (-9, "G"),
+        (-12, "T"),
+    ]);
+}
+
+#[inline(always)]
+fn scale_unit(unit: &Option<String>, scale: i32) -> String {
+    if let Some(u) = unit {
+        format!("{}{}", UNIT_PREFIX.get(&scale).unwrap_or(&""), u)
+    } else {
+        String::new()
+    }
+}
+
+#[inline(always)]
+fn scale_option_value(value: &Option<f32>, flag: &Option<[u8; 1]>, scale: i32, mask: u8) -> f32 {
+    if let Some(f32_num) = value {
+        if let Some(valid) = flag.map(|f| f[0] & mask == 0) {
+            if valid {
+                f32_num * 10f32.powi(scale)
+            } else {
+                f32::NAN
+            }
+        } else {
+            f32::NAN
+        }
+    } else {
+        f32::NAN
+    }
+}
+
 pub struct RecordTracker {
     // file id, test num, test name -> unique test id (map size)
     id_map: HashMap<(usize, u32, String), usize>,
+
+    // unique test id -> result scale
+    scale_map: HashMap<usize, i32>,
 
     // unique test id -> low limit in 1st PTR
     default_llimit: HashMap<usize, f32>,
@@ -57,6 +103,7 @@ impl RecordTracker {
     pub fn new() -> Self {
         RecordTracker {
             id_map: HashMap::with_capacity(1024),
+            scale_map: HashMap::with_capacity(1024),
             default_llimit: HashMap::with_capacity(1024),
             default_hlimit: HashMap::with_capacity(1024),
             test_fail_count: HashMap::with_capacity(1024),
@@ -216,6 +263,22 @@ impl RecordTracker {
         wafer_index
     }
 
+    /// return (exist, scale) for [PTR], [MPR]
+    #[inline(always)]
+    pub fn update_scale(&mut self, test_id: usize, scale: &Option<i8>) -> (bool, i32) {
+        match self.scale_map.get(&test_id) {
+            Some(s) => (true, *s),
+            None => {
+                // new test_id, insert into map
+                // if scale is None, use 0 instead, for
+                // it have no effect on the result
+                let scale = scale.unwrap_or(0) as i32;
+                self.scale_map.insert(test_id, scale);
+                (false, scale)
+            }
+        }
+    }
+
     /// return (dut_index, test_id) for [PTR], [FTR], [MPR] or maybe [STR] in the future
     ///
     /// ## Error
@@ -250,24 +313,17 @@ impl RecordTracker {
 
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
-    pub fn update_default_limits(
-        &mut self,
-        test_id: usize,
-        llimit: Option<f32>,
-        hlimit: Option<f32>,
-    ) -> bool {
+    pub fn update_default_limits(&mut self, test_id: usize, llimit: f32, hlimit: f32) -> bool {
         let llimit_exist = self.default_llimit.contains_key(&test_id);
         let hlimit_exist = self.default_hlimit.contains_key(&test_id);
 
         if !llimit_exist {
             // update llimit
-            self.default_llimit
-                .insert(test_id, llimit.unwrap_or(f32::NAN));
+            self.default_llimit.insert(test_id, llimit);
         }
         if !hlimit_exist {
             // update hlimit
-            self.default_hlimit
-                .insert(test_id, hlimit.unwrap_or(f32::NAN));
+            self.default_hlimit.insert(test_id, hlimit);
         }
         llimit_exist && hlimit_exist
     }
@@ -280,30 +336,27 @@ impl RecordTracker {
     pub fn is_ptr_limits_changed(
         &self,
         test_id: usize,
-        llimit: Option<f32>,
-        hlimit: Option<f32>,
+        llimit: f32,
+        hlimit: f32,
     ) -> Result<(bool, bool), StdfHelperError> {
         // llimit
-        let llimit_changed = llimit.is_some()
-            && match self.default_llimit.get(&test_id) {
-                Some(dft_ll) => {
-                    // unwrap is safe here, since we have a is_some() precondition
-                    // when the float number difference > epsilon, means limit changed
-                    Ok((llimit.unwrap() - *dft_ll).abs() > f32::EPSILON)
-                }
-                None => Err(StdfHelperError {
-                    msg: "Default low limit can not be read...this should never happen".to_string(),
-                }),
-            }?;
+        let llimit_changed = match self.default_llimit.get(&test_id) {
+            Some(dft_ll) => {
+                // NAN - NAN > EPSILON is `false`
+                // meaning if limit is NAN, it will return false
+                Ok((llimit - *dft_ll).abs() > f32::EPSILON)
+            }
+            None => Err(StdfHelperError {
+                msg: "Default low limit can not be read...this should never happen".to_string(),
+            }),
+        }?;
         // hlimit
-        let hlimit_changed = hlimit.is_some()
-            && match self.default_hlimit.get(&test_id) {
-                Some(dft_hl) => Ok((hlimit.unwrap() - *dft_hl).abs() > f32::EPSILON),
-                None => Err(StdfHelperError {
-                    msg: "Default high limit can not be read...this should never happen"
-                        .to_string(),
-                }),
-            }?;
+        let hlimit_changed = match self.default_hlimit.get(&test_id) {
+            Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
+            None => Err(StdfHelperError {
+                msg: "Default high limit can not be read...this should never happen".to_string(),
+            }),
+        }?;
         Ok((llimit_changed, hlimit_changed))
     }
 
@@ -899,17 +952,26 @@ fn on_ptr_rec(
         ptr_rec.test_num,
         &ptr_rec.test_txt,
     )?;
+    // get or update result scale
+    let (exist, scale) = tracker.update_scale(test_id, &ptr_rec.res_scal);
     // insert ptr result
     db_ctx.insert_ptr_data(rusqlite::params![
         dut_index,
         test_id,
-        ptr_rec.result,
+        ptr_rec.result * 10f32.powi(scale),
         ptr_rec.test_flg[0]
     ])?;
 
-    // if test id is not presented in llimit/hlimit hashmap
-    if !tracker.update_default_limits(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit) {
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        // need to apply result scale to limits and units
+        let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);
+        let hi_limit = scale_option_value(&ptr_rec.hi_limit, &ptr_rec.opt_flag, scale, 0xA0);
+        let lo_spec = scale_option_value(&ptr_rec.lo_spec, &ptr_rec.opt_flag, scale, 0x04);
+        let hi_spec = scale_option_value(&ptr_rec.hi_spec, &ptr_rec.opt_flag, scale, 0x08);
+        let unit = scale_unit(&ptr_rec.units, scale);
+
+        tracker.update_default_limits(test_id, lo_limit, hi_limit);
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
             test_id,
@@ -917,15 +979,15 @@ fn on_ptr_rec(
             10, // PTR sub code
             ptr_rec.test_txt,
             ptr_rec.res_scal,
-            ptr_rec.lo_limit,
-            ptr_rec.hi_limit,
-            ptr_rec.units,
+            lo_limit,
+            hi_limit,
+            unit,
             ptr_rec.opt_flag.map(|f| f[0]),
             -1,          // fail cnt, default -1
             None::<u16>, // RTN_ICNT for FTR & MPR
             None::<u16>, // RSLT or PGM for MPR or FTR
-            ptr_rec.lo_spec,
-            ptr_rec.hi_spec,
+            lo_spec,
+            hi_spec,
             None::<String>,                       // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
@@ -935,28 +997,22 @@ fn on_ptr_rec(
     else {
         // only when opt_flag is valid
         if let Some(opt_flag) = ptr_rec.opt_flag {
-            let (llimit_changed, hlimit_changed) =
-                tracker.is_ptr_limits_changed(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit)?;
+            // default limits are scaled, we need to scale current limits as well
+            let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);
+            let hi_limit = scale_option_value(&ptr_rec.hi_limit, &ptr_rec.opt_flag, scale, 0xA0);
 
-            let update_llimit =
-                llimit_changed && (opt_flag[0] & 0x10 == 0) && (opt_flag[0] & 0x40 == 0);
-            let update_hlimit =
-                hlimit_changed && (opt_flag[0] & 0x20 == 0) && (opt_flag[0] & 0x80 == 0);
+            let (llimit_changed, hlimit_changed) =
+                tracker.is_ptr_limits_changed(test_id, lo_limit, hi_limit)?;
+
+            let update_llimit = llimit_changed && (opt_flag[0] & 0x50 == 0);
+            let update_hlimit = hlimit_changed && (opt_flag[0] & 0xA0 == 0);
 
             if update_llimit || update_hlimit {
                 db_ctx.insert_dynamic_limit(rusqlite::params![
                     dut_index,
                     test_id,
-                    if update_llimit {
-                        ptr_rec.lo_limit
-                    } else {
-                        None
-                    },
-                    if update_hlimit {
-                        ptr_rec.hi_limit
-                    } else {
-                        None
-                    },
+                    if update_llimit { Some(lo_limit) } else { None },
+                    if update_hlimit { Some(hi_limit) } else { None },
                 ])?;
             }
         }
@@ -969,7 +1025,7 @@ fn on_mpr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    mpr_rec: MPR,
+    mut mpr_rec: MPR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
     // get id map if existed
@@ -980,7 +1036,12 @@ fn on_mpr_rec(
         mpr_rec.test_num,
         &mpr_rec.test_txt,
     )?;
-    // insert mpr data
+    let (exist, scale) = tracker.update_scale(test_id, &mpr_rec.res_scal);
+    // scale MPR result array
+    mpr_rec
+        .rtn_rslt
+        .iter_mut()
+        .for_each(|x| *x *= 10f32.powi(scale));
     // serialize result array and stat array using hex
     let rslt_hex = hex::encode_upper({
         unsafe {
@@ -989,6 +1050,7 @@ fn on_mpr_rec(
         }
     });
     let stat_hex = hex::encode_upper(mpr_rec.rtn_stat);
+    // insert mpr data
     db_ctx.insert_mpr_data(rusqlite::params![
         dut_index,
         test_id,
@@ -997,10 +1059,15 @@ fn on_mpr_rec(
         mpr_rec.test_flg[0]
     ])?;
 
-    // FTR doesn't have high/low limit, but we can still use this hashmap to check
-    // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
-    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        // scale limits
+        let lo_limit = scale_option_value(&mpr_rec.lo_limit, &mpr_rec.opt_flag, scale, 0x50);
+        let hi_limit = scale_option_value(&mpr_rec.hi_limit, &mpr_rec.opt_flag, scale, 0xA0);
+        let lo_spec = scale_option_value(&mpr_rec.lo_spec, &mpr_rec.opt_flag, scale, 0x04);
+        let hi_spec = scale_option_value(&mpr_rec.hi_spec, &mpr_rec.opt_flag, scale, 0x08);
+        let unit = scale_unit(&mpr_rec.units, scale);
+
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
             test_id,
@@ -1008,15 +1075,15 @@ fn on_mpr_rec(
             15, // MPR sub code
             mpr_rec.test_txt,
             mpr_rec.res_scal,
-            mpr_rec.lo_limit,
-            mpr_rec.hi_limit,
-            mpr_rec.units, // unit
+            lo_limit,
+            hi_limit,
+            unit, // unit
             mpr_rec.opt_flag.map(|f| f[0]),
             -1,               // fail cnt, default -1
             mpr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
             mpr_rec.rslt_cnt, // RSLT for MPR, or PGM for FTR
-            mpr_rec.lo_spec,
-            mpr_rec.hi_spec,
+            lo_spec,
+            hi_spec,
             None::<String>,                       // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
@@ -1050,9 +1117,11 @@ fn on_ftr_rec(
     // insert ftr test flag
     db_ctx.insert_ftr_data(rusqlite::params![dut_index, test_id, ftr_rec.test_flg[0]])?;
 
-    // FTR doesn't have high/low limit, but we can still use this hashmap to check
+    // FTR doesn't have result scale, but we can still use this hashmap to check
     // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
-    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+    // get or update result scale
+    let (exist, _) = tracker.update_scale(test_id, &Some(0));
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
