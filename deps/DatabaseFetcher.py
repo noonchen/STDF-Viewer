@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sat Nov 19 2022
+# Last Modified: Sun Nov 20 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,7 +24,7 @@
 
 import sqlite3
 import numpy as np
-from deps.SharedSrc import record_name_dict, DUT_SUMMARY_QUERY, DATALOG_QUERY
+from deps.SharedSrc import REC, record_name_dict, DUT_SUMMARY_QUERY, DATALOG_QUERY
 
 
 def tryDecode(b: bytes) -> str:
@@ -387,51 +387,224 @@ class DatabaseFetcher:
         return counts
     
     
-    def getTestInfo_AllDUTs(self, testID: tuple) -> list[dict]:
-        '''return a list of test info of all duts in the database, where index is file id'''
+    def getTestInfo(self, testTup: tuple, fileId) -> dict:
+        '''fetch a test info of testID from file id'''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        result = []
-        for fid in range(self.num_files):
-            testInfo = {}
-            sqlResult = None
-            # get test item's additional info
-            self.cursor.execute("SELECT * FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?", [fid, *testID])
-            col = [tup[0] for tup in self.cursor.description]
-            val = self.cursor.fetchone()
-            if val is None:
-                # when this file doesn't have
-                # (test num, test name), skip and append
-                # empty dictionary
-                result.append({})
-                continue
+        # get test item's additional info
+        self.cursor.execute("SELECT * FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?", [fileId, *testTup])
+        col = [tup[0] for tup in self.cursor.description]
+        val = self.cursor.fetchone()
+        if val is None:
+            # when this file doesn't have
+            # (test num, test name), return empty dictionary
+            return {}
             
-            testInfo.update(zip(col, val))
+        testInfo = dict(zip(col, val))
+        
+        #TODO: do we still need it?
+        # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
+        if len(self.dutArrays) == 0:
+            self.getDUT_SiteInfo()
             
-            # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
-            if len(self.dutArrays) == 0:
-                self.getDUT_SiteInfo()
-            
-            # get offset & length, insert -1 if testNum is not presented in a DUT
-            totalDutCnt = self.dutArrays[fid].size
-            tmp_oft = np.full(totalDutCnt, -1, dtype=np.int64)
-            tmp_biL = np.full(totalDutCnt, -1, dtype=np.int32)
-            
-            sql = "SELECT DUTIndex, Offset, BinaryLen FROM Test_Offsets \
-                WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?) AND \
-                        DUTIndex in (SELECT DUTIndex FROM Dut_Info WHERE Fid=?) \
-                ORDER by DUTIndex"
-            sqlResult = self.cursor.execute(sql, [fid, *testID, fid])
-            
-            # dutIndex starts from 1
-            for ind, oft, biL in sqlResult:
-                tmp_oft[ind-1] = oft
-                tmp_biL[ind-1] = biL
+        return testInfo
+    
+    
+    def getTestDataFromHeadSite(self, testTup: tuple, heads: list[int], sites: list[int], fileId: int) -> dict:
+        '''
+        return a dict contains test data, the keys are different for PTR / MPR / FTR
+        PTR:    `dutList`   `dataList`  `flagList` 
+        MPR:    `dutList`   `dataList`  `flagList`  `stateList`
+        FTR:    `dutList`               `flagList`
+        '''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        # get test ID and record type from Test_Info
+        testID = None
+        recHeader = None
+        for tid, rh, in self.cursor.execute('''
+                                            SELECT 
+                                                TEST_ID, recHeader 
+                                            FROM 
+                                                Test_Info 
+                                            WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?''', 
+                                            [fileId, *testTup]):
+            testID = tid
+            recHeader = rh
+        # if file doesn't contain this test item, return an empty dict
+        if testID is None or recHeader is None:
+            return {}
+        
+        head_condition = f" AND HEAD_NUM IN ({','.join(map(str, heads))})"
+        if -1 in sites:
+            site_condition = " AND SITE_NUM >= 0"
+        else:
+            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+        # only retrieve data from valid duts (not superseded)
+        dut_condition = f''' AND DUTIndex IN (SELECT 
+                                                DUTIndex 
+                                            FROM 
+                                                Dut_Info 
+                                            WHERE Supersede=0{head_condition}{site_condition})'''
+        dutList = []
+        dataList = []
+        flagList = []
+        stateList = []
+        if recHeader == REC.PTR:
+            for dutIndex, rslt, flag in self.cursor.execute(f'''
+                                                            SELECT
+                                                                DUTIndex, RESULT, TEST_FLAG
+                                                            FROM
+                                                                PTR_Data
+                                                            WHERE TEST_ID={testID}{dut_condition}
+                                                            ORDER By DUTIndex
+                                                            '''):
+                dutList.append(dutIndex)
+                dataList.append(rslt)
+                flagList.append(flag)
+            return {"dutList": np.array(dutList, dtype=np.uint32), 
+                    "dataList": np.array(dataList, dtype=np.float32), 
+                    "flagList": np.array(flagList, dtype=np.uint8)}
+        
+        elif recHeader == REC.MPR:
+            for dutIndex, rslts_hex, stats_hex, flag in self.cursor.execute(f'''
+                                                            SELECT
+                                                                DUTIndex, RTN_RSLT, RTN_STAT, TEST_FLAG
+                                                            FROM
+                                                                MPR_Data
+                                                            WHERE TEST_ID={testID}{dut_condition}
+                                                            ORDER By DUTIndex
+                                                            '''):
+                dutList.append(dutIndex)
+                dataList.append(np.frombuffer(bytearray.fromhex(rslts_hex), dtype=np.float32))
+                stateList.append(np.frombuffer(bytearray.fromhex(stats_hex), dtype=np.uint8))
+                flagList.append(flag)
+            return {"dutList": np.array(dutList, dtype=np.uint32), 
+                    # after transpose, row: pmr, col: dutIndex
+                    "dataList": np.array(dataList).T, 
+                    "stateList": np.array(stateList).T,
+                    "flagList": np.array(flagList, dtype=np.uint8)}
+        
+        else:
+            # FTR
+            for dutIndex, flag in self.cursor.execute(f'''
+                                                        SELECT
+                                                            DUTIndex, TEST_FLAG
+                                                        FROM
+                                                            FTR_Data
+                                                        WHERE TEST_ID={testID}{dut_condition}
+                                                        ORDER By DUTIndex
+                                                        '''):
+                dutList.append(dutIndex)
+                flagList.append(flag)
+            return {"dutList": np.array(dutList, dtype=np.uint32), 
+                    "flagList": np.array(flagList, dtype=np.uint8)}
 
-            testInfo.update({"Offset": tmp_oft, "BinaryLen": tmp_biL})
-            result.append(testInfo)
-            
-        return result
+    
+    def getTestDataFromDutIndex(self, testTup: tuple, duts: np.ndarray, fileId: int) -> dict:
+        '''
+        return a dict contains test data, the keys are different for PTR / MPR / FTR
+        PTR:    `dutList`   `dataList`  `flagList` 
+        MPR:    `dutList`   `dataList`  `flagList`  `stateList`
+        FTR:    `dutList`               `flagList`
+        
+        Differs from `getTestDataFromHeadSite`, this function can get data from 
+        superceded duts, and if data is not found in some duts, default data will
+        be used.
+        '''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        # get test ID and record type from Test_Info
+        testID = None
+        recHeader = None
+        mprRsltCnt = 0
+        for tid, rh, cnt in self.cursor.execute('''
+                                            SELECT 
+                                                TEST_ID, recHeader, RSLT_PGM_CNT
+                                            FROM 
+                                                Test_Info 
+                                            WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?''', 
+                                            [fileId, *testTup]):
+            testID = tid
+            recHeader = rh
+            if cnt is not None:
+                mprRsltCnt = cnt
+        # if file doesn't contain this test item, return an empty dict
+        if testID is None or recHeader is None:
+            return {}
+        
+        # If the length of `duts` is too long, we will iterate all duts instead
+        # and pick duts of interet during the iteration
+        dutsCount = len(duts)
+        if dutsCount > 128:
+            # select all
+            dut_condition = " AND DUTIndex > 0"
+        else:
+            dut_condition = f''' AND DUTIndex IN ({','.join(map(str, duts))})'''
+        
+        dutList = np.array(sorted(duts), dtype=np.uint32)
+        dutMap = dict(zip(dutList, range(dutsCount)))
+        # initiate default value, shape of dataList is related to 
+        # record type, thus it is moved inside case block
+        flagList = np.full(dutsCount, fill_value=-1, dtype=np.int16)
+        stateList = []
+        if recHeader == REC.PTR:
+            dataList = np.full(dutsCount, fill_value=np.nan, dtype=np.float32)
+            for dutIndex, rslt, flag in self.cursor.execute(f'''
+                                                            SELECT
+                                                                DUTIndex, RESULT, TEST_FLAG
+                                                            FROM
+                                                                PTR_Data
+                                                            WHERE TEST_ID={testID}{dut_condition}
+                                                            ORDER By DUTIndex
+                                                            '''):
+                arrayInd = dutMap[dutIndex]
+                dataList[arrayInd] = rslt
+                flagList[arrayInd] = flag
+            return {"dutList": dutList, 
+                    "dataList": dataList, 
+                    "flagList": flagList}
+        
+        elif recHeader == REC.MPR:
+            if mprRsltCnt > 0:
+                dataList = np.full( (dutsCount, mprRsltCnt), fill_value=np.nan, dtype=np.float32)
+                stateList = np.full( (dutsCount, mprRsltCnt), fill_value=0xF, dtype=np.uint8)
+            else:
+                dataList = np.array([])
+                stateList = np.array([])
+                
+            for dutIndex, rslts_hex, stats_hex, flag in self.cursor.execute(f'''
+                                                            SELECT
+                                                                DUTIndex, RTN_RSLT, RTN_STAT, TEST_FLAG
+                                                            FROM
+                                                                MPR_Data
+                                                            WHERE TEST_ID={testID}{dut_condition}
+                                                            ORDER By DUTIndex
+                                                            '''):
+                arrayInd = dutMap[dutIndex]
+                flagList[arrayInd] = flag
+                if mprRsltCnt > 0:
+                    dataList[arrayInd] = np.frombuffer(bytearray.fromhex(rslts_hex), dtype=np.float32)
+                    stateList[arrayInd] = np.frombuffer(bytearray.fromhex(stats_hex), dtype=np.uint8)
+            return {"dutList": dutList, 
+                    # after transpose, row: pmr, col: dutIndex
+                    "dataList": dataList.T, 
+                    "stateList": stateList.T,
+                    "flagList": flagList}
+        
+        else:
+            # FTR
+            for dutIndex, flag in self.cursor.execute(f'''
+                                                        SELECT
+                                                            DUTIndex, TEST_FLAG
+                                                        FROM
+                                                            FTR_Data
+                                                        WHERE TEST_ID={testID}{dut_condition}
+                                                        ORDER By DUTIndex
+                                                        '''):
+                flagList[arrayInd] = flag
+            return {"dutList": dutList, 
+                    "flagList": flagList}
     
     
     def getWaferBounds(self):
@@ -626,7 +799,7 @@ class DatabaseFetcher:
             info[dutIndex] = (partId, hsStr, flagStr)
             
         return info
-            
+
     
     def getFullDUTInfoFromDutArray(self, dutArray: np.ndarray, fid: int) -> dict:
         '''
