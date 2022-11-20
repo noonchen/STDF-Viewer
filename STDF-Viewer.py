@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1362,9 +1362,6 @@ class MyWindow(QtWidgets.QMainWindow):
             # set max height in order to resize site/head selection tab control
             nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
             self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
-            # get dutArray and its site info
-            self.dutArrays = self.data_interface.dutArrays
-            self.dutSiteInfo = self.data_interface.dutSiteInfo
             # update UI
             self.settingUI.removeColorBtns()               # remove existing color btns
             self.settingUI.initColorBtns(self.availableSites, 

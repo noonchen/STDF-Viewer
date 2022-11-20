@@ -405,12 +405,7 @@ class DatabaseFetcher:
         testInfo["HLimit"] = np.nan if testInfo["HLimit"] is None else testInfo["HLimit"]
         testInfo["LSpec"] = np.nan if testInfo["LSpec"] is None else testInfo["LSpec"]
         testInfo["HSpec"] = np.nan if testInfo["HSpec"] is None else testInfo["HSpec"]
-        
-        #TODO: do we still need it?
-        # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
-        if len(self.dutArrays) == 0:
-            self.getDUT_SiteInfo()
-            
+                    
         return testInfo
     
     

@@ -12,67 +12,10 @@
 #
 
 
-import os, zipfile, itertools
+import os, itertools
 import numpy as np
-from indexed_gzip import IndexedGzipFile
-from indexed_bzip2 import IndexedBzip2File
-
 from deps.DatabaseFetcher import DatabaseFetcher
 from deps.SharedSrc import *
-import rust_stdf_helper
-
-
-class StdfFiles:
-    def __init__(self, paths: list[str]):
-        self.file_paths = paths
-        self.file_type = []
-        self.file_handles = []
-        # save zip object in case of being gc
-        self.zip_handles = []
-        
-    def open(self):
-        # open files and store types and pointers
-        for path in self.file_paths:
-            if (path.lower()).endswith("gz"):
-                self.file_type.append("gz")
-                self.file_handles.append(IndexedGzipFile(filename=path, mode='rb'))
-            elif (path.lower()).endswith("bz2"):
-                self.file_type.append("bzip")
-                self.file_handles.append(IndexedBzip2File(path, parallelization = 4))
-            elif (path.lower()).endswith("zip"):
-                zipObj = zipfile.ZipFile(path, "r")
-                # zip checks
-                if len(zipObj.namelist()) == 0:
-                    raise OSError("Empty zip file detected")
-                fileNameOf1st = zipObj.namelist()[0]
-                if zipObj.filelist[0].file_size == 0:
-                    raise OSError(f"The first item in the zip is not a file: \n{fileNameOf1st}")
-                # open the 1st file in zip, ignore the rest
-                self.file_type.append("zip")
-                self.file_handles.append(zipObj.open(fileNameOf1st, "r", force_zip64=True))
-                self.zip_handles.append(zipObj)
-            else:
-                self.file_type.append("orig")
-                self.file_handles.append(open(path, 'rb'))
-        
-    def getFileHandle(self, fid: int):
-        if fid < len(self.file_handles):
-            return self.file_handles[fid]
-        else:
-            raise IndexError(f"only {len(self.file_handles)} files opened, \
-                             invalid index {fid}")
-    
-    def seek(self, fid: int, offset: int, whence: int = 0):
-        self.file_handles[fid].seek(offset, whence)
-        
-    def read(self, fid: int, numBytes: int):
-        return self.file_handles[fid].read(numBytes)
-    
-    def close(self):
-        [fp.close() for fp in self.file_handles]
-        [zipfp.close() for zipfp in self.zip_handles]
-
-
 
 
 class DataInterface:
@@ -84,23 +27,18 @@ class DataInterface:
     '''
     
     def __init__(self, paths: list[str]):
-        self.stdf = StdfFiles(paths)
-        self.stdf.open()
+        self.file_paths = paths
         self.num_files = len(paths)
         self.DatabaseFetcher = DatabaseFetcher(self.num_files)
         self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
-        # file byte order, indexed by fid
-        self.fileIsLB = [True for _ in range(self.num_files)]
         
         self.availableSites = []
         self.availableHeads = []
         self.testRecTypeDict = {}       # used for get test record type
         self.waferInfoDict = {}
         self.failCntDict = {}
-        self.dutArrays = []             # complete dut arrays from all files
-        self.dutSiteInfo = []           # site of each dut in self.dutArray
         # self.waferOrientation = ((), ())
         # dict to store H/SBIN info
         self.HBIN_dict = {}
@@ -108,11 +46,6 @@ class DataInterface:
         # all test list or wafers in the database
         self.completeTestList = []
         self.completeWaferList = []
-        # cache for faster access
-        # key: testID, (test_num, test_name)
-        # value: [testDataDict], file id as index, 
-        # if file id doesn't contains testID, testDataDict is an empty dict
-        self.dataCache = {}
         # cache test pin list and names for MPR
         self.pinInfoDictCache = {}
         
@@ -124,7 +57,6 @@ class DataInterface:
         self.DatabaseFetcher.connectDB(self.dbPath)
         self.dbConnected = True
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
-        self.fileIsLB = self.DatabaseFetcher.getByteOrder()
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
         self.availableHeads = self.DatabaseFetcher.getHeadList()        
@@ -134,10 +66,6 @@ class DataInterface:
         self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
         # update fail cnt dict
         self.failCntDict = self.DatabaseFetcher.getTestFailCnt()
-        # for dut masking
-        self.dutSiteInfo = self.DatabaseFetcher.getDUT_SiteInfo()
-        # hold a same reference to complete dut arrays
-        self.dutArrays = self.DatabaseFetcher.dutArrays        
         # update Bin dict
         self.HBIN_dict = self.DatabaseFetcher.getBinInfo(isHBIN=True)
         self.SBIN_dict = self.DatabaseFetcher.getBinInfo(isHBIN=False)
@@ -150,22 +78,19 @@ class DataInterface:
         if self.dbConnected:
             # disconnect database
             self.DatabaseFetcher.closeDB()
-        # close files
-        self.stdf.close()
         
         
     def getFileMetaData(self) -> list:
         metaDataList = []
-        filecount = len(self.stdf.file_paths)
         # if database is not exist,
         # return a empty list instead
         if not self.dbConnected:
             return metaDataList
         # some basic os info
         get_file_size = lambda p: "%.2f MB"%(os.stat(p).st_size / 2**20)
-        metaDataList.append(["File Name: ", *list(map(os.path.basename, self.stdf.file_paths)) ])
-        metaDataList.append(["Directory Path: ", *list(map(os.path.dirname, self.stdf.file_paths)) ])
-        metaDataList.append(["File Size: ", *list(map(get_file_size, self.stdf.file_paths)) ])
+        metaDataList.append(["File Name: ", *list(map(os.path.basename, self.file_paths)) ])
+        metaDataList.append(["Directory Path: ", *list(map(os.path.dirname, self.file_paths)) ])
+        metaDataList.append(["File Size: ", *list(map(get_file_size, self.file_paths)) ])
         # dut summary
         dutCntDict = self.DatabaseFetcher.getDUTCountDict()
         metaDataList.append(["Yield: ", *[f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?" for (p, f) in zip(dutCntDict["Pass"], dutCntDict["Failed"])] ])
@@ -184,7 +109,7 @@ class DataInterface:
             metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
         if self.containsWafer:
             metaDataList.append(["Wafers Tested: ", *list(map(str, self.DatabaseFetcher.getWaferCount())) ])
-            wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(filecount)])
+            wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(self.num_files)])
             if "WAFR_SIZ" in InfoDict:
                 wafer_size_tuple = InfoDict.pop("WAFR_SIZ")
                 metaDataList.append(["Wafer Size: ", *[f"{size} {unit}" if size is not None and unit is not None else "" for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
