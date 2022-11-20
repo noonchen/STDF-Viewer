@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -499,7 +499,7 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                     flag = data_test_file["flagList"][data_ind]
                     flagTip = test_flag_parser(flag)
                     if recHeader == REC.MPR:
-                        RTNStat = data_test_file["statesList"][data_ind]
+                        RTNStat = data_test_file["stateList"][data_ind]
                         statTip = return_state_parser(RTNStat)
                         return "\n".join([t for t in [statTip, flagTip] if t])
                     else:

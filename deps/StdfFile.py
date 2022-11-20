@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -211,135 +211,14 @@ class DataInterface:
         
         return metaDataList
         
-
-    def parseDataFromTestInfo(self, testInfo: dict, FileID: int) -> dict:
-        if len(testInfo) == 0:
-            # testInfo might be empty, if this file
-            # doesn't contain selected test item
-            return {}
-        
-        raw_offsets = testInfo.pop("Offset")
-        raw_lengths = testInfo.pop("BinaryLen")
-        recHeader = testInfo["recHeader"]
-        isPTR: bool = recHeader == REC.PTR
-        isMPR: bool = recHeader == REC.MPR
-        isFTR: bool = recHeader == REC.FTR
-        # get byte order
-        isLittleEndian = self.fileIsLB[FileID]
-        # read raw bytes from file stream 
-        raw_bytes = rust_stdf_helper.read_rawList(self.stdf.getFileHandle(FileID), raw_offsets, raw_lengths)
-        testDataDict = {}
-        
-        if isMPR:
-            pinCount = 0 if testInfo["RTN_ICNT"] is None else testInfo["RTN_ICNT"]
-            rsltCount = 0 if testInfo["RSLT_PGM_CNT"] is None else testInfo["RSLT_PGM_CNT"]
-            # send raw bytes to Rust function to parse MPR records
-            parsedMPR = rust_stdf_helper.parse_MPR_rawList(isLittleEndian, 
-                                                           pinCount, 
-                                                           rsltCount, 
-                                                           raw_bytes, 
-                                                           raw_lengths)
-            testDataDict["dataList"] = parsedMPR["dataList"]
-            testDataDict["flagList"] = parsedMPR["flagList"]
-            testDataDict["statesList"] = parsedMPR["statesList"]
-            # get MPR pin list and names
-            cacheKey = (testInfo["TEST_NUM"], testInfo["TEST_NAME"], "RTN")
-            if cacheKey in self.pinInfoDictCache:
-                pinInfoDict = self.pinInfoDictCache[cacheKey]
-            else:
-                # read and cache from database if not found
-                pinInfoDict = self.DatabaseFetcher.getPinNames(*cacheKey)
-                self.pinInfoDictCache[cacheKey] = pinInfoDict
-            # if pmr in TestPin_Map is not found in Pin_Map, the following value in pinInfoDict is empty
-            testDataDict["PMR_INDX"] = pinInfoDict["PMR"][FileID]
-            testDataDict["LOG_NAM"] = pinInfoDict["LOG_NAM"][FileID]
-            testDataDict["PHY_NAM"] = pinInfoDict["PHY_NAM"][FileID]
-            testDataDict["CHAN_NAM"] = pinInfoDict["CHAN_NAM"][FileID]
-        else:
-            # send raw bytes to Rust function to parse PTR or FTR records
-            parsedXTR = rust_stdf_helper.parse_PTR_FTR_rawList(isPTR, 
-                                                               isLittleEndian, 
-                                                               raw_bytes, 
-                                                               raw_lengths)
-            testDataDict["dataList"] = parsedXTR["dataList"]
-            testDataDict["flagList"] = parsedXTR["flagList"]
-            if isFTR:
-                testDataDict["VECT_NAM"] = testInfo["VECT_NAM"] if testInfo["VECT_NAM"] is not None else "" 
-        
-        record_flag = testInfo["OPT_FLAG"]
-        result_scale = testInfo["RES_SCAL"] if not isFTR and testInfo["RES_SCAL"] is not None and (record_flag & 0b00000001 == 0) else 0
-        result_lolimit = testInfo["LLimit"] if not isFTR and testInfo["LLimit"] is not None and (record_flag & 0b01010000 == 0) else np.nan
-        result_hilimit = testInfo["HLimit"] if not isFTR and testInfo["HLimit"] is not None and (record_flag & 0b10100000 == 0) else np.nan
-        result_lospec = testInfo["LSpec"] if not isFTR and testInfo["LSpec"] is not None and (record_flag & 0b00000100 == 0) else np.nan
-        result_hispec = testInfo["HSpec"] if not isFTR and testInfo["HSpec"] is not None and (record_flag & 0b00001000 == 0) else np.nan
-        result_unit = testInfo["Unit"] if not isFTR and testInfo["Unit"] is not None else ""
-        
-        testDataDict["recHeader"] = recHeader
-        testDataDict["TEST_NUM"] = testInfo["TEST_NUM"]
-        testDataDict["TEST_NAME"] = testInfo["TEST_NAME"]
-        # For FTR, result_scale is 0, the following code does not change value
-        testDataDict["dataList"] = testDataDict["dataList"] * 10 ** result_scale
-        testDataDict["LL"] = result_lolimit * 10 ** result_scale
-        testDataDict["HL"] = result_hilimit * 10 ** result_scale
-        testDataDict["LSpec"] = result_lospec * 10 ** result_scale
-        testDataDict["HSpec"] = result_hispec * 10 ** result_scale
-        testDataDict["Unit"] = unit_prefix.get(result_scale, "") + result_unit
-        testDataDict["Scale"] = result_scale
-        
-        return testDataDict
     
-    
-    # TODO
-    def getTestValueOfDUTs(self, selDUTs: list, testTuple:tuple) -> tuple:
-        test_num, pmr, test_name = testTuple
-        # read data of testID
-        testID = (test_num, test_name)
-        self.prepareData([testID], cacheData=True)    # must enable cache, otherwise, data of current select will be cleaned
-        testDict = self.getData(testTuple, selectDUTs=selDUTs)
-        valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-        test_data_list = self.stringifyTestData(testDict, valueFormat)
-        test_passFailStat_list = [True] * 5 + list(map(isPass, testDict["flagList"]))
-        # data info used in floating tips
-        test_dataInfo_list = [""] * 5 + self.generateDataFloatTips(testDict=testDict)
-        return (test_data_list, test_passFailStat_list, test_dataInfo_list)
-    
-                       
-    def prepareData(self, testIDs: list[tuple]):
+    def testDataProcessCore(self, testTuple: tuple, testInfo: dict, testData: dict, FileID: int) -> dict:
         '''
-        Read and parse testID data from ALL files, 
-        then stored in `dataCache`
-        
-        `testIDs`: list of tuple contains test num and test name, for identifying tests
-        '''     
-        for testID in testIDs:
-            # skip if testID has been read
-            if testID in self.dataCache:
-                continue
-            
-            # get test info of `testID` from all files
-            # see `Test_Info` database table for more details
-            testInfoList = self.DatabaseFetcher.getTestInfo_AllDUTs(testID)
-            cache_allFile = []
-            for fid, testInfo in enumerate(testInfoList):
-                cache_allFile.append(self.parseDataFromTestInfo(testInfo, fid))
-            # store parsed data
-            self.dataCache[testID] = cache_allFile
-            
-            
-# # get mask from selectDUTs
-# selMask = np.zeros(self.dutArray.size, dtype=bool)
-# for dutIndex in selectDUTs:
-# selMask |= (self.dutArray==dutIndex)
-
-    
-    def getTestDataCore(self, testTuple:tuple, dutMask: np.ndarray, FileID: int) -> dict:
-        '''
-        Get parsed data of the given testTuple, test duts are constrained by dutMask and fid.
-        
-        ### avoid calling this function directly, as the data may not be presented in the `dataCache` yet
+        Merge data and calculate statistic, or index PMR result from complete MPR
         
         `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
-        `dutMask`: mask for filtering duts of interest from the complete dutArray
+        `testInfo`: info of `testTuple`, from DatabaseFetcher `getTestInfo`
+        `testData`: data of `testTuple`, from DatabaseFetcher `getTestDataFromHeadSite` or `getTestDataFromDutIndex`
         `FileID`: index of loaded files
         
         return a dictionary contains:
@@ -347,80 +226,79 @@ class DataInterface:
         `LL` / `HL` / `Unit` / `dataList` / `DUTIndex` / 
         `Min` / `Max` / `Median` / `Mean` / `SDev` / `Cpk`
         '''
-        test_num, pmr, test_name = testTuple
-        testID = (test_num, test_name)
-        if testID not in self.dataCache: 
-            # if calling this function without prepare data
-            # raise exception
-            raise KeyError(f"{testID} is not prepared!")
-        
-        testCache: dict = self.dataCache[testID][FileID]
-        if len(testCache) == 0:
+        outData = {}
+        if len(testInfo) == 0 or len(testData) == 0:
             # if current file doesn't contain this testID
             # return empty dict
-            return {}
+            return outData
         
-        outData = {}        
-        recHeader = testCache["recHeader"]
-        outData["recHeader"] = recHeader
+        test_num, pmr, test_name = testTuple
+        outData.update(testInfo)
+        recHeader = testInfo["recHeader"]
         # store original for testID lookup
         outData["TEST_NAME_ORIG"] = test_name
-        # pmr will be add to TEST_NAME for MPR
-        outData["TEST_NAME"] = test_name
-        outData["TEST_NUM"] = test_num
-        outData["LL"] = testCache["LL"]
-        outData["HL"] = testCache["HL"]
-        outData["LSpec"] = testCache["LSpec"]
-        outData["HSpec"] = testCache["HSpec"]
-        outData["Unit"] = testCache["Unit"]
-        outData["Scale"] = testCache["Scale"]
-        outData["DUTIndex"] = self.dutArrays[FileID][dutMask]
-        outData["flagList"] = testCache["flagList"][dutMask]
+        outData["dutList"] = testData["dutList"]
+        outData["flagList"] = testData["flagList"]
         
         if recHeader == REC.MPR:
             # append pmr# to test name
-            if pmr > 0: outData["TEST_NAME"] = f"{test_name} #{pmr}"
+            if pmr > 0: 
+                outData["TEST_NAME"] = f"{test_name} #{pmr}"
+            # get MPR complete pin list and names
+            cacheKey = (test_num, test_name, "RTN")
+            if cacheKey in self.pinInfoDictCache:
+                pinInfoDict = self.pinInfoDictCache[cacheKey]
+            else:
+                # read and cache from database if not found
+                pinInfoDict = self.DatabaseFetcher.getPinNames(*cacheKey)
+                self.pinInfoDictCache[cacheKey] = pinInfoDict
+            # if pmr in TestPin_Map is not found in Pin_Map, 
+            # the following value in pinInfoDict is empty
+            PMR_list = pinInfoDict["PMR"][FileID]
+            LOG_NAM_list = pinInfoDict["LOG_NAM"][FileID]
+            PHY_NAM_list = pinInfoDict["PHY_NAM"][FileID]
+            CHAN_NAM_dict = pinInfoDict["CHAN_NAM"][FileID]
+            # get test data of current PMR
             try:
                 # the index of test value is the same as the index of {pmr} in PMR list
-                dataIndex = testCache["PMR_INDX"].index(pmr)
+                dataIndex = PMR_list.index(pmr)
                 # channel name differs from sites, get possible (head, site) first
-                channelNameDict = testCache["CHAN_NAM"]
-                hsSet = set()
-                for h, siteArray in self.dutSiteInfo[FileID].items():
-                    dutSite = set(siteArray[dutMask])
-                    # if site number is not nan, means there is a dut in (head, site) 
-                    [hsSet.add( (h, s) ) for s in dutSite if not np.isnan(s)]
-                # push non-empty channel names into a list
                 ChanNames = []
-                for hskey in hsSet:
-                    if hskey in channelNameDict:
-                        # add boundary check to prevent index error, we don't want to hit exception 
-                        # just because some name cannot be found
-                        ChanName = channelNameDict[hskey][dataIndex] if len(channelNameDict[hskey]) > dataIndex else ""
-                        if ChanName != "":
-                            ChanNames.append(ChanName)
+                for (h, s) in testInfo["HeadSite"]:
+                    if s == -1:
+                        # all sites, match any sites
+                        for (_h, _), cnlist in CHAN_NAM_dict.items():
+                            if h == _h:
+                                cn, = cnlist[dataIndex:dataIndex+1] or [""]
+                                ChanNames.append(cn)
+                        continue
+                    if (h, s) in CHAN_NAM_dict:
+                        cnlist = CHAN_NAM_dict[(h, s)]
+                        cn, = cnlist[dataIndex:dataIndex+1] or [""]
+                        ChanNames.append(cn)
 
-                outData["CHAN_NAM"] = ";".join(ChanNames)
-                outData["LOG_NAM"] = testCache["LOG_NAM"][dataIndex]
-                outData["PHY_NAM"] = testCache["PHY_NAM"][dataIndex]
-                outData["dataList"] = testCache["dataList"][dataIndex][dutMask]
-                outData["statesList"] = testCache["statesList"][dataIndex][dutMask]
+                outData["CHAN_NAM"] = ";".join([cn for cn in ChanNames if cn != ""])
+                outData["LOG_NAM"] = LOG_NAM_list[dataIndex]
+                outData["PHY_NAM"] = PHY_NAM_list[dataIndex]
+                outData["dataList"] = testData["dataList"][dataIndex]
+                outData["stateList"] = testData["stateList"][dataIndex]
             except (ValueError, IndexError) as e:
                 outData["CHAN_NAM"] = ""
                 outData["LOG_NAM"] = ""
                 outData["PHY_NAM"] = ""
                 outData["dataList"] = np.array([])
-                outData["statesList"] = np.array([])
+                outData["stateList"] = np.array([])
                 if isinstance(e, IndexError):
-                    print(f"Cannot found test data of PMR {pmr} in MPR test {testID}")
+                    print(f"Cannot found test data of PMR {pmr} in MPR test {test_num}")
                 else:
                     if pmr != 0:
                         # pmr != 0 indicates a valid pmr
-                        print(f"PMR {pmr} is not found in {testID}'s PMR list")
+                        print(f"PMR {pmr} is not found in {test_num}'s PMR list")
+        elif recHeader == REC.PTR:
+            outData["dataList"] = testData["dataList"]
         else:
-            outData["dataList"] = testCache["dataList"][dutMask]
-            if recHeader == REC.FTR:
-                outData["VECT_NAM"] = testCache["VECT_NAM"]
+            # FTR doesn't have `data`, use flag instead
+            outData["dataList"] = testData["flagList"]
         
         # get statistics
         if outData["dataList"].size > 0 and not np.all(np.isnan(outData["dataList"])):
@@ -434,29 +312,11 @@ class DataInterface:
             outData["Max"] = np.nan
             outData["Median"] = np.nan
                 
-        outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LL"], outData["HL"], outData["dataList"])
+        outData["Mean"], outData["SDev"], outData["Cpk"] = calc_cpk(outData["LLimit"], 
+                                                                    outData["HLimit"], 
+                                                                    outData["dataList"])
         return outData
     
-    
-    def getMaskFromHeadsSites(self, selectHeads:list[int], selectSites:list[int], FileID: int) -> np.ndarray:
-        '''
-        Create an array mask that will work on dutArray
-        and can be used for filtering duts of interest.
-        '''
-        mask = np.zeros(self.dutArrays[FileID].size, dtype=bool)
-        for head in selectHeads:
-            if -1 in selectSites:
-                # select all sites (site is unsigned int)
-                mask |= (self.dutSiteInfo[FileID][head]>=0)
-                # skip current head, since we have 
-                # all duts selected
-                continue
-            
-            for site in selectSites:
-                mask |= (self.dutSiteInfo[FileID][head]==site)
-        
-        return mask
-        
     
     def getTestDataFromHeadSite(self, testTuple: tuple, selectHeads:list[int], selectSites:list[int], FileID: int) -> dict:
         '''
@@ -468,19 +328,27 @@ class DataInterface:
         `FileID`: index of loaded files
         
         return a dictionary contains:
-        see `getTestDataCore`
+        see `testDataProcessCore`
         '''
         # testID -> (test_num, test_name)
         testID = (testTuple[0], testTuple[-1])
-        # read data from file if not cached
-        if testID not in self.dataCache:
-            self.prepareData([testID])
+        testInfo = self.DatabaseFetcher.getTestInfo(testID, FileID)
+        if len(testInfo) == 0:
+            return {}
+        # add (head, site) list to testInfo for MPR
+        # it will be used for indexing channel name dict
+        if testInfo["recHeader"] == REC.MPR:
+            testInfo["HeadSite"] = set(itertools.product(selectHeads, 
+                                                         [-1] if -1 in selectSites else selectSites))
+        testData = self.DatabaseFetcher.getTestDataFromHeadSite(testID, 
+                                                                selectHeads, 
+                                                                selectSites, 
+                                                                FileID)
         
-        dutMask = self.getMaskFromHeadsSites(selectHeads, selectSites, FileID)
-        return self.getTestDataCore(testTuple, dutMask, FileID)
+        return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
-    def getTestDataFromDutMask(self, testTuple: tuple, dutMask: np.ndarray, FileID: int) -> dict:
+    def getTestDataFromDutIndex(self, testTuple: tuple, selectedDutIndex: list, FileID: int) -> dict:
         '''
         Get parsed data of the given testTuple, test duts are constrained by heads & sites & fid
         
@@ -492,11 +360,19 @@ class DataInterface:
         '''
         # testID -> (test_num, test_name)
         testID = (testTuple[0], testTuple[-1])
-        # read data from file if not cached
-        if testID not in self.dataCache:
-            self.prepareData([testID])
+        testInfo = self.DatabaseFetcher.getTestInfo(testID, FileID)
+        if len(testInfo) == 0:
+            return {}        
+        # add (head, site) list to testInfo for MPR
+        # it will be used for indexing channel name dict
+        # TODO
+        if testInfo["recHeader"] == REC.MPR:
+            testInfo["HeadSite"] = set() # set(itertools.product(selectHeads, [-1] if -1 in selectSites else selectSites))
+        testData = self.DatabaseFetcher.getTestDataFromDutIndex(testID, 
+                                                                selectedDutIndex,
+                                                                FileID)
         
-        return self.getTestDataCore(testTuple, dutMask, FileID)
+        return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
     def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []) -> dict:
@@ -524,11 +400,11 @@ class DataInterface:
             if ("TEST_NAME" in test_fid) and (testTup not in testInfo):
                 testInfo[testTup] = [test_fid.pop("TEST_NAME"), 
                                      test_fid.pop("TEST_NUM"),
-                                     test_fid.pop("HL"),
-                                     test_fid.pop("LL"),
+                                     test_fid.pop("HLimit"),
+                                     test_fid.pop("LLimit"),
                                      test_fid.pop("Unit")]
-            if ("DUTIndex" in test_fid) and (fid not in dutIndexDict):
-                dutIndexDict[fid] = test_fid.pop("DUTIndex")
+            if ("dutList" in test_fid) and (fid not in dutIndexDict):
+                dutIndexDict[fid] = test_fid.pop("dutList")
             data.setdefault(testTup, []).append(test_fid)
         
         vheader = []
@@ -557,16 +433,15 @@ class DataInterface:
                 "dutInfo": dutInfo}
     
     
-    def getDutSummaryWithTestDataCore(self, testTuples: list[tuple], dutMaskDict: dict) -> dict:
+    def getDutSummaryWithTestDataCore(self, testTuples: list[tuple], dutIndexDict: dict) -> dict:
         '''
         Get all required test data for Dut Data Table or Report generator. Differ
         from `getTestDataTableContent`, `dutInfo` returned by this function is "full version",
-        same as dut summary table, file id and dut of interest are determined by user's 
-        selection on the GUI. 
+        file id and dut of interest are determined by user's selection on the GUI. 
         This function will always return dut info even if `testsTuples` is empty. 
         
         `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
-        `dutMaskDict`: dict, key: file id, value: dut mask
+        `dutMaskDict`: dict, key: file id, value: dutIndex list
         
         return a dictionary contains:
         `VHeader`: dut index as vertical header
@@ -578,34 +453,28 @@ class DataInterface:
         '''
         data = {}
         testInfo = {}
-        for testTup, fid in itertools.product(testTuples, sorted(dutMaskDict.keys())):
-            dutMask = dutMaskDict[fid]
-            test_fid = self.getTestDataFromDutMask(testTup, dutMask, fid)
+        for testTup, fid in itertools.product(testTuples, sorted(dutIndexDict.keys())):
+            dutIndexList = dutIndexDict[fid]
+            test_fid = self.getTestDataFromDutIndex(testTup, dutIndexList, fid)
             if ("TEST_NAME" in test_fid) and (testTup not in testInfo):
                 testInfo[testTup] = [test_fid.pop("TEST_NAME"), 
                                      test_fid.pop("TEST_NUM"),
-                                     test_fid.pop("HL"),
-                                     test_fid.pop("LL"),
+                                     test_fid.pop("HLimit"),
+                                     test_fid.pop("LLimit"),
                                      test_fid.pop("Unit")]
-                # already obtained the dutMask, no need to 
-                # use `DUTIndex` key, beside it would never
-                # run if `testTuples` is empty
-                test_fid.pop("DUTIndex")
+                # already obtained the dutIndexList
+                test_fid.pop("dutList")
             data.setdefault(testTup, []).append(test_fid)
         
         vheader = []
         dutInfo = []
         dut2ind = []
-        dutIndexDict = {}
-        for fid in sorted(dutMaskDict.keys()):
-            dutMask = dutMaskDict[fid]
-            # get duts of interest from mask
-            dutArray = self.dutArrays[fid][dutMask]
-            dutIndexDict[fid] = dutArray
-            vheader.extend(map(lambda i: f"File{fid} #{i}", dutArray))
-            dut2ind.append(dict(zip(dutArray, range(len(dutArray)))))
-            # add dict of dut index -> (part id, head site, dut flag)
-            dutInfo.append(self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutArray, fid))
+        for fid in sorted(dutIndexDict.keys()):
+            dutIndexList = sorted(dutIndexDict[fid])
+            vheader.extend(map(lambda i: f"File{fid} #{i}", dutIndexList))
+            dut2ind.append(dict(zip(dutIndexList, range(len(dutIndexList)))))
+            # add dict of dut index -> (part id, head site, ..., dut flag)
+            dutInfo.append(self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexList, fid))
                 
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
@@ -623,15 +492,11 @@ class DataInterface:
         return a dict, see `getDutSummaryWithTestDataCore`
         '''
         testTuples = [parseTestString(t, False) for t in self.completeTestList]
-        dutMaskDict = {}
+        dutIndexDict = {}
         for fid, dutIndex in selectedDutIndex:
-            if fid not in dutMaskDict:
-                # init a mask
-                dutMaskDict[fid] = np.full(self.dutArrays[fid].size, False, dtype=bool)
-            # update mask
-            dutMaskDict[fid] |= (self.dutArrays[fid] == dutIndex)
+            dutIndexDict.setdefault(fid, []).append(dutIndex)
         
-        return self.getDutSummaryWithTestDataCore(testTuples, dutMaskDict)
+        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):
@@ -681,8 +546,8 @@ class DataInterface:
                 CpkString = "%s" % "∞" if testDataDict["Cpk"] == np.inf else ("N/A" if np.isnan(testDataDict["Cpk"]) else floatFormat % testDataDict["Cpk"])                
                 row =  [test_name,
                         testDataDict["Unit"],
-                        "N/A" if np.isnan(testDataDict["LL"]) else floatFormat % testDataDict["LL"],
-                        "N/A" if np.isnan(testDataDict["HL"]) else floatFormat % testDataDict["HL"],
+                        "N/A" if np.isnan(testDataDict["LLimit"]) else floatFormat % testDataDict["LLimit"],
+                        "N/A" if np.isnan(testDataDict["HLimit"]) else floatFormat % testDataDict["HLimit"],
                         "%d" % list(map(isPass, testDataDict["flagList"])).count(False),
                         CpkString,
                         floatFormat % testDataDict["Mean"],

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -401,6 +401,10 @@ class DatabaseFetcher:
             return {}
             
         testInfo = dict(zip(col, val))
+        testInfo["LLimit"] = np.nan if testInfo["LLimit"] is None else testInfo["LLimit"]
+        testInfo["HLimit"] = np.nan if testInfo["HLimit"] is None else testInfo["HLimit"]
+        testInfo["LSpec"] = np.nan if testInfo["LSpec"] is None else testInfo["LSpec"]
+        testInfo["HSpec"] = np.nan if testInfo["HSpec"] is None else testInfo["HSpec"]
         
         #TODO: do we still need it?
         # get complete dut index first, since indexes are omitted if testNum is not tested in certain duts
@@ -501,7 +505,7 @@ class DatabaseFetcher:
                     "flagList": np.array(flagList, dtype=np.uint8)}
 
     
-    def getTestDataFromDutIndex(self, testTup: tuple, duts: np.ndarray, fileId: int) -> dict:
+    def getTestDataFromDutIndex(self, testTup: tuple, duts: list[int], fileId: int) -> dict:
         '''
         return a dict contains test data, the keys are different for PTR / MPR / FTR
         PTR:    `dutList`   `dataList`  `flagList` 
@@ -602,6 +606,7 @@ class DatabaseFetcher:
                                                         WHERE TEST_ID={testID}{dut_condition}
                                                         ORDER By DUTIndex
                                                         '''):
+                arrayInd = dutMap[dutIndex]
                 flagList[arrayInd] = flag
             return {"dutList": dutList, 
                     "flagList": flagList}
