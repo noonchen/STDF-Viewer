@@ -28,13 +28,15 @@ import io, os, sys, gc, traceback, toml, atexit
 import json, urllib.request as rq
 import platform, logging
 import numpy as np
+from itertools import product
+from fontTools import ttLib
 from base64 import b64decode
 from deps.SharedSrc import tab, REC
 import deps.SharedSrc as ss
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
-from deps.StdfFile import DataInterface
-from deps.MatplotlibWidgets import PlotCanvas, MagCursor
+from deps.DataInterface import DataInterface
+# from deps.MatplotlibWidgets import PlotCanvas, MagCursor
 from deps.customizedQtClass import (StyleDelegateForTable_List, 
                                     DutSortFilter, 
                                     ColorSqlQueryModel, 
@@ -65,11 +67,6 @@ from PyQt5.QtCore import Qt, QTranslator, pyqtSignal as Signal, pyqtSlot as Slot
 # from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
 # from PySide6.QtCore import Qt, QTranslator, Signal, Slot
-
-import matplotlib
-matplotlib.use('QT5Agg')
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 
 # high dpi support
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
@@ -791,45 +788,41 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     # TODO
-    def isTestFail(self, testTuple):
+    def isTestFail(self, testTuple: tuple) -> str:
         testID = (testTuple[0], testTuple[-1])
-        if testID in self.failCntDict:
-            # test synopsis for current test item contains valid fail count
-            failCount = self.failCntDict[testID]
-            if failCount > 0:
-                return "testFailed"
-            elif failCount == 0:
-                # if user do not need to check Cpk, return to caller
-                if self.settingParams.checkCpk:
-                    failStateChecked = True      # avoid re-check fail state when calculating Cpk
-                else:
-                    return "testPassed"
-            else:
-                failStateChecked = False
-
-            # when need to check Cpk, fail count for this test_num in TSR is invalid, or TSR is not omitted whatsoever
-            # read test data from all heads and sites
-            self.prepareData([testID], cacheData=True)
-            parsedData = self.selData[testID]
-            if not failStateChecked:
-                for stat in map(ss.isPass, parsedData["flagList"]):
-                    if stat == False:
-                        self.failCntDict[testID] = 1
-                        return "testFailed"
-                    
-            self.failCntDict[testID] = 0
+        failCountList = self.data_interface.failCntDict.get(testID, [-1])
+        failExist = any(map(lambda x: x>0, failCountList))
+        allPass = all((map(lambda x: x==0, failCountList)))
+        
+        if failExist:
+            return "Fail"
+        elif allPass:
+            # if user do not need to check Cpk, return to caller
             if self.settingParams.checkCpk:
-                # if all tests passed, check if cpk is lower than the threshold
-                parsedData["dataList"] = np.array(parsedData["dataList"], dtype='float64')
-                for head in self.availableHeads:
-                    for site in self.availableSites:
-                        cpk = self.getData(testTuple, [head], [site])["Cpk"]
-                        if not np.isnan(cpk):
-                            # check cpk only if it's valid
-                            if cpk < self.settingParams.cpkThreshold:
-                                return "cpkFailed"
+                checkCpkOnly = True      # avoid re-check fail state when calculating Cpk
+            else:
+                return "Pass"
+        else:
+            checkCpkOnly = False
+
+        if not checkCpkOnly:
+            #TODO manually parse flagList of current testTuple
+            # update the result in failCntDict
+            for stat in map(ss.isPass, parsedData["flagList"]):
+                if stat == False:
+                    self.failCntDict[testID] = 1
+                    return "Fail"
+                
+        if self.settingParams.checkCpk:
+            # if all tests passed, check if cpk is lower than the threshold
+            for head, site in product(self.availableHeads, self.availableSites):
+                cpk = self.getData(testTuple, [head], [site])["Cpk"]
+                if not np.isnan(cpk):
+                    # check cpk only if it's valid
+                    if cpk < self.settingParams.cpkThreshold:
+                        return "cpkFail"
             
-            return "testPassed"
+            return "Pass"
         
         
     def clearTestItemBG(self):
@@ -1142,6 +1135,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
+    #TODO
     def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
         '''testTuple: (test_num, pmr, test_name)'''
         exportImg: bool = ("exportImg" in kargs) and (kargs["exportImg"] == True)
@@ -1229,12 +1223,6 @@ class MyWindow(QtWidgets.QMainWindow):
                                                        site=site,
                                                        wafer_num=test_num)
                 connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
-            
-            
-    
-    def updateCursorPrecision(self):
-        for _, cursor in self.cursorDict.items():
-            cursor.updatePrecision(self.settingParams.dataPrecision, self.settingParams.dataNotation)
             
             
     def clearOtherTab(self, currentTab):        
@@ -1427,24 +1415,19 @@ def run():
     app.setStyle('Fusion')
     app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))
     # default font for dialogs
-    font_names = []
+    # font_names = []
     defaultFontNames = FontNames()
     # reverse to put courier at the rear
-    for fn in sorted(os.listdir(os.path.join(sys.rootFolder, "fonts")), key=lambda x:x.lower(), reverse=True):
+    for fn in sorted(os.listdir(os.path.join(sys.rootFolder, "fonts")), 
+                     key=lambda x:x.lower(), reverse=True):
         if not fn.endswith(".ttf"): continue
         fontPath = os.path.join(sys.rootFolder, "fonts", fn)
         QtGui.QFontDatabase.addApplicationFont(fontPath)
-        fm.fontManager.addfont(fontPath)
-        font_name = fm.FontProperties(fname=fontPath).get_name()
-        font_names.append(font_name)
-        # update default fonts if special prefix is found
+        font_name = ttLib.TTFont(fontPath)["name"].getDebugName(1)
         if fn.startswith("cn_"):
             defaultFontNames.Chinese = font_name
         elif fn.startswith("en_"):
             defaultFontNames.English = font_name
-
-    matplotlib.rcParams["font.family"] = "sans-serif"
-    matplotlib.rcParams["font.sans-serif"] = font_names
     
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow(defaultFontNames)
