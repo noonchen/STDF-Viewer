@@ -140,6 +140,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.updateIcons()
         self.init_TestList()
         self.init_DataTable()
+        self.init_Head_SiteCheckbox()
         # enable drop file
         self.enableDragDrop()
         # init actions
@@ -342,7 +343,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 
     
     def onExportReport(self):
-        if self.dbConnected:
+        if self.data_interface is not None:
             self.exporter.showUI()
             # we have to de-select test_num(s) after exporting
             # the selected test nums may not be prepared anymore
@@ -821,6 +822,9 @@ class MyWindow(QtWidgets.QMainWindow):
                         
                        
     def refreshTestList(self):
+        if self.data_interface is None:
+            return
+        
         if self.settingParams.sortTestList == "Number":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: ss.parseTestString(x)))
         elif self.settingParams.sortTestList == "Name":
@@ -835,6 +839,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # 2. dut list changed (site & head selection changed);
         # 3. test num selection changed;
         # 4. tab changed
+        if self.data_interface is None:
+            return
+        
         if self.ui.infoBox.currentIndex() != 2:
             # do nothing if test data table is not selected
             return
