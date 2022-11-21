@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -25,15 +25,16 @@
 
 
 import subprocess, os, platform
+from xlsxwriter import Workbook
+from xlsxwriter.worksheet import Worksheet
 from .customizedQtClass import (StyleDelegateForTable_List, 
                                 FlippedProxyModel, 
                                 NormalProxyModel, 
                                 TestDataTableModel)
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog, QPushButton
-from PyQt5.QtCore import pyqtSignal as Signal, QTranslator, Qt
-from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton
+from PyQt5.QtCore import QTranslator, Qt
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
@@ -63,6 +64,8 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.transposeBtn = QPushButton("T")
         self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
         self.transposeBtn.setShortcut("t")
+        self.transposeBtn.setStyleSheet("QPushButton { background-color: #FE7B00; }")
+        self.transposeBtn.setToolTip(self.tr("Transpose table"))
         self.UI.horizontalLayout.insertWidget(0, self.transposeBtn)
         self.transposeBtn.clicked.connect(self.onTransposeTable)
         
@@ -108,12 +111,12 @@ class DutDataDisplayer(QtWidgets.QDialog):
     def init_Table(self):
         self.tmodel = TestDataTableModel()
         # proxy model for normal display & transpose
-        # self.flipModel = FlippedProxyModel()
-        # self.normalModel = NormalProxyModel()
-        # self.flipModel.setSourceModel(self.tmodel)
-        # self.normalModel.setSourceModel(self.tmodel)
+        self.flipModel = FlippedProxyModel()
+        self.normalModel = NormalProxyModel()
+        self.flipModel.setSourceModel(self.tmodel)
+        self.normalModel.setSourceModel(self.tmodel)
         # use normal model as default
-        # self.activeModel = self.normalModel
+        self.activeModel = self.normalModel
         self.UI.tableView_dutData.setModel(self.tmodel)
         self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
@@ -122,7 +125,7 @@ class DutDataDisplayer(QtWidgets.QDialog):
 
         
     def onTransposeTable(self):
-        if self.activeModel == self.normalModel:
+        if self.activeModel is self.normalModel:
             self.activeModel = self.flipModel
         else:
             self.activeModel = self.normalModel
@@ -132,19 +135,38 @@ class DutDataDisplayer(QtWidgets.QDialog):
     
     
     def onSave_csv(self):
+        def checkComma(text: str) -> str:
+            # if comma is in the string, needs to close with ""
+            if isinstance(text, str):
+                if "," in text:
+                    return f'"{text}"'
+                else:
+                    return text
+            else:
+                if text is None:
+                    return ""
+                else:
+                    return f"{text}"
+        
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("CSV file (*.csv)"))
-        checkComma = lambda text: '"' + text + '"' if "," in text else text
         if outPath:
             rowTotal = self.activeModel.rowCount()
             columnTotal = self.activeModel.columnCount()
-            # if comma is in the string, needs to close with ""
-            hh = [checkComma(self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole)) for i in range(columnTotal)]
-            vh = [checkComma(self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole)) for i in range(rowTotal)]
+            hh = [checkComma(self.activeModel.headerData(i, 
+                                                         Qt.Orientation.Horizontal, 
+                                                         Qt.ItemDataRole.DisplayRole)) 
+                  for i in range(columnTotal)]
+            vh = [checkComma(self.activeModel.headerData(i, 
+                                                         Qt.Orientation.Vertical, 
+                                                         Qt.ItemDataRole.DisplayRole)) 
+                  for i in range(rowTotal)]
+            
             with open(outPath, "w") as f:
                 f.write(",".join([""] + hh)+"\n")
                 for row in range(rowTotal):
                     rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), Qt.DisplayRole)) for col in range(columnTotal)]
                     f.write(",".join([vh[row]] + rowDataList)+"\n")
+            
             msgbox = QtWidgets.QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
@@ -163,41 +185,69 @@ class DutDataDisplayer(QtWidgets.QDialog):
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("Excel file (*.xlsx)"))
         
         if outPath:
-            def write_row(sheet, row, scol, dataL, styleList):
+            def write_row(sheet: Worksheet, row: int, scol: int, dataL: list, styleList: list):
                 # write as number in default, otherwise as string
-                for i in range(len(dataL)):
+                for i, (data, style) in enumerate(zip(dataL, styleList)):
                     try:
-                        sheet.write_number(row, scol+i, float(dataL[i]), styleList[i])
+                        sheet.write_number(row, scol+i, float(data), style)
                     except (TypeError, ValueError):
-                        sheet.write_string(row, scol+i, dataL[i], styleList[i])
+                        sheet.write_string(row, scol+i, data, style)
             
-            import xlsxwriter as xw
-            with xw.Workbook(outPath) as wb:
+            with Workbook(outPath) as wb:
                 noStyle = wb.add_format({"align": "center"})
-                failStyle = wb.add_format({"bg_color": "#CC0000", "bold": True, "align": "center"})
+                boldStyle = wb.add_format({"bold": True, "align": "center"})
+                failStyle = wb.add_format({"font_color": "FFFFFF", "bg_color": "#CC0000", "bold": True, "align": "center"})
+                supersedeStyle = wb.add_format({"bg_color": "#D0D0D0", "bold": True, "align": "center"})
+                unknownStyle = wb.add_format({"bg_color": "#FE7B00", "bold": True, "align": "center"})
                 sheetOBJ = wb.add_worksheet(self.tr("DUT Data"))
                 
                 rowTotal = self.activeModel.rowCount()
                 columnTotal = self.activeModel.columnCount()
-                colHeader = [""] + [self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole) for i in range(columnTotal)]
-                vh = [self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole) for i in range(rowTotal)]
-                
-                write_row(sheetOBJ, 0, 0, colHeader, [noStyle] * (columnTotal + 1))
+                colHeader = [""] + [self.activeModel.headerData(i, 
+                                                                Qt.Orientation.Horizontal, 
+                                                                Qt.ItemDataRole.DisplayRole) 
+                                    for i in range(columnTotal)]
+                vh = [self.activeModel.headerData(i, 
+                                                  Qt.Orientation.Vertical, 
+                                                  Qt.ItemDataRole.DisplayRole) 
+                      for i in range(rowTotal)]
+                write_row(sheetOBJ, 0, 0, colHeader, [boldStyle] * (columnTotal + 1))
                 col_width = [len(s) for s in colHeader]     # get max string len to adjust cell width
                 
                 for row in range(rowTotal):
-                    rowDataList = [vh[row]]     # row header
-                    rowStyleList = [noStyle]    # no style for row header
-                    if len(vh[row]) > col_width[0]: col_width[0] = len(vh[row])
+                    # row header
+                    rowDataList = [vh[row]]
+                    rowStyleList = [boldStyle]
+                    col_width[0] = max(len(vh[row]), col_width[0])
                     
                     for col in range(columnTotal):
-                        qitem = self.activeModel.item(row, col)
-                        data = qitem.text()
-                        color = qitem.background().color().name().lower()
+                        modelIndex = self.activeModel.index(row, col)
+                        data = self.activeModel.data(modelIndex, 
+                                                     Qt.ItemDataRole.DisplayRole)
+                        bgcolor = self.activeModel.data(modelIndex, 
+                                                        Qt.ItemDataRole.BackgroundRole)
+                        # replace None with empty string
+                        data = data if data is not None else ""
+                        # choose cell style by background color
+                        if isinstance(bgcolor, QtGui.QColor):
+                            hexcolor = bgcolor.name().lower()
+                            if hexcolor.startswith("#cc0000"):
+                                cellStyle = failStyle
+                            elif hexcolor.startswith("#d0d0d0"):
+                                cellStyle = supersedeStyle
+                            elif hexcolor.startswith("#fe7b00"):
+                                cellStyle = unknownStyle
+                            else:
+                                cellStyle = noStyle
+                        else:
+                            cellStyle = noStyle
+                        
                         rowDataList.append(data)
-                        rowStyleList.append(failStyle if color=="#cc0000" else noStyle)
-                        if len(data) > col_width[col+1]: col_width[col+1] = len(data)
+                        rowStyleList.append(cellStyle)
+                        col_width[col + 1] = max(len(str(data)), col_width[col + 1])
                     write_row(sheetOBJ, row + 1, 0, rowDataList, rowStyleList)
+                
+                # resize columns
                 [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
                 
             msgbox = QtWidgets.QMessageBox(None)
