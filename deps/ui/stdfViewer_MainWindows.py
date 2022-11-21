@@ -117,7 +117,7 @@ class Ui_MainWindow(object):
         self.TestList.setSizePolicy(sizePolicy)
         self.TestList.setMinimumSize(QtCore.QSize(0, 0))
         font = QtGui.QFont()
-        font.setFamily("Courier")
+        font.setFamily("Courier New")
         font.setPointSize(12)
         font.setBold(False)
         font.setItalic(False)
@@ -169,7 +169,7 @@ class Ui_MainWindow(object):
         self.WaferList.setSizePolicy(sizePolicy)
         self.WaferList.setMinimumSize(QtCore.QSize(0, 0))
         font = QtGui.QFont()
-        font.setFamily("Courier")
+        font.setFamily("Courier New")
         font.setPointSize(12)
         font.setBold(False)
         font.setItalic(False)
@@ -334,7 +334,7 @@ class Ui_MainWindow(object):
         self.fileInfoTable = QtWidgets.QTableView(self.fileInfoPage)
         self.fileInfoTable.setStyleSheet("QTableView {\n"
 "background: transparent;\n"
-"font: 13pt \"Courier\";}\n"
+"font: 13pt \"Courier New\";}\n"
 "\n"
 "")
         self.fileInfoTable.setFrameShape(QtWidgets.QFrame.NoFrame)
