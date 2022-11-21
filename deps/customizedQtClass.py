@@ -41,49 +41,56 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
     """
     
     def __init__(self, parent):
-        super().__init__(parent)
-        self.color_default = QtGui.QColor("#0096ff")
+        super().__init__()
+        self.parentWidget = parent
+        self.hightColor = QtGui.QColor("#0096ff")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        # if option.state and QtWidgets.QStyle.State_Selected:
-        #     # font color
-        #     fgcolor = self.getColor(index, "FG")
-        #     if fgcolor:
-        #         option.palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, fgcolor)
-        #     # background color
-        #     bgcolor = self.combineColors(self.getColor(index, "BG"), self.color_default)
-        #     # option.palette.setColor(QtGui.QPalette.Highlight, bgcolor)    # change color for listView
-        #     painter.fillRect(option.rect, bgcolor)    # change color for tableView
+        self.initStyleOption(option, index)
+        if (option.state & QtWidgets.QStyle.StateFlag.State_Selected and 
+            option.state & QtWidgets.QStyle.StateFlag.State_Active):
+            # get background color
+            bg = self.getColor(index, isBG = True)
+            # set highlight color
+            option.palette.setColor(QtGui.QPalette.ColorRole.Highlight, 
+                                    self.mixColors(bg))
         QStyledItemDelegate.paint(self, painter, option, index)
 
-    def getColor(self, index, pos):
-        parentWidget = self.parent()
-        model = parentWidget.model()
-        dataRole = QtCore.Qt.BackgroundRole if pos == "BG" else QtCore.Qt.ForegroundRole
+    def getColor(self, index: QModelIndex, isBG = True) -> QtGui.QColor:
+        model = self.parentWidget.model()
+        dataRole = Qt.ItemDataRole.BackgroundRole if isBG else Qt.ItemDataRole.ForegroundRole
         
         # TableView
-        if isinstance(parentWidget, QtWidgets.QTableView):
-            if isinstance(model, QtCore.QSortFilterProxyModel) or \
-               isinstance(model, FlippedProxyModel) or \
-               isinstance(model, NormalProxyModel):
+        if isinstance(self.parentWidget, QtWidgets.QTableView):
+            if (isinstance(model, QSortFilterProxyModel) or     # dut summary
+                isinstance(model, FlippedProxyModel) or         # dut data table
+                isinstance(model, NormalProxyModel)):           # dut data table
+                # proxy model
                 sourceIndex = model.mapToSource(index)
                 return model.sourceModel().data(sourceIndex, dataRole)
-            else:
-                return self.parent().model().data(index, dataRole)
+            
+            elif (isinstance(model, TestDataTableModel) or      # test data table
+                  isinstance(model, BinWaferTableModel)):       # bin/wafer table
+                # abstract table model
+                return model.data(index, dataRole)                
 
         # ListView
-        if isinstance(parentWidget, QtWidgets.QListView):
-            # my listView uses proxyModel
-            sourceIndex = model.mapToSource(index)
-            return self.parent().model().sourceModel().data(sourceIndex, dataRole)
+        if isinstance(self.parentWidget, QtWidgets.QListView):
+            if isinstance(model, QSortFilterProxyModel):
+                # all of listView uses proxyModel
+                sourceIndex = model.mapToSource(index)
+                return model.sourceModel().data(sourceIndex, dataRole)
         
-    def combineColors(self, c1: QtGui.QColor, c2: QtGui.QColor) -> QtGui.QColor:
-        c3 = QtGui.QColor()
-        c3.setRed(int(c1.red()*0.7 + c2.red()*0.3))
-        c3.setGreen(int(c1.green()*0.7 + c2.green()*0.3))
-        c3.setBlue(int(c1.blue()*0.7 + c2.blue()*0.3))
-        return c3
-
+        return QtGui.QColor("#000000")
+        
+    def mixColors(self, src) -> QtGui.QColor:
+        if isinstance(src, QtGui.QColor):
+            r = int(src.red()*0.7   + self.hightColor.red()*0.3)
+            g = int(src.green()*0.7 + self.hightColor.green()*0.3)
+            b = int(src.blue()*0.7  + self.hightColor.blue()*0.3)
+            return QtGui.QColor(r, g, b)
+        else:
+            self.hightColor
 
 
 def getHS(text: str):
