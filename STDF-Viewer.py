@@ -55,8 +55,11 @@ from deps.uic_stdDebug import stdDebugPanel
 # pyqt5
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
-from PyQt5.QtWidgets import QApplication, QFileDialog, QAbstractItemView, QMessageBox
-from PyQt5.QtCore import Qt, QTranslator, pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5.QtWidgets import (QApplication, QFileDialog, 
+                             QAbstractItemView, QMessageBox, QHeaderView)
+from PyQt5.QtCore import (Qt, QTranslator, 
+                          pyqtSignal as Signal, 
+                          pyqtSlot as Slot)
 # pyside2
 # from deps.ui.stdfViewer_MainWindows_side2 import Ui_MainWindow
 # from PySide2 import QtCore, QtWidgets, QtGui
@@ -331,7 +334,7 @@ class MyWindow(QtWidgets.QMainWindow):
               
     
     def onFailMarker(self):
-        if self.dbConnected:
+        if self.data_interface is not None:
             self.failmarker.start()
         else:
             # no data is found, show a warning dialog
@@ -622,19 +625,19 @@ class MyWindow(QtWidgets.QMainWindow):
                 if self.settingParams.language != "English":
                     # fix weird font when switch to chinese-s
                     qfont = QtGui.QFont(self.imageFont)
-                    [qele.setData(qfont, QtCore.Qt.FontRole) for qele in qitemRow]
+                    [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
             # horizontalHeader.resizeSection(0, 250)
-            horizontalHeader.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+            horizontalHeader.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             for column in range(1, horizontalHeader.count()):
-                horizontalHeader.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+                horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
             
             # resize to content to show all texts, then add additional height to each row
             for row in range(self.tmodel_info.rowCount()):
-                verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.ResizeToContents)
+                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.ResizeToContents)
                 newHeight = verticalHeader.sectionSize(row) + 20
-                verticalHeader.setSectionResizeMode(row, QtWidgets.QHeaderView.Fixed)
+                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
                 verticalHeader.resizeSection(row, newHeight)
     
     
@@ -645,7 +648,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_dut.setQuery(QtSql.QSqlQuery(ss.DUT_SUMMARY_QUERY, self.db_dut))
         
         for column in range(1, header.count()):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
         
         # always hide dut index column
         self.ui.dutInfoTable.hideColumn(0)
@@ -663,7 +666,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_datalog.setQuery(QtSql.QSqlQuery(ss.DATALOG_QUERY, self.db_dut))
                     
         for column in [2, 3]:
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Stretch)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
         self.ui.datalogTable.resizeRowsToContents()
         
         # hide file id column if 1 file is opened
@@ -787,42 +790,26 @@ class MyWindow(QtWidgets.QMainWindow):
         self.onSelect()
     
     
-    # TODO
-    def isTestFail(self, testTuple: tuple) -> str:
-        testID = (testTuple[0], testTuple[-1])
-        failCountList = self.data_interface.failCntDict.get(testID, [-1])
-        failExist = any(map(lambda x: x>0, failCountList))
-        allPass = all((map(lambda x: x==0, failCountList)))
+    def isTestFail(self, selected_string: str) -> str:
+        testTuple = ss.parseTestString(selected_string, False)
+        testPass = self.data_interface.checkTestPassFail(testTuple)
         
-        if failExist:
-            return "Fail"
-        elif allPass:
+        if testPass:
             # if user do not need to check Cpk, return to caller
-            if self.settingParams.checkCpk:
-                checkCpkOnly = True      # avoid re-check fail state when calculating Cpk
-            else:
+            if not self.settingParams.checkCpk:
                 return "Pass"
         else:
-            checkCpkOnly = False
-
-        if not checkCpkOnly:
-            #TODO manually parse flagList of current testTuple
-            # update the result in failCntDict
-            for stat in map(ss.isPass, parsedData["flagList"]):
-                if stat == False:
-                    self.failCntDict[testID] = 1
-                    return "Fail"
-                
-        if self.settingParams.checkCpk:
-            # if all tests passed, check if cpk is lower than the threshold
-            for head, site in product(self.availableHeads, self.availableSites):
-                cpk = self.getData(testTuple, [head], [site])["Cpk"]
-                if not np.isnan(cpk):
-                    # check cpk only if it's valid
-                    if cpk < self.settingParams.cpkThreshold:
-                        return "cpkFail"
+            return "Fail"
+        
+        # check if cpk is lower than the threshold
+        cpkList = self.data_interface.getTestCpkList(testTuple)
+        for cpk in cpkList:
+            if not np.isnan(cpk):
+                # check cpk only if it's valid
+                if cpk < self.settingParams.cpkThreshold:
+                    return "cpkFail"
             
-            return "Pass"
+        return "Pass"
         
         
     def clearTestItemBG(self):
@@ -835,7 +822,7 @@ class MyWindow(QtWidgets.QMainWindow):
                        
     def refreshTestList(self):
         if self.settingParams.sortTestList == "Number":
-            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: self.getTestTuple(x)))
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: ss.parseTestString(x)))
         elif self.settingParams.sortTestList == "Name":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: x.split("\t")[-1]))
         else:
@@ -870,7 +857,7 @@ class MyWindow(QtWidgets.QMainWindow):
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
         # FIXME: resize to contents causes laggy
-        # hheaderview.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        # hheaderview.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.ui.rawDataTable.verticalHeader().setVisible(True)
     
                 
@@ -880,6 +867,9 @@ class MyWindow(QtWidgets.QMainWindow):
         if tab is not changed, insert canvas and toolbars based on test num and site
         if tab is changed, clear all and then add canvas
         '''
+        if self.data_interface is None:
+            return
+        
         tabType = self.ui.tabControl.currentIndex()
         self.clearOtherTab(tabType)     # clear other tabs' content to save memory
         # check if redraw is required
@@ -1012,35 +1002,9 @@ class MyWindow(QtWidgets.QMainWindow):
                 for key in list(self.cursorDict.keys()):
                     if key.startswith(matchString):
                         self.cursorDict.pop(key, None)
-            
-            
-    
-    # TODO
-    def prepareDUTSummaryForExporter(self, selHeads, selSites, **kargs):
-        '''This method is for providing data for report generator'''
-        result = []
-        
-        if ("testTuple" in kargs and isinstance(kargs["testTuple"], tuple)):
-            # return test data of the given test_num
-            valueFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
-            testTuple = kargs["testTuple"]
-            # get test value of selected DUTs
-            testDict = self.getData(testTuple, selHeads, selSites)
-            test_data_list = self.stringifyTestData(testDict, valueFormat)
-            test_stat_list = [True] * 5 + list(map(ss.isPass, testDict["flagList"]))  # TestName, TestNum, HL, LL, Unit
-            result = [test_data_list, test_stat_list]
-        
-        elif "testTuple" not in kargs:
-            # return dut info
-            currentMask = self.getMaskFromHeadsSites(selHeads, selSites)
-            selectedDUTs = self.dutArray[currentMask]
-            for dutIndex in selectedDUTs:
-                # decode bytes to str
-                result.append(self.getDutSummaryOfIndex(dutIndex))
-
-        return result
         
     
+    #TODO remove...
     def resizeCellWidth(self, tableView: QtWidgets.QTableView, stretchToFit = True):
         # set column width
         header = tableView.horizontalHeader()
@@ -1050,7 +1014,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # set to ResizeToContents mode and get the minimum width list
         min_widthList = []
         for column in range(header.model().columnCount()):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
             min_widthList += [header.sectionSize(column)]   
 
         # calcualte the width for each column
@@ -1070,12 +1034,15 @@ class MyWindow(QtWidgets.QMainWindow):
             WL = [w + 20 for w in min_widthList]
                 
         for column, width in enumerate(WL):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
             # use the calculated width
             header.resizeSection(column, width)        
             
             
     def updateStatTableContent(self):
+        if self.data_interface is None:
+            return
+        
         tabType = self.ui.tabControl.currentIndex()
         selTests = self.getSelectedTests()
         horizontalHeader = self.ui.dataTable.horizontalHeader()

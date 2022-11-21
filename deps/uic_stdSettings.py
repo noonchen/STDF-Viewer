@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -338,7 +338,6 @@ class stdfSettings(QtWidgets.QDialog):
             if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.refreshTestList()
             if clearListBG: self.parent.clearTestItemBG()
-            if refreshCursor: self.parent.updateCursorPrecision()
             if retranslate: self.parent.changeLanguage()
                 
             # need to update orignal params after updating parent settings

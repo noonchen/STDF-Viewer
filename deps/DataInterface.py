@@ -137,6 +137,50 @@ class DataInterface:
         return metaDataList
         
     
+    def checkTestPassFail(self, testTuple: tuple) -> bool:
+        '''
+        For fail marker
+        check the failcount of testTuple in all files.
+        if failcount == -1, parse flagList and update count dict
+        if failcount == 0, returns True
+        '''
+        testID = (testTuple[0], testTuple[-1])
+        failCntList = self.failCntDict[testID]
+        for fid, fcnt in enumerate(failCntList):
+            if fcnt == -1:
+                # TSR doesn't contains
+                # fail count of this test
+                # parse flagList manually
+                testData = self.getTestDataFromHeadSite(testTuple, 
+                                                        self.availableHeads, 
+                                                        self.availableSites, 
+                                                        fid)
+                flagList = testData.get("flagList", [])
+                fcnt = sum(map(lambda f: 1 if f & 24 == 8 else 0, 
+                               flagList))
+                # update count
+                failCntList[fid] = fcnt
+        
+        return all(map(lambda c: c==0, failCntList))
+    
+    
+    def getTestCpkList(self, testTuple: tuple) -> list:
+        '''
+        For fail marker
+        calculate Cpk of given testTuple from all heads/sites/files
+        '''
+        cpkList = []
+        for fid, head, site in itertools.product(range(self.num_files), 
+                                                 self.availableHeads, 
+                                                 self.availableSites):
+            testData = self.getTestDataFromHeadSite(testTuple, 
+                                                    [head], 
+                                                    [site], 
+                                                    fid)
+            cpkList.append(testData.get("Cpk", np.nan))
+        return cpkList
+    
+    
     def testDataProcessCore(self, testTuple: tuple, testInfo: dict, testData: dict, FileID: int) -> dict:
         '''
         Merge data and calculate statistic, or index PMR result from complete MPR
