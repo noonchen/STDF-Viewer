@@ -36,7 +36,6 @@ import deps.SharedSrc as ss
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
-# from deps.MatplotlibWidgets import PlotCanvas, MagCursor
 from deps.customizedQtClass import (StyleDelegateForTable_List, 
                                     DutSortFilter, 
                                     ColorSqlQueryModel, 
@@ -104,10 +103,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
-        # data_interface for processing requests by GUI and reading data 
-        # from database or files
+        # data_interface for processing requests by GUI 
+        # and reading data from database
         self.data_interface = None
-        # database for dut summary only
+        # database for dut summary and GDR/DTR table
         self.db_dut = QtSql.QSqlDatabase.addDatabase("QSQLITE")
         # used for detecting tab changes
         self.preTab = None             
@@ -118,8 +117,6 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
-        # init/clear a dict to store cursors instance to prevent garbage collection
-        self.cursorDict = {}
         self.init_SettingParams()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
@@ -163,18 +160,17 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.tabControl.currentChanged.connect(self.onSelect)
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
         # add a toolbar action at the right side
-        self.ui.spaceWidgetTB = QtWidgets.QWidget()
-        self.ui.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, 
-                                                                  QtWidgets.QSizePolicy.Policy.Expanding))
-        self.ui.toolBar.addWidget(self.ui.spaceWidgetTB)
+        self.spaceWidgetTB = QtWidgets.QWidget()
+        self.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                                               QtWidgets.QSizePolicy.Policy.Expanding))
+        self.ui.toolBar.addWidget(self.spaceWidgetTB)
         self.ui.toolBar.addAction(self.ui.actionAbout)
         # disable wafer tab in default
         self.ui.tabControl.setTabEnabled(4, False)
         # clean up before exiting
         atexit.register(self.onExit)
-        # a workaround for not canvas not having render attribute
-        self.textRender = None
-        self.changeLanguage()   # set language after initing subwindow & reading config
+        # set language after initing subwindow & reading config
+        self.changeLanguage()
         
         
     def checkNewVersion(self):
@@ -187,26 +183,26 @@ class MyWindow(QtWidgets.QMainWindow):
             
             if latestTag > Version:
                 # show dialog for updating
-                msgBox = QtWidgets.QMessageBox(self)
-                msgBox.setWindowFlag(Qt.FramelessWindowHint)
-                msgBox.setTextFormat(QtCore.Qt.RichText)
+                msgBox = QMessageBox(self)
+                msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+                msgBox.setTextFormat(Qt.TextFormat.RichText)
                 msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;<a href='{2}'>{1}</a></span>".format(self.tr("{0} is available!").format(latestTag),
                                                                                                                       self.tr("→Go to download page←"),
                                                                                                                       releaseLink))
                 msgBox.setInformativeText(self.tr("Change List:") + "\n\n" + changeList)
-                msgBox.addButton(self.tr("Maybe later"), QtWidgets.QMessageBox.NoRole)
+                msgBox.addButton(self.tr("Maybe later"), QMessageBox.ButtonRole.NoRole)
                 msgBox.exec_()
             else:
-                msgBox = QtWidgets.QMessageBox(self)
-                msgBox.setWindowFlag(Qt.FramelessWindowHint)
-                msgBox.setTextFormat(QtCore.Qt.RichText)
+                msgBox = QMessageBox(self)
+                msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+                msgBox.setTextFormat(Qt.TextFormat.RichText)
                 msgBox.setText(self.tr("You're using the latest version."))
                 msgBox.exec_()
             
         except Exception as e:
                 # tell user cannot connect to the internet
-                msgBox = QtWidgets.QMessageBox(self)
-                msgBox.setWindowFlag(Qt.FramelessWindowHint)
+                msgBox = QMessageBox(self)
+                msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
                 msgBox.setText(self.tr("Cannot connect to Github"))
                 msgBox.setInformativeText(repr(e))
                 msgBox.exec_()
@@ -321,7 +317,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def openNewFile(self, files: list[str]):
         if not files:
-            files, _typ = QFileDialog.getOpenFileNames(self, 
+            files, _ = QFileDialog.getOpenFileNames(self, 
                                                   caption=self.tr("Select a STD File To Open"), 
                                                   directory=self.settingParams.recentFolder,
                                                   filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
@@ -339,7 +335,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.failmarker.start()
         else:
             # no data is found, show a warning dialog
-            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
                 
     
     def onExportReport(self):
@@ -350,7 +346,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.TestList.clearSelection()
         else:
             # no data is found, show a warning dialog
-            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
     
     
     def onSettings(self):
@@ -358,9 +354,9 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onAbout(self):
-        msgBox = QtWidgets.QMessageBox(self)
+        msgBox = QMessageBox(self)
         msgBox.setWindowTitle(self.tr("About"))
-        msgBox.setTextFormat(QtCore.Qt.RichText)
+        msgBox.setTextFormat(Qt.TextFormat.RichText)
         msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>{0}: {1}<br>{2}: noonchen<br>{3}: chennoon233@foxmail.com<br>".format(self.tr("Version"), 
                                                                                                                                                                Version, 
                                                                                                                                                                self.tr("Author"), 
@@ -373,9 +369,9 @@ class MyWindow(QtWidgets.QMainWindow):
         appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
-        dbgBtn = msgBox.addButton(self.tr("Debug"), QtWidgets.QMessageBox.ResetRole)   # leftmost
-        ckupdateBtn = msgBox.addButton(self.tr("Check For Updates"), QtWidgets.QMessageBox.ApplyRole)   # middle
-        msgBox.addButton(self.tr("OK"), QtWidgets.QMessageBox.NoRole)   # rightmost
+        dbgBtn = msgBox.addButton(self.tr("Debug"), QMessageBox.ButtonRole.ResetRole)   # leftmost
+        ckupdateBtn = msgBox.addButton(self.tr("Check For Updates"), QMessageBox.ButtonRole.ApplyRole)   # middle
+        msgBox.addButton(self.tr("OK"), QMessageBox.ButtonRole.NoRole)   # rightmost
         msgBox.exec_()
         if msgBox.clickedButton() == dbgBtn:
             self.showDebugPanel()
@@ -479,22 +475,22 @@ class MyWindow(QtWidgets.QMainWindow):
         self.sim_list = QtGui.QStandardItemModel()
         self.proxyModel_list = QtCore.QSortFilterProxyModel()
         self.proxyModel_list.setSourceModel(self.sim_list)
-        self.proxyModel_list.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.proxyModel_list.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.ui.TestList.setModel(self.proxyModel_list)
         self.ui.TestList.setItemDelegate(StyleDelegateForTable_List(self.ui.TestList))
         
         self.sim_list_wafer = QtGui.QStandardItemModel()
         self.proxyModel_list_wafer = QtCore.QSortFilterProxyModel()
         self.proxyModel_list_wafer.setSourceModel(self.sim_list_wafer)
-        self.proxyModel_list_wafer.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.proxyModel_list_wafer.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.ui.WaferList.setModel(self.proxyModel_list_wafer)        
         self.ui.WaferList.setItemDelegate(StyleDelegateForTable_List(self.ui.WaferList))
         # enable multi selection
-        self.ui.TestList.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.ui.TestList.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.ui.TestList.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.ui.TestList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
-        self.ui.WaferList.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.ui.WaferList.setEditTriggers(QAbstractItemView.NoEditTriggers)        
+        self.ui.WaferList.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.ui.WaferList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)        
         # get select model and connect func to change event
         self.selModel = self.ui.TestList.selectionModel()
         self.selModel.selectionChanged.connect(self.onSelect)
@@ -524,24 +520,25 @@ class MyWindow(QtWidgets.QMainWindow):
         self.proxyModel_tmodel_dut.setSourceModel(self.tmodel_dut)
         self.ui.dutInfoTable.setSortingEnabled(True)
         self.ui.dutInfoTable.setModel(self.proxyModel_tmodel_dut)
-        self.ui.dutInfoTable.setSelectionBehavior(QAbstractItemView.SelectRows)     # select row only
+        self.ui.dutInfoTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.dutInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dutInfoTable))
         self.ui.dutInfoTable.addAction(self.ui.actionReadDutData_DS)   # add context menu for reading dut data
         # file header table
         self.tmodel_info = QtGui.QStandardItemModel()
         self.ui.fileInfoTable.setModel(self.tmodel_info)
-        self.ui.fileInfoTable.setSelectionMode(QAbstractItemView.NoSelection)
+        self.ui.fileInfoTable.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.ui.fileInfoTable.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         # self.ui.fileInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.fileInfoTable))
         # smooth scrolling
-        self.ui.datalogTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.datalogTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.dataTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.dataTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.rawDataTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.rawDataTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)        
-        self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.ui.datalogTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.datalogTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.dataTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.dataTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.rawDataTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.rawDataTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)        
+        self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
                             
     def init_Head_SiteCheckbox(self):
@@ -630,9 +627,10 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.tmodel_info.appendRow(qitemRow)
             
             # horizontalHeader.resizeSection(0, 250)
-            horizontalHeader.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            for column in range(1, horizontalHeader.count()):
-                horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+            
+            for column in range(0, horizontalHeader.count()):
+                horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+                # horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
             
             # resize to content to show all texts, then add additional height to each row
             for row in range(self.tmodel_info.rowCount()):
@@ -817,8 +815,8 @@ class MyWindow(QtWidgets.QMainWindow):
         # reset test item background color when cpk threshold is reset
         for i in range(self.sim_list.rowCount()):
             qitem = self.sim_list.item(i)
-            qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.ForegroundRole)
-            qitem.setData(QtGui.QColor.Invalid, QtCore.Qt.BackgroundRole)
+            qitem.setData(None, Qt.ItemDataRole.ForegroundRole)
+            qitem.setData(None, Qt.ItemDataRole.BackgroundRole)
                         
                        
     def refreshTestList(self):
@@ -834,11 +832,6 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def updateTestDataTable(self):
-        # update test data table if:
-        # 1. it is activated;
-        # 2. dut list changed (site & head selection changed);
-        # 3. test num selection changed;
-        # 4. tab changed
         if self.data_interface is None:
             return
         
@@ -869,183 +862,41 @@ class MyWindow(QtWidgets.QMainWindow):
     
                 
     def updateTabContent(self, forceUpdate=False):
-        '''
-        update logic:
-        if tab is not changed, insert canvas and toolbars based on test num and site
-        if tab is changed, clear all and then add canvas
-        '''
         if self.data_interface is None:
             return
         
         tabType = self.ui.tabControl.currentIndex()
-        self.clearOtherTab(tabType)     # clear other tabs' content to save memory
-        # check if redraw is required
-        # if previous tab or current tab is Wafer, no need to redraw as it has an independent listView
-        tabChanged = (tabType != self.preTab)
-        reDrawTab = tabChanged and (self.preTab != tab.Wafer) and (tabType != tab.Wafer)
-        
-        self.preTab = tabType       # save tab index everytime tab updates
-        selTests = self.getSelectedTests()    # (test_num, test_name) in trend/histo, (wafer_index, wafer_name) in wafer
-        selSites = self.getCheckedSites()
-        selHeads = self.getCheckedHeads()
-        
-        # update Test Data table in info tab only when test items are selected
+        # update Test Data table in info tab
         if tabType == tab.Info:
             self.updateTestDataTable()
             return
-        #TODO
-        return
-        '''
-        ***This following code is used for finding the index of the new image to add or old image to delete.***
-                
-        tabLayout only contans 1 widgets -- qfigWidget, which is the parent of all matplot canvas and toolbars
-        qfigWidget.children(): 1st is qfigLayout, others are canvas
-        qfigLayout contains the references to all canvas and toolbars
-        qfigLayout.itemAt(index).widget(): canvas or toolbars
-        canvas and toolbars can be deleted by  qfigLayout.itemAt(index).widget().setParent(None)
-        '''
-        canvasIndexDict = {}
-        # get tab layout
-        tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
         
-        if reDrawTab or forceUpdate:
-            # clear all contents in current tab
-            [ss.deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())[::-1]]
-            # add new widget
-            qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
-            qfigLayout = QtWidgets.QVBoxLayout()
-            qfigWidget.setLayout(qfigLayout)
-            tabLayout.addWidget(qfigWidget)
-            # clear cursor dict in current tab
+        # draw plots
+        #
+        # if previous tab or current tab is Wafer, 
+        # no need to redraw as it has an independent listView
+        tabChanged = (tabType != self.preTab)
+        redrawTab = tabChanged and (self.preTab != tab.Wafer) and (tabType != tab.Wafer)
+        # save tab index everytime tab updates
+        self.preTab = tabType
+        selTests = self.getSelectedTests()
+        selSites = self.getCheckedSites()
+        selHeads = self.getCheckedHeads()
+        
+        if redrawTab or forceUpdate:
+            #TODO clean all plots in the current layout
+            tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
+            
             if tabType == tab.Trend:
-                matchString = "trend"
+                pass
             elif tabType == tab.Histo:
-                matchString = "histo"
+                pass
+            elif tabType == tab.Wafer:
+                pass
             elif tabType == tab.Bin:
-                matchString = "bin"
-            else:
-                matchString = "wafer"
-            for key in list(self.cursorDict.keys()):
-                # remove cursors, get a default in case key not found (only happens when data is invalid in some sites)
-                if key.startswith(matchString):
-                    self.cursorDict.pop(key, None)
-        else:
-            try:
-                # get testnum/site of current canvas/toolbars and corresponding widget index
-                qfigWidget: QtWidgets.QWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
-                qfigLayout: QtWidgets.QVBoxLayout = qfigWidget.children()[0]
-            except AttributeError:
-                # in case there are no canvas (e.g. initial state), add new widget
-                qfigWidget = QtWidgets.QWidget(self.tab_dict[tabType]["scroll"])
-                qfigLayout = QtWidgets.QVBoxLayout()
-                qfigWidget.setLayout(qfigLayout)
-                tabLayout.addWidget(qfigWidget)
-                
-            canvasIndexDict = ss.getCanvasDicts(qfigLayout)    # get current indexes
-                    
-            # delete canvas/toolbars that are not selected
-            canvasIndexDict_reverse = {v:k for k, v in canvasIndexDict.items()}
-            # must delete from large index, invert dict to loop from large index
-            for index in sorted(canvasIndexDict_reverse.keys(), reverse=True):
-                (mp_head, mp_test_num, mp_pmr, mp_site, mp_test_name) = canvasIndexDict_reverse[index]
-                # if not in Bin tab: no test item selected/ test item is unselected, remove
-                # if sites are unselected, remove
-                if (tabType != tab.Bin and (len(selTests) == 0 or not (mp_test_num, mp_pmr, mp_test_name) in selTests)) or (not mp_site in selSites) or (not mp_head in selHeads):
-                    # bin don't care about testNum
-                    ss.deleteWidget(qfigLayout.itemAt(index).widget())
-                    if tabType == tab.Trend:
-                        matchString = f"trend_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}_{mp_test_name}"
-                    elif tabType == tab.Histo:
-                        matchString = f"histo_{mp_head}_{mp_test_num}_{mp_pmr}_{mp_site}_{mp_test_name}"
-                    elif tabType == tab.Bin:
-                        matchString = f"bin_{mp_head}_{mp_test_num}_{mp_site}"
-                    else:
-                        matchString = f"wafer_{mp_head}_{mp_test_num}_{mp_site}"
-                        
-                    for key in list(self.cursorDict.keys()):
-                        # remove cursors, get a default in case key not found (only happens when data is invalid in some sites)
-                        if key.startswith(matchString):
-                            self.cursorDict.pop(key, None)
-                    
-            canvasIndexDict = ss.getCanvasDicts(qfigLayout)    # update after deleting some images
-                    
-        # generate drawings in trend , histo and bin, but bin doesn't require test items selection
-        if tabType == tab.Bin or (tabType in [tab.Trend, tab.Histo, tab.Wafer] and len(selTests) > 0):
-            if tabType == tab.Bin:
-                # bin chart is independent of test items
-                for site in selSites[::-1]:
-                    for head in selHeads[::-1]:
-                        if (head, 0, 0, site) in canvasIndexDict:
-                            # no need to draw image for a existed testnum and site
-                            continue
-                        calIndex = ss.calculateCanvasIndex(0, head, site, 0, "", canvasIndexDict)
-                        # draw
-                        self.genPlot(head, site, (0, 0, ""), tabType, updateTab=True, insertIndex=calIndex)
-            else:
-                # trend, histo, wafer
-                for test_num, pmr, test_name in selTests[::-1]:
-                    for site in selSites[::-1]:
-                        for head in selHeads[::-1]:
-                            if (head, test_num, pmr, site, test_name) in canvasIndexDict:
-                                # no need to draw image for a existed testnum and site
-                                continue
-                            calIndex = ss.calculateCanvasIndex(test_num, head, site, pmr, test_name, canvasIndexDict)
-                            # draw
-                            self.genPlot(head, site, (test_num, pmr, test_name), tabType, updateTab=True, insertIndex=calIndex)
-        # remaining cases are: no test items in tab trend, histo, wafer
-        else:
-            # when no test item is selected, clear trend, histo & wafer tab content
-            if tabType in [tab.Trend, tab.Histo, tab.Wafer]:
-                tabLayout = self.tab_dict[tabType]["layout"]
-                # clear current content in the layout in reverse order - no use
-                [ss.deleteWidget(tabLayout.itemAt(i).widget()) for i in range(tabLayout.count())]
-                if tabType == tab.Trend:
-                    matchString = "trend"
-                elif tabType == tab.Histo:
-                    matchString = "histo"
-                else:
-                    matchString = "wafer"
-
-                for key in list(self.cursorDict.keys()):
-                    if key.startswith(matchString):
-                        self.cursorDict.pop(key, None)
+                pass
         
     
-    #TODO remove...
-    def resizeCellWidth(self, tableView: QtWidgets.QTableView, stretchToFit = True):
-        # set column width
-        header = tableView.horizontalHeader()
-        rowheader = tableView.verticalHeader()
-        rowheader.setDefaultAlignment(QtCore.Qt.AlignCenter)
-        
-        # set to ResizeToContents mode and get the minimum width list
-        min_widthList = []
-        for column in range(header.model().columnCount()):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-            min_widthList += [header.sectionSize(column)]   
-
-        # calcualte the width for each column
-        hHeaderWidth = header.width()
-        WL = []
-        minWidth = sum(min_widthList)
-        if stretchToFit and minWidth <= hHeaderWidth:
-            delta_wid = int((hHeaderWidth - minWidth) / len(min_widthList))
-            remain_wid = hHeaderWidth - delta_wid * len(min_widthList) - minWidth
-            # add delta to each element
-            for w in min_widthList:
-                WL.append(w + delta_wid)
-            # add remaining to the first column
-            WL[0] = WL[0] + remain_wid
-        else:
-            # too many columns that part of contents will definity be covered, add more space to column
-            WL = [w + 20 for w in min_widthList]
-                
-        for column, width in enumerate(WL):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
-            # use the calculated width
-            header.resizeSection(column, width)        
-            
-            
     def updateStatTableContent(self):
         if self.data_interface is None:
             return
@@ -1076,13 +927,11 @@ class MyWindow(QtWidgets.QMainWindow):
             horizontalHeader.setVisible(True)
             verticalHeader.setVisible(True)
             verticalHeader.setDefaultSectionSize(25)
-            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
+            verticalHeader.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # activate test statistc model
             self.ui.dataTable.setModel(self.tmodel)
             self.tmodel.layoutChanged.emit()
-            # resize table
-            # self.resizeCellWidth(self.ui.dataTable)
                 
         else:
             if tabType == tab.Bin:
@@ -1101,102 +950,17 @@ class MyWindow(QtWidgets.QMainWindow):
             horizontalHeader.setVisible(False)
             verticalHeader.setVisible(True)
             verticalHeader.setDefaultSectionSize(35)
-            verticalHeader.setDefaultAlignment(QtCore.Qt.AlignCenter)
+            verticalHeader.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # activate bin wafer model
             self.ui.dataTable.setModel(self.bwmodel)
             self.bwmodel.layoutChanged.emit()
-            # self.resizeCellWidth(self.ui.dataTable, stretchToFit=False)
                 
     
     #TODO
     def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
         '''testTuple: (test_num, pmr, test_name)'''
-        exportImg: bool = ("exportImg" in kargs) and (kargs["exportImg"] == True)
-        # create fig & canvas
-        figsize = (10, 4)
-        fig = plt.Figure(figsize=figsize)
-        fig.set_tight_layout(True)
-                
-        if tabType == tab.Trend:   # Trend
-            ax, trendLines = self.genTrendPlot(fig, head, site, testTuple)
-            
-        elif tabType == tab.Histo:   # Histogram
-            ax, recGroups = self.genHistoPlot(fig, head, site, testTuple)
-            
-        elif tabType == tab.Bin:   # Bin Chart
-            axs, recGroups = self.genBinPlot(fig, head, site)
-            
-        elif tabType == tab.Wafer:   # Wafermap
-            ax = self.genWaferPlot(fig, head, site, testTuple[0])
-            
-        if exportImg:
-            imgData = io.BytesIO()
-            fig.savefig(imgData, format="png", dpi=200, bbox_inches="tight")
-            return imgData
-        else:
-            # put figure in a canvas and display in pyqt widgets
-            test_num, pmr, test_name = testTuple
-            canvas = PlotCanvas(fig)
-            # binds to widget
-            if "updateTab" in kargs and kargs["updateTab"] and "insertIndex" in kargs:
-                qfigWidget = self.tab_dict[tabType]["layout"].itemAt(0).widget()
-                qfigLayout = qfigWidget.children()[0]
-                
-                canvas.bindToUI(qfigWidget)
-                canvas.head = head
-                canvas.site = site
-                canvas.test_num = test_num
-                canvas.pmr = pmr
-                canvas.test_name = test_name
-                canvas.priority = head + test_num + pmr + site
-                # place the fig and toolbar in the layout
-                index = kargs["insertIndex"]
-                qfigLayout.insertWidget(index, canvas)
-                
-            def connectMagCursor(_canvas:PlotCanvas, cursor:MagCursor, _ax):
-                _canvas.mpl_connect('motion_notify_event', cursor.mouse_move)
-                _canvas.mpl_connect('resize_event', cursor.canvas_resize)
-                _canvas.mpl_connect('pick_event', cursor.on_pick)
-                _canvas.mpl_connect('key_press_event', cursor.key_press)
-                _canvas.mpl_connect('key_release_event', cursor.key_release)                
-                _canvas.mpl_connect('button_press_event', cursor.button_press)
-                _ax.callbacks.connect('xlim_changed', cursor.canvas_resize)
-                _ax.callbacks.connect('ylim_changed', cursor.canvas_resize)
-                # cursor.copyBackground()   # not required, as updating the tab will trigger canvas resize event
-            
-            if tabType == tab.Trend and len(trendLines) > 0:
-                # connect magnet cursor
-                for i, trendLine in enumerate(trendLines):
-                    cursorKey = "trend_%d_%d_%d_%d_%s_%d"%(head, test_num, pmr, site, test_name, i)
-                    self.cursorDict[cursorKey] = MagCursor(line=trendLine,
-                                                           mainGUI=self)
-                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
-                    
-            elif tabType == tab.Histo and len(recGroups) > 0:
-                for i, recGroup in enumerate(recGroups):
-                    cursorKey = "histo_%d_%d_%d_%d_%s_%d"%(head, test_num, pmr, site, test_name, i)
-                    self.cursorDict[cursorKey] = MagCursor(histo=recGroup,
-                                                           mainGUI=self)
-                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
-                    
-            elif tabType == tab.Bin:
-                for i, (ax_bin, recGroup) in enumerate(zip(axs, recGroups)):
-                    if len(recGroup) == 0:
-                        # skip if no bins in the plot
-                        continue
-                    cursorKey = "bin_%d_%d_%d_%d"%(head, test_num, site, i)
-                    self.cursorDict[cursorKey] = MagCursor(binchart=recGroup,
-                                                           mainGUI=self)
-                    connectMagCursor(canvas, self.cursorDict[cursorKey], ax_bin)
-            
-            elif tabType == tab.Wafer and len(ax.collections) > 0:
-                cursorKey = "wafer_%d_%d_%d"%(head, test_num, site)
-                self.cursorDict[cursorKey] = MagCursor(wafer=ax.collections,
-                                                       mainGUI=self,
-                                                       site=site,
-                                                       wafer_num=test_num)
-                connectMagCursor(canvas, self.cursorDict[cursorKey], ax)
+        pass
             
             
     def clearOtherTab(self, currentTab):        
@@ -1205,28 +969,12 @@ class MyWindow(QtWidgets.QMainWindow):
             # wafer tab and other tab is separated in the app
             # we don't want to clean trend/histo/bin when we are in wafer tab
             [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
-            
-            if currentTab == tab.Trend:
-                # clear magic cursor as well, it contains copies of figures
-                matchString = "trend"
-            elif currentTab == tab.Histo:
-                matchString = "histo"
-            else:
-                matchString = "bin"
-
-            for key in list(self.cursorDict.keys()):
-                # keep wafer and current tabs' cursors
-                if not (key.startswith(matchString) or key.startswith("wafer")):
-                    self.cursorDict.pop(key, None)
-            
         gc.collect()
     
     
     def clearAllContents(self):
         # clear tabs' images
         [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
-        # clear magic cursor as well, it contains copies of figures
-        self.cursorDict = {}
         
         self.preTestSelection = set()
         self.preHeadSelection = set()
@@ -1344,20 +1092,20 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
         self.statusBar().showMessage(new_msg)
         if info: 
-            QtWidgets.QMessageBox.information(self, self.tr("Info"), new_msg)
+            QMessageBox.information(self, self.tr("Info"), new_msg)
         elif warning: 
-            QtWidgets.QMessageBox.warning(self, self.tr("Warning"), new_msg)
+            QMessageBox.warning(self, self.tr("Warning"), new_msg)
             logger.warning(new_msg)
         elif error:
-            QtWidgets.QMessageBox.critical(self, self.tr("Error"), new_msg)
+            QMessageBox.critical(self, self.tr("Error"), new_msg)
             # sys.exit()
         QApplication.processEvents()
         
     
-    def eventFilter(self, object, event):
+    def eventFilter(self, object, event: QtCore.QEvent):
         # modified from https://stackoverflow.com/questions/18001944/pyqt-drop-event-without-subclassing
         if object in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
-            if (event.type() == QtCore.QEvent.DragEnter):
+            if (event.type() == QtCore.QEvent.Type.DragEnter):
                 if event.mimeData().hasUrls():
                     event.accept()   # must accept the dragEnterEvent or else the dropEvent can't occur !!!
                     return True
@@ -1365,7 +1113,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     event.ignore()
                     return False
                     
-            if (event.type() == QtCore.QEvent.Drop):
+            if (event.type() == QtCore.QEvent.Type.Drop):
                 if event.mimeData().hasUrls():   # if file or link is dropped
                     urls = event.mimeData().urls()
                     paths = [url.toLocalFile() for url in urls]
