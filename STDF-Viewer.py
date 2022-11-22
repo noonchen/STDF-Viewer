@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Tue Nov 22 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -110,10 +110,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.db_dut = QtSql.QSqlDatabase.addDatabase("QSQLITE")
         # used for detecting tab changes
         self.preTab = None             
-        # used for detecting site selection changes
-        self.preSiteSelection = set()    
-        self.preHeadSelection = set()
-        self.preTestSelection = set()
+        # used for detecting selection changes
+        self.selectionTracker = {}
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
@@ -752,33 +750,35 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.ClearButton.setDisabled(False)
         
         if self.data_interface:
-            selTests = self.getSelectedTests()
-            selSites = self.getCheckedSites()
-            selHeads = self.getCheckedHeads()
-            headSiteChanged = (self.preHeadSelection != set(selHeads) or self.preSiteSelection != set(selSites))
-            testSelChanged = (self.preTestSelection != set(selTests))
-            
-            if headSiteChanged:
+            selHeads = set(self.getCheckedHeads())
+            selSites = set(self.getCheckedSites())
+            selTests = set(self.getSelectedTests())
+
+            tabChanged = currentTab != self.preTab
+            (preHeads, preSites, preTests) = self.selectionTracker.setdefault(currentTab, 
+                                                                           (None, None, None))
+            if (preHeads != selHeads or
+                preSites != selSites or
+                preTests != selTests):
+                # if any changes, update current tab
                 updateTab = True
-                if currentTab == tab.Info:
-                    # filter dut summary table if in Info tab and head & site changed
-                    self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
+                updateStat = True
             else:
-                if currentTab == tab.Bin and self.preTab == tab.Bin:
-                    # head site not changed, and user doesn't switch from Bin tab
-                    updateTab = False
-                else:
-                    # update if test selections changed
-                    updateTab = testSelChanged
+                updateTab = False
+                updateStat = False
+            
+            # if tab changed, must update 
+            # statistic table
+            updateStat = updateStat or tabChanged
                     
-            if updateTab:
+            if updateStat:
                 self.updateStatTableContent()   # update statistic table
+            if updateTab:
                 self.updateTabContent()         # update tab
             
+            self.preTab = currentTab
             # always update pre selection at last
-            self.preHeadSelection = set(selHeads)
-            self.preSiteSelection = set(selSites)
-            self.preTestSelection = set(selTests)
+            self.selectionTracker[currentTab] = (selHeads, selSites, selTests)
     
     
     def onSiteChecked(self):
@@ -861,40 +861,33 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.rawDataTable.verticalHeader().setVisible(True)
     
                 
-    def updateTabContent(self, forceUpdate=False):
+    def updateTabContent(self):
         if self.data_interface is None:
             return
         
         tabType = self.ui.tabControl.currentIndex()
+        selSites = self.getCheckedSites()
+        selHeads = self.getCheckedHeads()
         # update Test Data table in info tab
         if tabType == tab.Info:
+            # filter dut summary table if in Info tab and head & site changed
+            self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
             self.updateTestDataTable()
             return
         
-        # draw plots
-        #
-        # if previous tab or current tab is Wafer, 
-        # no need to redraw as it has an independent listView
-        tabChanged = (tabType != self.preTab)
-        redrawTab = tabChanged and (self.preTab != tab.Wafer) and (tabType != tab.Wafer)
-        # save tab index everytime tab updates
-        self.preTab = tabType
+        # draw plots        
         selTests = self.getSelectedTests()
-        selSites = self.getCheckedSites()
-        selHeads = self.getCheckedHeads()
+        #TODO clean all plots in the current layout
+        tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
         
-        if redrawTab or forceUpdate:
-            #TODO clean all plots in the current layout
-            tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
-            
-            if tabType == tab.Trend:
-                pass
-            elif tabType == tab.Histo:
-                pass
-            elif tabType == tab.Wafer:
-                pass
-            elif tabType == tab.Bin:
-                pass
+        if tabType == tab.Trend:
+            pass
+        elif tabType == tab.Histo:
+            pass
+        elif tabType == tab.Wafer:
+            pass
+        elif tabType == tab.Bin:
+            pass
         
     
     def updateStatTableContent(self):
@@ -976,9 +969,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # clear tabs' images
         [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
         
-        self.preTestSelection = set()
-        self.preHeadSelection = set()
-        self.preSiteSelection = set()
+        self.selectionTracker = {}
         gc.collect()
     
     
@@ -1084,8 +1075,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateFileHeader()
             self.updateDutSummaryTable()
             self.updateGDR_DTR_Table()
-            self.updateStatTableContent()
-            self.updateTabContent(forceUpdate=True)
+            self.onSelect()
 
     
     @Slot(str, bool, bool, bool)

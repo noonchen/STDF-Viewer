@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Tue Nov 22 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -307,7 +307,6 @@ class stdfSettings(QtWidgets.QDialog):
             refreshTable = False
             refreshList = False
             clearListBG = False
-            refreshCursor = False
             retranslate = False
             if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
                 refreshTab = True
@@ -322,7 +321,6 @@ class stdfSettings(QtWidgets.QDialog):
                     refreshList = True
                 if self.parent.ui.tabControl.currentIndex() != tab.Bin:
                     refreshTable = True
-                    refreshCursor = True
                     # if raw data table is active, update as well
                     if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
                         refreshTab = True
@@ -334,7 +332,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTab = True
                 refreshTable = True
                 
-            if refreshTab: self.parent.updateTabContent(forceUpdate=True)
+            if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.refreshTestList()
             if clearListBG: self.parent.clearTestItemBG()
