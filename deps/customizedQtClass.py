@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Tue Nov 22 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -43,20 +43,26 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
     def __init__(self, parent):
         super().__init__()
         self.parentWidget = parent
-        self.hightColor = QtGui.QColor("#0096ff")
+        self.highlightColor = QtGui.QColor("#0096FF")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        self.initStyleOption(option, index)
+        # self.initStyleOption(option, index)
         if (option.state & QtWidgets.QStyle.StateFlag.State_Selected and 
             option.state & QtWidgets.QStyle.StateFlag.State_Active):
+            # get foreground color
+            fg = self.getColor(index, isBG = False)
             # get background color
             bg = self.getColor(index, isBG = True)
             # set highlight color
+            if fg:
+                # if fg is None, do not set color
+                option.palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, 
+                                        self.mixColors(fg))
             option.palette.setColor(QtGui.QPalette.ColorRole.Highlight, 
                                     self.mixColors(bg))
         QStyledItemDelegate.paint(self, painter, option, index)
 
-    def getColor(self, index: QModelIndex, isBG = True) -> QtGui.QColor:
+    def getColor(self, index: QModelIndex, isBG = True):
         model = self.parentWidget.model()
         dataRole = Qt.ItemDataRole.BackgroundRole if isBG else Qt.ItemDataRole.ForegroundRole
         
@@ -70,6 +76,7 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
                 return model.sourceModel().data(sourceIndex, dataRole)
             
             elif (isinstance(model, TestDataTableModel) or      # test data table
+                  isinstance(model, TestStatisticTableModel) or # test stat table
                   isinstance(model, BinWaferTableModel)):       # bin/wafer table
                 # abstract table model
                 return model.data(index, dataRole)                
@@ -81,16 +88,16 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
                 sourceIndex = model.mapToSource(index)
                 return model.sourceModel().data(sourceIndex, dataRole)
         
-        return QtGui.QColor("#000000")
+        return None
         
     def mixColors(self, src) -> QtGui.QColor:
         if isinstance(src, QtGui.QColor):
-            r = int(src.red()*0.7   + self.hightColor.red()*0.3)
-            g = int(src.green()*0.7 + self.hightColor.green()*0.3)
-            b = int(src.blue()*0.7  + self.hightColor.blue()*0.3)
+            r = int(src.red()*0.7   + self.highlightColor.red()*0.3)
+            g = int(src.green()*0.7 + self.highlightColor.green()*0.3)
+            b = int(src.blue()*0.7  + self.highlightColor.blue()*0.3)
             return QtGui.QColor(r, g, b)
         else:
-            self.hightColor
+            return self.highlightColor
 
 
 def getHS(text: str):
