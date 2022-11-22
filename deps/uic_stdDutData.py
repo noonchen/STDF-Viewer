@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Tue Nov 22 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -57,9 +57,11 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
         self.translator = QTranslator(self)
-        self.sd = StyleDelegateForTable_List(self)
         self.textFont = QtGui.QFont()
         self.floatFormat = "%f"
+        
+        self.sd = StyleDelegateForTable_List(self.UI.tableView_dutData)
+        self.UI.tableView_dutData.setItemDelegate(self.sd)
         
         self.transposeBtn = QPushButton("T")
         self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
@@ -120,8 +122,6 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.UI.tableView_dutData.setModel(self.tmodel)
         self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
-        self.sd.setParent(self.UI.tableView_dutData)
-        self.UI.tableView_dutData.setItemDelegate(self.sd)    
 
         
     def onTransposeTable(self):

@@ -46,7 +46,7 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
         self.highlightColor = QtGui.QColor("#0096FF")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        # self.initStyleOption(option, index)
+        self.initStyleOption(option, index)
         if (option.state & QtWidgets.QStyle.StateFlag.State_Selected and 
             option.state & QtWidgets.QStyle.StateFlag.State_Active):
             # get foreground color
