@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Mar 09 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -48,9 +48,10 @@ class FailMarker(QtWidgets.QWidget):
         self.translator = QtCore.QTranslator(self)
                 
         self.setWindowTitle(self.tr("Searching Failed Items"))
-        self.UI.progressBar.setFormat("%p%")
     
     def start(self):
+        self.UI.progressBar.setFormat("%p%")
+        self.UI.progressBar.setValue(0)
         self.stopFlag = False   # init at start
         self.show()
         start_time = time.time()
@@ -70,14 +71,12 @@ class FailMarker(QtWidgets.QWidget):
             QApplication.processEvents()    # force refresh UI to update progress bar
             
             qitem = self.sim.item(i)
-            testTuple = self.parent.getTestTuple(qitem.text())
-            
-            status = self.parent.isTestFail(testTuple)
-            if status == "testFailed":
+            status = self.parent.isTestFail(qitem.text())
+            if status == "Fail":
                 failCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-            elif status == "cpkFailed":
+            elif status == "cpkFail":
                 cpkFailCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)

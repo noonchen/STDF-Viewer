@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Thu Nov 03 2022
+// Last Modified: Sun Nov 20 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -11,14 +11,61 @@
 
 use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use lazy_static::lazy_static;
 use rust_stdf::*;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::{fs, io};
+use zip::ZipArchive;
+
+lazy_static! {
+    static ref UNIT_PREFIX: HashMap<i32, &'static str> = HashMap::from([
+        (15, "f"),
+        (12, "p"),
+        (9, "n"),
+        (6, "u"),
+        (3, "m"),
+        (2, "%"),
+        (0, ""),
+        (-3, "K"),
+        (-6, "M"),
+        (-9, "G"),
+        (-12, "T"),
+    ]);
+}
+
+#[inline(always)]
+fn scale_unit(unit: &Option<String>, scale: i32) -> String {
+    if let Some(u) = unit {
+        format!("{}{}", UNIT_PREFIX.get(&scale).unwrap_or(&""), u)
+    } else {
+        String::new()
+    }
+}
+
+#[inline(always)]
+fn scale_option_value(value: &Option<f32>, flag: &Option<[u8; 1]>, scale: i32, mask: u8) -> f32 {
+    if let Some(f32_num) = value {
+        if let Some(valid) = flag.map(|f| f[0] & mask == 0) {
+            if valid {
+                f32_num * 10f32.powi(scale)
+            } else {
+                f32::NAN
+            }
+        } else {
+            f32::NAN
+        }
+    } else {
+        f32::NAN
+    }
+}
 
 pub struct RecordTracker {
     // file id, test num, test name -> unique test id (map size)
     id_map: HashMap<(usize, u32, String), usize>,
+
+    // unique test id -> result scale
+    scale_map: HashMap<usize, i32>,
 
     // unique test id -> low limit in 1st PTR
     default_llimit: HashMap<usize, f32>,
@@ -56,6 +103,7 @@ impl RecordTracker {
     pub fn new() -> Self {
         RecordTracker {
             id_map: HashMap::with_capacity(1024),
+            scale_map: HashMap::with_capacity(1024),
             default_llimit: HashMap::with_capacity(1024),
             default_hlimit: HashMap::with_capacity(1024),
             test_fail_count: HashMap::with_capacity(1024),
@@ -150,36 +198,46 @@ impl RecordTracker {
 
     #[inline(always)]
     pub fn hbr_detected(&mut self, file_id: usize, hbr_rec: &HBR) {
+        let bin_pf = if hbr_rec.hbin_pf == 'P' || hbr_rec.hbin_pf == 'F' {
+            hbr_rec.hbin_pf
+        } else {
+            'U'
+        };
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.hbin_tracker.get_mut(&(file_id, hbr_rec.hbin_num)) {
             // update name & Pass/Fail if exist
             if !hbr_rec.hbin_nam.is_empty() {
                 *name = hbr_rec.hbin_nam.clone();
             };
-            *pf = hbr_rec.hbin_pf;
+            *pf = bin_pf;
         } else {
             // insert if not exist
             self.hbin_tracker.insert(
                 (file_id, hbr_rec.hbin_num),
-                (hbr_rec.hbin_nam.clone(), hbr_rec.hbin_pf),
+                (hbr_rec.hbin_nam.clone(), bin_pf),
             );
         }
     }
 
     #[inline(always)]
     pub fn sbr_detected(&mut self, file_id: usize, sbr_rec: &SBR) {
+        let bin_pf = if sbr_rec.sbin_pf == 'P' || sbr_rec.sbin_pf == 'F' {
+            sbr_rec.sbin_pf
+        } else {
+            'U'
+        };
         // since HBR is valid, we can drop the inferred info from PRR
         if let Some((name, pf)) = self.sbin_tracker.get_mut(&(file_id, sbr_rec.sbin_num)) {
             // update name & Pass/Fail if exist
             if !sbr_rec.sbin_nam.is_empty() {
                 *name = sbr_rec.sbin_nam.clone();
             };
-            *pf = sbr_rec.sbin_pf;
+            *pf = bin_pf;
         } else {
             // insert if not exist
             self.sbin_tracker.insert(
                 (file_id, sbr_rec.sbin_num),
-                (sbr_rec.sbin_nam.clone(), sbr_rec.sbin_pf),
+                (sbr_rec.sbin_nam.clone(), bin_pf),
             );
         }
     }
@@ -203,6 +261,22 @@ impl RecordTracker {
                 .insert((file_id, head_num), wafer_index);
         };
         wafer_index
+    }
+
+    /// return (exist, scale) for [PTR], [MPR]
+    #[inline(always)]
+    pub fn update_scale(&mut self, test_id: usize, scale: &Option<i8>) -> (bool, i32) {
+        match self.scale_map.get(&test_id) {
+            Some(s) => (true, *s),
+            None => {
+                // new test_id, insert into map
+                // if scale is None, use 0 instead, for
+                // it have no effect on the result
+                let s = scale.unwrap_or(0) as i32;
+                self.scale_map.insert(test_id, s);
+                (false, s)
+            }
+        }
     }
 
     /// return (dut_index, test_id) for [PTR], [FTR], [MPR] or maybe [STR] in the future
@@ -239,24 +313,17 @@ impl RecordTracker {
 
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
-    pub fn update_default_limits(
-        &mut self,
-        test_id: usize,
-        llimit: Option<f32>,
-        hlimit: Option<f32>,
-    ) -> bool {
+    pub fn update_default_limits(&mut self, test_id: usize, llimit: f32, hlimit: f32) -> bool {
         let llimit_exist = self.default_llimit.contains_key(&test_id);
         let hlimit_exist = self.default_hlimit.contains_key(&test_id);
 
         if !llimit_exist {
             // update llimit
-            self.default_llimit
-                .insert(test_id, llimit.unwrap_or(f32::NAN));
+            self.default_llimit.insert(test_id, llimit);
         }
         if !hlimit_exist {
             // update hlimit
-            self.default_hlimit
-                .insert(test_id, hlimit.unwrap_or(f32::NAN));
+            self.default_hlimit.insert(test_id, hlimit);
         }
         llimit_exist && hlimit_exist
     }
@@ -269,30 +336,27 @@ impl RecordTracker {
     pub fn is_ptr_limits_changed(
         &self,
         test_id: usize,
-        llimit: Option<f32>,
-        hlimit: Option<f32>,
+        llimit: f32,
+        hlimit: f32,
     ) -> Result<(bool, bool), StdfHelperError> {
         // llimit
-        let llimit_changed = llimit.is_some()
-            && match self.default_llimit.get(&test_id) {
-                Some(dft_ll) => {
-                    // unwrap is safe here, since we have a is_some() precondition
-                    // when the float number difference > epsilon, means limit changed
-                    Ok((llimit.unwrap() - *dft_ll).abs() > f32::EPSILON)
-                }
-                None => Err(StdfHelperError {
-                    msg: "Default low limit can not be read...this should never happen".to_string(),
-                }),
-            }?;
+        let llimit_changed = match self.default_llimit.get(&test_id) {
+            Some(dft_ll) => {
+                // NAN - NAN > EPSILON is `false`
+                // meaning if limit is NAN, it will return false
+                Ok((llimit - *dft_ll).abs() > f32::EPSILON)
+            }
+            None => Err(StdfHelperError {
+                msg: "Default low limit can not be read...this should never happen".to_string(),
+            }),
+        }?;
         // hlimit
-        let hlimit_changed = hlimit.is_some()
-            && match self.default_hlimit.get(&test_id) {
-                Some(dft_hl) => Ok((hlimit.unwrap() - *dft_hl).abs() > f32::EPSILON),
-                None => Err(StdfHelperError {
-                    msg: "Default high limit can not be read...this should never happen"
-                        .to_string(),
-                }),
-            }?;
+        let hlimit_changed = match self.default_hlimit.get(&test_id) {
+            Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
+            None => Err(StdfHelperError {
+                msg: "Default high limit can not be read...this should never happen".to_string(),
+            }),
+        }?;
         Ok((llimit_changed, hlimit_changed))
     }
 
@@ -320,19 +384,40 @@ impl RecordTracker {
     #[inline(always)]
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
-        let test_id =
-            match self
-                .id_map
-                .get(&(file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string()))
-            {
-                Some(id) => Ok(*id),
-                None => Err(StdfHelperError {
-                    msg: format!(
-                    "File[{}]: test num [{}] test name [{}] in TSR is not seen in any PTR/FTR/MPR ",
-                    file_id, tsr_rec.test_num, tsr_rec.test_nam
-                ),
-                }),
-            }?;
+        let test_id = match self.id_map.get(&(
+            file_id,
+            tsr_rec.test_num,
+            tsr_rec.test_nam.to_string(),
+        )) {
+            Some(id) => Ok(*id),
+            None => {
+                // in some stdf files, the test name in TSR might be different
+                // in PTR/MPR/FTR, in this case, we should find the test id that
+                // file id and test number matched
+                match self
+                    .id_map
+                    .keys()
+                    .find(|&key| key.0 == file_id && key.1 == tsr_rec.test_num)
+                {
+                    Some(key) => {
+                        println!("TSR: [{}\t{}] matches no records in File[{}], use test name [{}] instead", 
+                        tsr_rec.test_num, tsr_rec.test_nam, file_id, &key.2);
+                        // this unwrap is infallible
+                        Ok(*self.id_map.get(key).unwrap())
+                    }
+                    None => {
+                        // if fild id and test number cannot match any key,
+                        // report this error
+                        Err(StdfHelperError {
+                            msg: format!(
+                                "Test number [{}] in TSR matches no records in File[{}]",
+                                tsr_rec.test_num, file_id
+                            ),
+                        })
+                    }
+                }
+            }
+        }?;
         // update fail cnt hashmap, only when fail cnt is valid
         if tsr_rec.fail_cnt != u32::MAX {
             if let Some(cnt) = self.test_fail_count.get_mut(&test_id) {
@@ -386,18 +471,12 @@ pub fn process_incoming_record(
     rec_info: (usize, ByteOrder, u64, usize, StdfRecord),
 ) -> Result<(), StdfHelperError> {
     // unpack info
-    let (file_id, order, offset, data_len, rec) = rec_info;
+    let (file_id, order, _offset, _data_len, rec) = rec_info;
     match rec {
         // // rec type 15
-        StdfRecord::PTR(ptr_rec) => {
-            on_ptr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ptr_rec)?
-        }
-        StdfRecord::MPR(mpr_rec) => {
-            on_mpr_rec(db_ctx, rec_tracker, file_id, offset, data_len, mpr_rec)?
-        }
-        StdfRecord::FTR(ftr_rec) => {
-            on_ftr_rec(db_ctx, rec_tracker, file_id, offset, data_len, ftr_rec)?
-        }
+        StdfRecord::PTR(ptr_rec) => on_ptr_rec(db_ctx, rec_tracker, file_id, ptr_rec)?,
+        StdfRecord::MPR(mpr_rec) => on_mpr_rec(db_ctx, rec_tracker, file_id, mpr_rec)?,
+        StdfRecord::FTR(ftr_rec) => on_ftr_rec(db_ctx, rec_tracker, file_id, ftr_rec)?,
         // StdfRecord::STR(str_rec) => str_rec.read_from_bytes(raw_data, order),
         // // rec type 5
         StdfRecord::PIR(pir_rec) => on_pir_rec(db_ctx, rec_tracker, file_id, pir_rec)?,
@@ -556,12 +635,12 @@ fn on_mir_rec(
     mir_rec: MIR,
 ) -> Result<(), StdfHelperError> {
     // update File_List table
-    db_ctx.insert_file_list(rusqlite::params![
-        file_id,
+    db_ctx.update_file_list(rusqlite::params![
         &mir_rec.lot_id,
         &mir_rec.sblot_id,
         &mir_rec.proc_id,
-        &mir_rec.flow_id
+        &mir_rec.flow_id,
+        file_id
     ])?;
     // update File_Info table
     db_ctx.insert_file_info(rusqlite::params![
@@ -852,7 +931,7 @@ fn on_pir_rec(
         file_id,
         pir_rec.head_num,
         pir_rec.site_num,
-        dut_index
+        dut_index,
     ])?;
     Ok(())
 }
@@ -862,8 +941,6 @@ fn on_ptr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
     ptr_rec: PTR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
@@ -875,12 +952,26 @@ fn on_ptr_rec(
         ptr_rec.test_num,
         &ptr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    // get or update result scale
+    let (exist, scale) = tracker.update_scale(test_id, &ptr_rec.res_scal);
+    // insert ptr result
+    db_ctx.insert_ptr_data(rusqlite::params![
+        dut_index,
+        test_id,
+        ptr_rec.result * 10f32.powi(scale),
+        ptr_rec.test_flg[0]
+    ])?;
 
-    // if test id is not presented in llimit/hlimit hashmap
-    if !tracker.update_default_limits(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit) {
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        // need to apply result scale to limits and units
+        let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);
+        let hi_limit = scale_option_value(&ptr_rec.hi_limit, &ptr_rec.opt_flag, scale, 0xA0);
+        let lo_spec = scale_option_value(&ptr_rec.lo_spec, &ptr_rec.opt_flag, scale, 0x04);
+        let hi_spec = scale_option_value(&ptr_rec.hi_spec, &ptr_rec.opt_flag, scale, 0x08);
+        let unit = scale_unit(&ptr_rec.units, scale);
+
+        tracker.update_default_limits(test_id, lo_limit, hi_limit);
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
             test_id,
@@ -888,15 +979,15 @@ fn on_ptr_rec(
             10, // PTR sub code
             ptr_rec.test_txt,
             ptr_rec.res_scal,
-            ptr_rec.lo_limit,
-            ptr_rec.hi_limit,
-            ptr_rec.units,
+            lo_limit,
+            hi_limit,
+            unit,
             ptr_rec.opt_flag.map(|f| f[0]),
             -1,          // fail cnt, default -1
             None::<u16>, // RTN_ICNT for FTR & MPR
             None::<u16>, // RSLT or PGM for MPR or FTR
-            ptr_rec.lo_spec,
-            ptr_rec.hi_spec,
+            lo_spec,
+            hi_spec,
             None::<String>,                       // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
@@ -906,28 +997,22 @@ fn on_ptr_rec(
     else {
         // only when opt_flag is valid
         if let Some(opt_flag) = ptr_rec.opt_flag {
-            let (llimit_changed, hlimit_changed) =
-                tracker.is_ptr_limits_changed(test_id, ptr_rec.lo_limit, ptr_rec.hi_limit)?;
+            // default limits are scaled, we need to scale current limits as well
+            let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);
+            let hi_limit = scale_option_value(&ptr_rec.hi_limit, &ptr_rec.opt_flag, scale, 0xA0);
 
-            let update_llimit =
-                llimit_changed && (opt_flag[0] & 0x10 == 0) && (opt_flag[0] & 0x40 == 0);
-            let update_hlimit =
-                hlimit_changed && (opt_flag[0] & 0x20 == 0) && (opt_flag[0] & 0x80 == 0);
+            let (llimit_changed, hlimit_changed) =
+                tracker.is_ptr_limits_changed(test_id, lo_limit, hi_limit)?;
+
+            let update_llimit = llimit_changed && (opt_flag[0] & 0x50 == 0);
+            let update_hlimit = hlimit_changed && (opt_flag[0] & 0xA0 == 0);
 
             if update_llimit || update_hlimit {
                 db_ctx.insert_dynamic_limit(rusqlite::params![
                     dut_index,
                     test_id,
-                    if update_llimit {
-                        ptr_rec.lo_limit
-                    } else {
-                        None
-                    },
-                    if update_hlimit {
-                        ptr_rec.hi_limit
-                    } else {
-                        None
-                    },
+                    if update_llimit { Some(lo_limit) } else { None },
+                    if update_hlimit { Some(hi_limit) } else { None },
                 ])?;
             }
         }
@@ -940,9 +1025,7 @@ fn on_mpr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
-    mpr_rec: MPR,
+    mut mpr_rec: MPR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
     // get id map if existed
@@ -953,13 +1036,38 @@ fn on_mpr_rec(
         mpr_rec.test_num,
         &mpr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    let (exist, scale) = tracker.update_scale(test_id, &mpr_rec.res_scal);
+    // scale MPR result array
+    mpr_rec
+        .rtn_rslt
+        .iter_mut()
+        .for_each(|x| *x *= 10f32.powi(scale));
+    // serialize result array and stat array using hex
+    let rslt_hex = hex::encode_upper({
+        unsafe {
+            let u8ptr = std::mem::transmute::<*const _, *const u8>(mpr_rec.rtn_rslt.as_ptr());
+            std::slice::from_raw_parts(u8ptr, mpr_rec.rtn_rslt.len() * 4)
+        }
+    });
+    let stat_hex = hex::encode_upper(mpr_rec.rtn_stat);
+    // insert mpr data
+    db_ctx.insert_mpr_data(rusqlite::params![
+        dut_index,
+        test_id,
+        rslt_hex,
+        stat_hex,
+        mpr_rec.test_flg[0]
+    ])?;
 
-    // FTR doesn't have high/low limit, but we can still use this hashmap to check
-    // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
-    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
+        // scale limits
+        let lo_limit = scale_option_value(&mpr_rec.lo_limit, &mpr_rec.opt_flag, scale, 0x50);
+        let hi_limit = scale_option_value(&mpr_rec.hi_limit, &mpr_rec.opt_flag, scale, 0xA0);
+        let lo_spec = scale_option_value(&mpr_rec.lo_spec, &mpr_rec.opt_flag, scale, 0x04);
+        let hi_spec = scale_option_value(&mpr_rec.hi_spec, &mpr_rec.opt_flag, scale, 0x08);
+        let unit = scale_unit(&mpr_rec.units, scale);
+
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
             test_id,
@@ -967,15 +1075,15 @@ fn on_mpr_rec(
             15, // MPR sub code
             mpr_rec.test_txt,
             mpr_rec.res_scal,
-            mpr_rec.lo_limit,
-            mpr_rec.hi_limit,
-            mpr_rec.units, // unit
+            lo_limit,
+            hi_limit,
+            unit, // unit
             mpr_rec.opt_flag.map(|f| f[0]),
             -1,               // fail cnt, default -1
             mpr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
             mpr_rec.rslt_cnt, // RSLT for MPR, or PGM for FTR
-            mpr_rec.lo_spec,
-            mpr_rec.hi_spec,
+            lo_spec,
+            hi_spec,
             None::<String>,                       // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
@@ -995,8 +1103,6 @@ fn on_ftr_rec(
     db_ctx: &mut DataBaseCtx,
     tracker: &mut RecordTracker,
     file_id: usize,
-    offset: u64,
-    data_len: usize,
     ftr_rec: FTR,
 ) -> Result<(), StdfHelperError> {
     // get dut_index of (head, site)
@@ -1008,12 +1114,14 @@ fn on_ftr_rec(
         ftr_rec.test_num,
         &ftr_rec.test_txt,
     )?;
-    // insert test offset
-    db_ctx.insert_test_rec(rusqlite::params![dut_index, test_id, offset, data_len])?;
+    // insert ftr test flag
+    db_ctx.insert_ftr_data(rusqlite::params![dut_index, test_id, ftr_rec.test_flg[0]])?;
 
-    // FTR doesn't have high/low limit, but we can still use this hashmap to check
+    // FTR doesn't have result scale, but we can still use this hashmap to check
     // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
-    if !tracker.update_default_limits(test_id, Some(f32::NAN), Some(f32::NAN)) {
+    // get or update result scale
+    let (exist, _) = tracker.update_scale(test_id, &Some(0));
+    if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         db_ctx.insert_test_info(rusqlite::params![
             file_id,
@@ -1022,15 +1130,15 @@ fn on_ftr_rec(
             20, // FTR sub code
             ftr_rec.test_txt,
             None::<i8>,
-            None::<f32>,
-            None::<f32>,
+            f32::NAN,
+            f32::NAN,
             "", // unit
-            ftr_rec.opt_flag,
+            ftr_rec.opt_flag[0],
             -1,               // fail cnt, default -1
             ftr_rec.rtn_icnt, // RTN_ICNT for FTR & MPR
             ftr_rec.pgm_icnt, // RSLT for MPR, or PGM for FTR
-            None::<f32>,
-            None::<f32>,
+            f32::NAN,
+            f32::NAN,
             ftr_rec.vect_nam,                     // VECT_NAM
             tracker.get_program_section(file_id), // SEQ_NAM
         ])?;
@@ -1065,7 +1173,48 @@ fn on_prr_rec(
     // get dut_index
     // get wafer_index if WIR is detected
     let (dut_index, wafer_index) = tracker.prr_detected(file_id, &prr_rec)?;
+    let part_flg = prr_rec.part_flg[0];
+    let x_coord = match prr_rec.x_coord != -32768 {
+        // use NULL to replace -32768
+        true => Some(prr_rec.x_coord), // in order to reduce db size
+        false => None,
+    };
+    let y_coord = match prr_rec.y_coord != -32768 {
+        true => Some(prr_rec.y_coord),
+        false => None,
+    };
+
+    // check if current dut supersedes previous duts
+    // must do it before updating current PRR
+    // otherwise current dut will be marked as superseded as well
+    let supersede_dut = part_flg & 1u8 == 1u8;
+    let supersede_die = part_flg & 2u8 == 2u8;
+    if supersede_dut {
+        // set previous dut with same fid, head, site and part_id as superseded
+        db_ctx.update_supersede_dut(rusqlite::params![
+            file_id,
+            prr_rec.head_num,
+            prr_rec.site_num,
+            prr_rec.part_id,
+        ])?;
+    }
+    if supersede_die {
+        // set previous dut with same fid, head, site, wafer_index, x and y as superseded
+        db_ctx.update_supersede_die(rusqlite::params![
+            file_id,
+            prr_rec.head_num,
+            prr_rec.site_num,
+            wafer_index,
+            x_coord,
+            y_coord
+        ])?;
+    }
+
     // update PRR info to database
+    //
+    // `supersede` status may have been
+    // set to 1 by code above, we need
+    // to set it back to 0
     db_ctx.update_dut(rusqlite::params![
         prr_rec.num_test,
         prr_rec.test_t,
@@ -1074,15 +1223,9 @@ fn on_prr_rec(
         prr_rec.soft_bin,
         prr_rec.part_flg[0],
         wafer_index,
-        match prr_rec.x_coord != -32768 {
-            // use NULL to replace -32768
-            true => Some(prr_rec.x_coord), // in order to reduce db size
-            false => None,
-        },
-        match prr_rec.y_coord != -32768 {
-            true => Some(prr_rec.y_coord),
-            false => None,
-        },
+        x_coord,
+        y_coord,
+        0,
         file_id,
         dut_index
     ])?;
@@ -1146,7 +1289,7 @@ fn on_wcr_rec(
     if wcr_rec.wf_units != 0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
-            "DIE_WID",
+            "WF_UNITS",
             match wcr_rec.wf_units {
                 1 => "inch",
                 2 => "cm",
@@ -1241,22 +1384,10 @@ fn on_wrr_rec(
         wrr_rec.head_num,
         wafer_index,
         wrr_rec.part_cnt,
-        match wrr_rec.rtst_cnt != u32::MAX {
-            true => Some(wrr_rec.rtst_cnt),
-            false => None,
-        },
-        match wrr_rec.abrt_cnt != u32::MAX {
-            true => Some(wrr_rec.abrt_cnt),
-            false => None,
-        },
-        match wrr_rec.good_cnt != u32::MAX {
-            true => Some(wrr_rec.good_cnt),
-            false => None,
-        },
-        match wrr_rec.func_cnt != u32::MAX {
-            true => Some(wrr_rec.func_cnt),
-            false => None,
-        },
+        wrr_rec.rtst_cnt,
+        wrr_rec.abrt_cnt,
+        wrr_rec.good_cnt,
+        wrr_rec.func_cnt,
         wrr_rec.wafer_id,
         wrr_rec.fabwf_id,
         wrr_rec.frame_id,
@@ -1289,7 +1420,7 @@ fn on_tsr_rec(
     // in this case, I have to manually consume
     // this error for compatibility.
     if let Err(e) = tracker.tsr_detected(file_id, &tsr_rec) {
-        println!("Manually consumed TSR error: {}", e.msg);
+        println!("TSR warning: {}", e.msg);
     }
     Ok(())
 }
@@ -1305,22 +1436,10 @@ fn on_pcr_rec(
         pcr_rec.head_num,
         pcr_rec.site_num,
         pcr_rec.part_cnt,
-        match pcr_rec.rtst_cnt != u32::MAX {
-            true => Some(pcr_rec.rtst_cnt),
-            false => None,
-        },
-        match pcr_rec.abrt_cnt != u32::MAX {
-            true => Some(pcr_rec.abrt_cnt),
-            false => None,
-        },
-        match pcr_rec.good_cnt != u32::MAX {
-            true => Some(pcr_rec.good_cnt),
-            false => None,
-        },
-        match pcr_rec.func_cnt != u32::MAX {
-            true => Some(pcr_rec.func_cnt),
-            false => None,
-        },
+        pcr_rec.rtst_cnt,
+        pcr_rec.abrt_cnt,
+        pcr_rec.good_cnt,
+        pcr_rec.func_cnt,
     ])?;
     Ok(())
 }
@@ -1641,6 +1760,10 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
         let mut buffer = [0u8; 4];
         fp.read_exact(&mut buffer)?;
         Ok(u32::from_le_bytes(buffer).into())
+    } else if file_path.ends_with(".zip") {
+        let mut za = ZipArchive::new(fp)?;
+        let fst_file = za.by_index(0)?;
+        Ok(fst_file.size())
     } else {
         // binary file
         Ok(fp.metadata()?.len())

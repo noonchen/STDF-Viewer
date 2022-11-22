@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Dec 09 2021
+# Last Modified: Tue Nov 22 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -70,6 +70,42 @@ indexDic_sortby = {0: "Original",
 indexDic_sortby_reverse = {v:k for k, v in indexDic_sortby.items()}
 
 rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+
+
+class SettingParams:
+    def __init__(self):
+        # trend
+        self.showHL_trend = True
+        self.showLL_trend = True
+        self.showHSpec_trend = True
+        self.showLSpec_trend = True
+        self.showMed_trend = True
+        self.showMean_trend = True
+        # histo
+        self.showHL_histo = True
+        self.showLL_histo = True
+        self.showHSpec_histo = True
+        self.showLSpec_histo = True
+        self.showMed_histo = True
+        self.showMean_histo = True
+        self.showGaus_histo = True
+        self.showBoxp_histo = True
+        self.binCount = 30
+        self.showSigma = "3, 6, 9"
+        # General
+        self.language = "English"
+        self.recentFolder = ""
+        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
+        self.dataPrecision = 3
+        self.checkCpk = False
+        self.cpkThreshold = 1.33
+        self.sortTestList = "Original"
+        # colors
+        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
+                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
+        self.sbinColor = {}
+        self.hbinColor = {}
+
 
 class colorBtn(QtWidgets.QWidget):
     def __init__(self, parent=None, name="", num=None):
@@ -271,7 +307,6 @@ class stdfSettings(QtWidgets.QDialog):
             refreshTable = False
             refreshList = False
             clearListBG = False
-            refreshCursor = False
             retranslate = False
             if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
                 refreshTab = True
@@ -286,7 +321,6 @@ class stdfSettings(QtWidgets.QDialog):
                     refreshList = True
                 if self.parent.ui.tabControl.currentIndex() != tab.Bin:
                     refreshTable = True
-                    refreshCursor = True
                     # if raw data table is active, update as well
                     if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
                         refreshTab = True
@@ -298,11 +332,10 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTab = True
                 refreshTable = True
                 
-            if refreshTab: self.parent.updateTabContent(forceUpdate=True)
+            if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.refreshTestList()
             if clearListBG: self.parent.clearTestItemBG()
-            if refreshCursor: self.parent.updateCursorPrecision()
             if retranslate: self.parent.changeLanguage()
                 
             # need to update orignal params after updating parent settings
@@ -326,11 +359,11 @@ class stdfSettings(QtWidgets.QDialog):
                 cB.setParent(None)
     
     
-    def initColorBtns(self):
+    def initColorBtns(self, availableSites: set, SBIN_dict: dict, HBIN_dict: dict):
         # site color picker
         site_color_group = self.settingsUI.site_groupBox
         site_gridLayout = self.settingsUI.gridLayout_site_color
-        for i, siteNum in enumerate([-1]+[i for i in self.parent.availableSites]):
+        for i, siteNum in enumerate([-1]+[i for i in availableSites]):
             siteName = f"Site {siteNum:<2}" if siteNum != -1 else "All Site"
             cB = colorBtn(parent=site_color_group, name=siteName, num=siteNum)
             row = i//3
@@ -340,7 +373,7 @@ class stdfSettings(QtWidgets.QDialog):
         # sbin color picker
         sbin_color_group = self.settingsUI.sbin_groupBox
         sbin_gridLayout = self.settingsUI.gridLayout_sbin_color
-        for i, sbin in enumerate([i for i in sorted(self.parent.SBIN_dict.keys())]):
+        for i, sbin in enumerate([i for i in sorted(SBIN_dict.keys())]):
             binName = f"SBIN {sbin:<2}"
             cB = colorBtn(parent=sbin_color_group, name=binName, num=sbin)
             row = i//3
@@ -350,7 +383,7 @@ class stdfSettings(QtWidgets.QDialog):
         # hbin color picker
         hbin_color_group = self.settingsUI.hbin_groupBox
         hbin_gridLayout = self.settingsUI.gridLayout_hbin_color
-        for i, hbin in enumerate([i for i in sorted(self.parent.HBIN_dict.keys())]):
+        for i, hbin in enumerate([i for i in sorted(HBIN_dict.keys())]):
             binName = f"HBIN {hbin:<2}"
             cB = colorBtn(parent=hbin_color_group, name=binName, num=hbin)
             row = i//3

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Feb 04 2022
+# Last Modified: Mon Nov 21 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,7 +24,7 @@
 
 
 
-import time, os, sys, logging
+import time, os, sys, logging, uuid
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
@@ -38,7 +38,9 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # from PySide6.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
-from .cystdf import stdfDataRetriever     # cython version
+# from .cystdf import stdfDataRetriever     # cython version
+import rust_stdf_helper
+from deps.DataInterface import DataInterface
 
 
 logger = logging.getLogger("STDF Viewer")
@@ -50,13 +52,13 @@ class flags:
 class signal4Loader(QtCore.QObject):
     # get progress from reader
     progressBarSignal = Signal(int)
-    # get parse status from reader
-    parseStatusSignal_reader = Signal(bool)
+    # get `DataInterface` from reader
+    dataInterfaceSignal_reader = Signal(object)
     # get close signal
     closeSignal = Signal(bool)
     
-    # parse status signal from parent
-    parseStatusSignal_parent = None
+    # object signal from parent
+    dataInterfaceSignal_parent = None
     # status bar signal from parent
     msgSignal = None
 
@@ -71,22 +73,24 @@ class stdfLoader(QtWidgets.QDialog):
         
         self.signals = signal4Loader()
         self.signals.progressBarSignal.connect(self.updateProgressBar)
-        self.signals.parseStatusSignal_reader.connect(self.sendParseSignal)
+        self.signals.dataInterfaceSignal_reader.connect(self.sendDataInterface)
         self.signals.closeSignal.connect(self.closeLoader)
         
-        self.signals.parseStatusSignal_parent = getattr(parentSignal, "parseStatusSignal", None)
+        self.signals.dataInterfaceSignal_parent = getattr(parentSignal, "dataInterfaceSignal", None)
         self.signals.msgSignal = getattr(parentSignal, "statusSignal", None)
         
         self.loaderUI = Ui_loadingUI()
         self.loaderUI.setupUi(self)
         self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         
-    def loadFile(self, stdPath):
+    def loadFile(self, stdPaths: list[str]):
         self.closeEventByThread = False    # init at new file
+        self.loaderUI.progressBar.setFormat("0.00%%")
+        self.loaderUI.progressBar.setValue(0)
         # create new thread and move stdReader to the new thread
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
-        self.reader.readThis(stdPath)
+        self.reader.readThis(stdPaths)
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
@@ -118,17 +122,17 @@ class stdfLoader(QtWidgets.QDialog):
     @Slot(int)
     def updateProgressBar(self, num):
         if num == 10000:
-            self.loaderUI.progressBar.setFormat("Updating GUI...")
+            self.loaderUI.progressBar.setFormat("Loading database...")
             self.loaderUI.progressBar.setValue(num)
         else:
             # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
             self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
             self.loaderUI.progressBar.setValue(num)
         
-    @Slot(bool)
-    def sendParseSignal(self, parseStatus):
-        # parse parse status from reader to mainUI
-        self.signals.parseStatusSignal_parent.emit(parseStatus)
+    @Slot(object)
+    def sendDataInterface(self, di: object):
+        # send `DataInterface` from reader to mainUI
+        self.signals.dataInterfaceSignal_parent.emit(di)
     
     @Slot(bool)
     def closeLoader(self, closeUI):
@@ -144,50 +148,61 @@ class stdfLoader(QtWidgets.QDialog):
 class stdReader(QtCore.QObject):
     def __init__(self, QSignal:signal4Loader):
         super().__init__()
-        self.parseStatus = True     # default success
         if (QSignal is None or
-            QSignal.parseStatusSignal_reader is None or
+            QSignal.dataInterfaceSignal_reader is None or
             QSignal.msgSignal is None):
             raise ValueError("Qsignal is invalid, parse is terminated")
         
         self.QSignals = QSignal
         self.progressBarSignal = self.QSignals.progressBarSignal
         self.closeSignal = self.QSignals.closeSignal
-        self.parseStatusSignal = self.QSignals.parseStatusSignal_reader
+        self.dataInterfaceSignal = self.QSignals.dataInterfaceSignal_reader
         self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
         
-    def readThis(self, stdPath):
-        self.stdPath = stdPath
+    def readThis(self, stdPaths: list[str]):
+        self.stdPaths = stdPaths
         
     @Slot()
     def readBegin(self):
+        di = DataInterface(self.stdPaths)
+        sendDI = True
+        showWarning = False
+        finalMsg = ""
+
         try:
             if self.msgSignal: self.msgSignal.emit("Loading STD file...", False, False, False)
             start = time.time()
-            databasePath = os.path.join(sys.rootFolder, "logs", "tmp_new.db")
-            stdfDataRetriever(filepath=self.stdPath, dbPath=databasePath, QSignal=self.progressBarSignal, flag=self.flag)
+            # auto generate a database name
+            databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
+            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.progressBarSignal, self.flag)
             end = time.time()
-            print(end - start)
             if self.flag.stop:
-                # user terminated
-                self.parseStatus = False
-                if self.msgSignal: self.msgSignal.emit("Loading cancelled by user", False, False, False)
+                # user terminated...
+                sendDI = False
+                finalMsg = "Loading cancelled by user"
             else:
-                self.parseStatus = True
-                if self.msgSignal: self.msgSignal.emit("Load completed, process time %.3f sec"%(end - start), False, False, False)
-            self.parseStatusSignal.emit(self.parseStatus)
+                # send Data_interface object
+                # sqlite cannot be used between thread
+                # thus we need to store the db path and
+                # load database in the main thread
+                di.dbPath = databasePath
+                finalMsg = f"Load completed, process time {end - start :.3f} sec"
                 
         except Exception as e:
-            self.parseStatus = False
-            self.parseStatusSignal.emit(self.parseStatus)
+            # set stop flag to True to stop rust process
+            # in case it's an exception from python code
+            self.flag.stop = True
+            # clean data interface
+            di.close()
             logger.exception("\nError occurred when parsing the file")
-            if self.msgSignal: self.msgSignal.emit(str(e), False, True, False)
+            sendDI = False
+            showWarning = True
+            finalMsg = str(e)
             
-        finally:
-            # parse signal cannot be emitted in finally block
-            # since it will execute before except block
-            self.closeSignal.emit(True)     # close loaderUI
+        self.dataInterfaceSignal.emit(di if sendDI else None)
+        if self.msgSignal: self.msgSignal.emit(finalMsg, False, showWarning, False)
+        self.closeSignal.emit(True)     # close loaderUI
         
 
     

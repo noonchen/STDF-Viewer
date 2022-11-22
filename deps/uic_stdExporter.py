@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sun Mar 13 2022
+# Last Modified: Fri Nov 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -842,9 +842,9 @@ class stdfExporter(QtWidgets.QDialog):
             self.exportUI.gridLayout_site.addWidget(self.site_cb_dict[siteNum], row, col)
         
         
-    def refreshUI(self):
+    def refreshUI(self, completeTestList):
         # get all test items from mainUI
-        self.remainTestItems = self.parent.completeTestList      # mutable
+        self.remainTestItems = completeTestList      # mutable
         #TODO get background color of all test items
         self.exportTestItems = []
         self.AllTestItems = tuple(self.remainTestItems)     # immutable, prevent parent list from modifying
