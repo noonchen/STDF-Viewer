@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Wed Nov 23 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -26,7 +26,7 @@ class DataInterface:
     The main purpose is to decouple IO code from GUI logic...
     '''
     
-    def __init__(self, paths: list[str]):
+    def __init__(self, paths: list[list[str]]):
         self.file_paths = paths
         self.num_files = len(paths)
         self.DatabaseFetcher = DatabaseFetcher(self.num_files)
@@ -88,9 +88,10 @@ class DataInterface:
             return metaDataList
         # some basic os info
         get_file_size = lambda p: "%.2f MB"%(os.stat(p).st_size / 2**20)
-        metaDataList.append(["File Name: ", *list(map(os.path.basename, self.file_paths)) ])
-        metaDataList.append(["Directory Path: ", *list(map(os.path.dirname, self.file_paths)) ])
-        metaDataList.append(["File Size: ", *list(map(get_file_size, self.file_paths)) ])
+        add_i_ifmany = lambda l: l if len(l) < 2 else [f"#{i+1} → {e}" for i, e in enumerate(l)]
+        metaDataList.append(["File Name: ", *list(["\n".join(add_i_ifmany(list(map(os.path.basename, fg)))) for fg in self.file_paths]) ])
+        metaDataList.append(["Directory Path: ", *list([os.path.dirname(fg[0]) for fg in self.file_paths]) ])
+        metaDataList.append(["File Size: ", *list(["\n".join(add_i_ifmany(list(map(get_file_size, fg)))) for fg in self.file_paths]) ])
         # dut summary
         dutCntDict = self.DatabaseFetcher.getDUTCountDict()
         metaDataList.append(["Yield: ", *[f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?" for (p, f) in zip(dutCntDict["Pass"], dutCntDict["Failed"])] ])

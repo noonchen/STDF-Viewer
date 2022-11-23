@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Nov 20 2022
+// Last Modified: Wed Nov 23 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -32,17 +32,21 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 BEGIN;
 
                                 CREATE TABLE IF NOT EXISTS File_List (
-                                                        Fid INTEGER PRIMARY KEY,
+                                                        Fid INTEGER,
+                                                        SubFid INTEGER,
                                                         Filename TEXT,
                                                         Lot_ID TEXT, 
                                                         Sublot_ID TEXT,
                                                         Product_ID TEXT,
-                                                        Flow_ID TEXT);
+                                                        Flow_ID TEXT,
+                                                        PRIMARY KEY (Fid, SubFid));
             
                                 CREATE TABLE IF NOT EXISTS File_Info (
                                                         Fid INTEGER,
+                                                        SubFid INTEGER,
                                                         Field TEXT, 
-                                                        Value TEXT);
+                                                        Value TEXT,
+                                                        PRIMARY KEY (Fid, SubFid, Field));
                                                         
                                 CREATE TABLE IF NOT EXISTS Wafer_Info (
                                                         Fid INTEGER,
@@ -198,20 +202,20 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 BEGIN;";
 
 static INSERT_FILE_NAME: &str = "INSERT INTO 
-                                    File_List (Fid, Filename)
+                                    File_List (Fid, SubFid, Filename)
                                 VALUES 
-                                    (?,?)";
+                                    (?,?,?)";
 
 static UPDATE_FILE_LIST: &str = "UPDATE File_List SET 
                                     Lot_ID=:Lot_ID, Sublot_ID=:Sublot_ID, 
                                     Product_ID=:Product_ID, Flow_ID=:Flow_ID
                                 WHERE 
-                                    Fid=:Fid";
+                                    Fid=:Fid AND SubFid=:SubFid";
 
 static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
-                                    (?,?,?)";
+                                    (?,?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
                                 Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex) 
