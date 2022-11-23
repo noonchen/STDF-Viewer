@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Nov 22 2022
+# Last Modified: Wed Nov 23 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -325,7 +325,8 @@ class MyWindow(QtWidgets.QMainWindow):
         if files:
             # store folder path
             self.updateRecentFolder(files[0])
-            self.callFileLoader(files)
+            # self.callFileLoader([files])
+            self.callFileLoader([[f] for f in files])
               
     
     def onFailMarker(self):
@@ -973,7 +974,7 @@ class MyWindow(QtWidgets.QMainWindow):
         gc.collect()
     
     
-    def callFileLoader(self, paths: list[str]):
+    def callFileLoader(self, paths: list[list[str]]):
         if paths:
             self.loader.loadFile(paths)
 

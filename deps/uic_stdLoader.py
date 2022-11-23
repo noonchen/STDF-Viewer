@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Wed Nov 23 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -83,7 +83,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.loaderUI.setupUi(self)
         self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         
-    def loadFile(self, stdPaths: list[str]):
+    def loadFile(self, stdPaths: list[list[str]]):
         self.closeEventByThread = False    # init at new file
         self.loaderUI.progressBar.setFormat("0.00%%")
         self.loaderUI.progressBar.setValue(0)
@@ -160,7 +160,7 @@ class stdReader(QtCore.QObject):
         self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
         
-    def readThis(self, stdPaths: list[str]):
+    def readThis(self, stdPaths: list[list[str]]):
         self.stdPaths = stdPaths
         
     @Slot()

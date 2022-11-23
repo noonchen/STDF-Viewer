@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Nov 21 2022
+# Last Modified: Wed Nov 23 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -68,7 +68,7 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         self.cursor.execute("SELECT A.Fid, B.wafercnt FROM \
-                            (SELECT Fid FROM File_List ) as A \
+                            (SELECT DISTINCT Fid FROM File_List ) as A \
                             LEFT JOIN (SELECT Fid, count(*) as wafercnt FROM Wafer_Info GROUP by Fid) as B \
                             on A.Fid = B.Fid \
                             ORDER by A.Fid")
@@ -267,18 +267,41 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         InfoDict = {}
-        # # get file count from database
-        # self.cursor.execute("SELECT count(Fid) FROM File_List")
-        # filecount = self.cursor.fetchone()[0]
+        sql = '''SELECT 
+                    Fid, Field, Value 
+                FROM 
+                    File_Info 
+                ORDER By 
+                    Fid, Field, SubFid'''
         
-        # get field data of multiple files, use `field` as key
-        block1 = ", ".join([f"id{i}.Value AS File{i}" for i in range(self.num_files)])
-        block2 = "\n".join([f"LEFT JOIN (SELECT * FROM File_Info WHERE Fid = {i}) as id{i} on A.Field = id{i}.Field" for i in range(self.num_files)])
-        sql = f"SELECT A.Field, {block1} FROM (SELECT DISTINCT Field FROM File_Info) as A \
-                {block2}"
-                
-        for data in self.cursor.execute(sql):
-            InfoDict[data[0]] = data[1:]
+        for Fid, Field, Value in self.cursor.execute(sql):
+            valueList = InfoDict.setdefault(Field, [[] for _ in range(self.num_files)])
+            valueList[Fid].append(Value)
+            
+        # convert dict value to tuple of strings
+        def process(key, old_value: list) -> tuple:
+            new = []
+            for info_per_file in old_value:
+                # info_per_file contains same field value from
+                # all merged files
+                # most of them are duplicated, except:
+                # XX_Time and Sublot_ID
+                if len(info_per_file) == 1:
+                    new.append(info_per_file[0])
+                elif len(info_per_file) == 0:
+                    new.append(None)
+                else:
+                    if key in ["SETUP_T", "START_T", "FINISH_T", "SBLOT_ID"]:
+                        # concat these field values by "\n"
+                        new.append("\n".join([f"#{i+1} → {v}" for i, v in enumerate(info_per_file)]))
+                    else:
+                        # for other fields, only extract info from 1st file
+                        new.append(info_per_file[0])
+            return tuple(new)
+        
+        for key in InfoDict.keys():
+            old_value = InfoDict[key]
+            InfoDict[key] = process(key, old_value)
         
         return InfoDict
     
