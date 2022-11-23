@@ -1,6 +1,6 @@
 [package]
 name = "rust_stdf_helper"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 
 [profile.release]

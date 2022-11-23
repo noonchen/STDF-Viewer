@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Nov 20 2022
+// Last Modified: Wed Nov 23 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -468,10 +468,10 @@ impl RecordTracker {
 pub fn process_incoming_record(
     db_ctx: &mut DataBaseCtx,
     rec_tracker: &mut RecordTracker,
-    rec_info: (usize, ByteOrder, u64, usize, StdfRecord),
+    rec_info: (usize, usize, ByteOrder, u64, usize, StdfRecord),
 ) -> Result<(), StdfHelperError> {
     // unpack info
-    let (file_id, order, _offset, _data_len, rec) = rec_info;
+    let (file_id, subfile_id, order, _offset, _data_len, rec) = rec_info;
     match rec {
         // // rec type 15
         StdfRecord::PTR(ptr_rec) => on_ptr_rec(db_ctx, rec_tracker, file_id, ptr_rec)?,
@@ -491,7 +491,7 @@ pub fn process_incoming_record(
         // // rec type 10
         StdfRecord::TSR(tsr_rec) => on_tsr_rec(rec_tracker, file_id, tsr_rec)?,
         // // rec type 1
-        StdfRecord::MIR(mir_rec) => on_mir_rec(db_ctx, file_id, mir_rec)?,
+        StdfRecord::MIR(mir_rec) => on_mir_rec(db_ctx, file_id, subfile_id, mir_rec)?,
         StdfRecord::MRR(mrr_rec) => on_mrr_rec(db_ctx, file_id, mrr_rec)?,
         StdfRecord::PCR(pcr_rec) => on_pcr_rec(db_ctx, file_id, pcr_rec)?,
         StdfRecord::HBR(hbr_rec) => on_hbr_rec(rec_tracker, file_id, hbr_rec)?,
@@ -632,6 +632,7 @@ fn on_atr_rec(
 fn on_mir_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     mir_rec: MIR,
 ) -> Result<(), StdfHelperError> {
     // update File_List table
@@ -640,7 +641,8 @@ fn on_mir_rec(
         &mir_rec.sblot_id,
         &mir_rec.proc_id,
         &mir_rec.flow_id,
-        file_id
+        file_id,
+        subfile_id
     ])?;
     // update File_Info table
     db_ctx.insert_file_info(rusqlite::params![

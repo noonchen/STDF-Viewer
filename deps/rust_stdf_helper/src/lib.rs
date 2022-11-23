@@ -498,14 +498,26 @@ fn parse_mpr_from_raw<'py>(
 fn generate_database(
     py: Python,
     dbpath: String,
-    stdf_paths: Vec<String>,
+    stdf_paths: Vec<Vec<String>>,
     progress_signal: &PyAny,
     stop_flag: &PyAny,
 ) -> PyResult<()> {
-    // do nothing if no file
-    let num_files = stdf_paths.len();
-    if num_files == 0 {
-        return Err(PyValueError::new_err("Empty STDF path list"));
+    // stdf_paths is a Vec of Vec<String>, each sub vec
+    // indicates a group of stdf files that needs to be merged.
+    //
+    // For example:
+    // [["v1_1", "v1_2", "v1_3"],
+    //  ["v2_1", "v2_2"]]
+    //
+    // "v1_x" is the 1st group of file, they will be treated as
+    // a single file (Fid=0) in the database.
+    //
+    // "v2_x" is another group with Fid=1.
+    //
+    // do nothing if empty file group detected
+    let num_groups = stdf_paths.len();
+    if stdf_paths.iter().map(|v| v.is_empty()).any(|b| b) {
+        return Err(PyValueError::new_err("Empty STDF file group detected"));
     }
 
     // convert and check python arguments
@@ -530,51 +542,63 @@ fn generate_database(
     // prepare channel for multithreading communication
     let (tx, rx) = mpsc::channel();
     let mut thread_handles = vec![];
-    let mut thread_txes = Vec::with_capacity(num_files);
-    // clone {num_files-1} sender, and push the `tx` to last
-    (0..num_files - 1)
+    let mut thread_txes = Vec::with_capacity(num_groups);
+    // clone {num_groups-1} sender, and push the `tx` to last
+    (0..num_groups - 1)
         .map(|_| thread_txes.push(tx.clone()))
         .count();
     thread_txes.push(tx);
 
     // sending parsing work to
     // other threads.
-    // one file per thread
-    for (fid, (fpath, thread_tx)) in stdf_paths
+    // one file group per thread
+    for (fid, (fgroups, thread_tx)) in stdf_paths
         .clone()
         .into_iter()
         .zip(thread_txes.into_iter())
         .enumerate()
     {
         let handle = thread::spawn(move || -> Result<(), StdfHelperError> {
-            let file_size = get_file_size(&fpath)? as f32;
-            if file_size == 0.0 {
-                return Err(StdfHelperError {
-                    msg: format!("Empty file detected!\n\n{}", &fpath),
-                });
-            }
-            let mut stdf_reader = match StdfReader::new(&fpath) {
-                Ok(r) => r,
-                Err(e) => {
+            let num_files = fgroups.len();
+            // loop fpath in a group in vector order,
+            // this step CANNOT be parallel, since
+            // superseded flag must overwrite all the
+            // DUTs in the previous files
+            for (sub_fid, fpath) in fgroups.iter().enumerate() {
+                let file_size = get_file_size(fpath)? as f32;
+                if file_size == 0.0 {
                     return Err(StdfHelperError {
-                        msg: format!("Cannot parse this file:\n{}\n\nMessage:\n{}", &fpath, e),
-                    })
+                        msg: format!("Empty file detected!\n\n{}", fpath),
+                    });
                 }
-            };
-            for raw_rec in stdf_reader.get_rawdata_iter() {
-                let raw_rec = match raw_rec {
+                let mut stdf_reader = match StdfReader::new(fpath) {
                     Ok(r) => r,
-                    Err(_) => {
-                        // there is only one error, that is
-                        // unexpected EOF, we just sliently
-                        // stop here
-                        break;
+                    Err(e) => {
+                        return Err(StdfHelperError {
+                            msg: format!("Cannot parse this file:\n{}\n\nMessage:\n{}", fpath, e),
+                        })
                     }
                 };
-                // calculate the reading progress in each thread
-                let progress_x100 = raw_rec.offset as f32 * 10000.0 / file_size;
-                if thread_tx.send((fid, progress_x100, raw_rec)).is_err() {
-                    break;
+                for raw_rec in stdf_reader.get_rawdata_iter() {
+                    let raw_rec = match raw_rec {
+                        Ok(r) => r,
+                        Err(_) => {
+                            // there is only one error, that is
+                            // unexpected EOF, we just sliently
+                            // stop here
+                            break;
+                        }
+                    };
+                    // calculate the reading progress in each thread
+                    let file_progress = (sub_fid + 1) as f32 / num_files as f32;
+                    let progress_x100 = raw_rec.offset as f32 * file_progress * 10000.0 / file_size;
+                    // send
+                    if thread_tx
+                        .send((fid, sub_fid, progress_x100, raw_rec))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             }
             Ok(())
@@ -640,17 +664,20 @@ fn generate_database(
         let mut db_ctx = DataBaseCtx::new(&conn)?;
 
         // store file paths to database
-        for (fid, fpath) in stdf_paths.iter().enumerate() {
-            db_ctx.insert_file_name(rusqlite::params![fid, fpath])?;
+        for (fid, fgroup) in stdf_paths.iter().enumerate() {
+            for (sub_fid, fpath) in fgroup.iter().enumerate() {
+                db_ctx.insert_file_name(rusqlite::params![fid, sub_fid, fpath])?;
+            }
         }
 
         let mut record_tracker = RecordTracker::new();
-        let mut progress_tracker = vec![0.0f32; num_files];
+        let mut progress_tracker = vec![0.0f32; num_groups];
         let mut transaction_count_up = 0;
         // process and write database in main thread
-        for (fid, progress_x100, raw_rec) in rx {
+        for (fid, sub_fid, progress_x100, raw_rec) in rx {
             let rec_info = (
                 fid,
+                sub_fid,
                 raw_rec.byte_order,
                 raw_rec.offset,
                 raw_rec.raw_data.len(),
@@ -664,7 +691,7 @@ fn generate_database(
                     *v = progress_x100;
                 };
                 total_progress.store(
-                    (progress_tracker.iter().sum::<f32>() / num_files as f32) as u16,
+                    (progress_tracker.iter().sum::<f32>() / num_groups as f32) as u16,
                     Ordering::Relaxed,
                 );
             }
