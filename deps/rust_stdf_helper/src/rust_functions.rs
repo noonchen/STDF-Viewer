@@ -484,7 +484,7 @@ pub fn process_incoming_record(
         // // rec type 2
         StdfRecord::WIR(wir_rec) => on_wir_rec(db_ctx, rec_tracker, file_id, wir_rec)?,
         StdfRecord::WRR(wrr_rec) => on_wrr_rec(db_ctx, rec_tracker, file_id, wrr_rec)?,
-        StdfRecord::WCR(wcr_rec) => on_wcr_rec(db_ctx, file_id, wcr_rec)?,
+        StdfRecord::WCR(wcr_rec) => on_wcr_rec(db_ctx, file_id, subfile_id, wcr_rec)?,
         // // rec type 50
         StdfRecord::GDR(gdr_rec) => on_gdr_rec(db_ctx, rec_tracker, file_id, gdr_rec)?,
         StdfRecord::DTR(dtr_rec) => on_dtr_rec(db_ctx, rec_tracker, file_id, dtr_rec)?,
@@ -492,24 +492,24 @@ pub fn process_incoming_record(
         StdfRecord::TSR(tsr_rec) => on_tsr_rec(rec_tracker, file_id, tsr_rec)?,
         // // rec type 1
         StdfRecord::MIR(mir_rec) => on_mir_rec(db_ctx, file_id, subfile_id, mir_rec)?,
-        StdfRecord::MRR(mrr_rec) => on_mrr_rec(db_ctx, file_id, mrr_rec)?,
+        StdfRecord::MRR(mrr_rec) => on_mrr_rec(db_ctx, file_id, subfile_id, mrr_rec)?,
         StdfRecord::PCR(pcr_rec) => on_pcr_rec(db_ctx, file_id, pcr_rec)?,
         StdfRecord::HBR(hbr_rec) => on_hbr_rec(rec_tracker, file_id, hbr_rec)?,
         StdfRecord::SBR(sbr_rec) => on_sbr_rec(rec_tracker, file_id, sbr_rec)?,
         StdfRecord::PMR(pmr_rec) => on_pmr_rec(db_ctx, file_id, pmr_rec)?,
         StdfRecord::PGR(pgr_rec) => on_pgr_rec(db_ctx, file_id, pgr_rec)?,
         StdfRecord::PLR(plr_rec) => on_plr_rec(db_ctx, file_id, plr_rec)?,
-        StdfRecord::RDR(rdr_rec) => on_rdr_rec(db_ctx, file_id, rdr_rec)?,
-        StdfRecord::SDR(sdr_rec) => on_sdr_rec(db_ctx, file_id, sdr_rec)?,
+        StdfRecord::RDR(rdr_rec) => on_rdr_rec(db_ctx, file_id, subfile_id, rdr_rec)?,
+        StdfRecord::SDR(sdr_rec) => on_sdr_rec(db_ctx, file_id, subfile_id, sdr_rec)?,
         // // StdfRecord::PSR(psr_rec) => psr_rec,
         // // StdfRecord::NMR(nmr_rec) => nmr_rec,
         // // StdfRecord::CNR(cnr_rec) => cnr_rec,
         // // StdfRecord::SSR(ssr_rec) => ssr_rec,
         // // StdfRecord::CDR(cdr_rec) => cdr_rec,
         // // rec type 0
-        StdfRecord::FAR(far_rec) => on_far_rec(db_ctx, file_id, order, far_rec)?,
-        StdfRecord::ATR(atr_rec) => on_atr_rec(db_ctx, file_id, atr_rec)?,
-        StdfRecord::VUR(vur_rec) => on_vur_rec(db_ctx, file_id, vur_rec)?,
+        StdfRecord::FAR(far_rec) => on_far_rec(db_ctx, file_id, subfile_id, order, far_rec)?,
+        StdfRecord::ATR(atr_rec) => on_atr_rec(db_ctx, file_id, subfile_id, atr_rec)?,
+        StdfRecord::VUR(vur_rec) => on_vur_rec(db_ctx, file_id, subfile_id, vur_rec)?,
         // // rec type 20
         StdfRecord::BPS(bps_rec) => on_bps_rec(rec_tracker, file_id, bps_rec)?,
         StdfRecord::EPS(_eps_rec) => on_eps_rec(rec_tracker, file_id)?,
@@ -580,16 +580,19 @@ fn u32_to_localtime(timestamp: u32) -> String {
 fn on_far_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     order: ByteOrder,
     far_rec: FAR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "STDF Version",
         far_rec.stdf_ver.to_string()
     ])?;
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "BYTE_ORD",
         if order == ByteOrder::LittleEndian {
             "Little endian"
@@ -604,9 +607,15 @@ fn on_far_rec(
 fn on_vur_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     vur_rec: VUR,
 ) -> Result<(), StdfHelperError> {
-    db_ctx.insert_file_info(rusqlite::params![file_id, "STDF Version", vur_rec.upd_nam])?;
+    db_ctx.insert_file_info(rusqlite::params![
+        file_id,
+        subfile_id,
+        "STDF Version",
+        vur_rec.upd_nam
+    ])?;
     Ok(())
 }
 
@@ -614,10 +623,12 @@ fn on_vur_rec(
 fn on_atr_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     atr_rec: ATR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "File Modification",
         format!(
             "Time: {}\nCMD: {}",
@@ -647,18 +658,21 @@ fn on_mir_rec(
     // update File_Info table
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "SETUP_T",
         u32_to_localtime(mir_rec.setup_t)
     ])?;
 
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "START_T",
         u32_to_localtime(mir_rec.start_t)
     ])?;
 
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "STAT_NUM",
         format!("{}", mir_rec.stat_num)
     ])?;
@@ -666,6 +680,7 @@ fn on_mir_rec(
     if mir_rec.mode_cod != ' ' {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "MODE_COD",
             format!("{}", mir_rec.mode_cod)
         ])?
@@ -674,6 +689,7 @@ fn on_mir_rec(
     if mir_rec.rtst_cod != ' ' {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "RTST_COD",
             format!("{}", mir_rec.rtst_cod)
         ])?
@@ -682,6 +698,7 @@ fn on_mir_rec(
     if mir_rec.prot_cod != ' ' {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "PROT_COD",
             format!("{}", mir_rec.prot_cod)
         ])?
@@ -690,6 +707,7 @@ fn on_mir_rec(
     if mir_rec.burn_tim != 65535 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "BURN_TIM",
             format!("{}", mir_rec.burn_tim)
         ])?
@@ -698,129 +716,280 @@ fn on_mir_rec(
     if mir_rec.cmod_cod != ' ' {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "CMOD_COD",
             format!("{}", mir_rec.cmod_cod)
         ])?
     };
 
     if !mir_rec.lot_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "LOT_ID", &mir_rec.lot_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "LOT_ID",
+            &mir_rec.lot_id
+        ])?
     };
 
     if !mir_rec.part_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "PART_TYP", &mir_rec.part_typ])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "PART_TYP",
+            &mir_rec.part_typ
+        ])?
     };
 
     if !mir_rec.node_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "NODE_NAM", &mir_rec.node_nam,])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "NODE_NAM",
+            &mir_rec.node_nam,
+        ])?
     };
 
     if !mir_rec.tstr_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "TSTR_TYP", &mir_rec.tstr_typ])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "TSTR_TYP",
+            &mir_rec.tstr_typ
+        ])?
     };
 
     if !mir_rec.job_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "JOB_NAM", &mir_rec.job_nam])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "JOB_NAM",
+            &mir_rec.job_nam
+        ])?
     };
 
     if !mir_rec.job_rev.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "JOB_REV", &mir_rec.job_rev])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "JOB_REV",
+            &mir_rec.job_rev
+        ])?
     };
 
     if !mir_rec.sblot_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SBLOT_ID", &mir_rec.sblot_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SBLOT_ID",
+            &mir_rec.sblot_id
+        ])?
     };
 
     if !mir_rec.oper_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "OPER_NAM", &mir_rec.oper_nam])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "OPER_NAM",
+            &mir_rec.oper_nam
+        ])?
     };
 
     if !mir_rec.exec_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "EXEC_TYP", &mir_rec.exec_typ])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "EXEC_TYP",
+            &mir_rec.exec_typ
+        ])?
     };
 
     if !mir_rec.exec_ver.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "EXEC_VER", &mir_rec.exec_ver])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "EXEC_VER",
+            &mir_rec.exec_ver
+        ])?
     };
 
     if !mir_rec.test_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "TEST_COD", &mir_rec.test_cod])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "TEST_COD",
+            &mir_rec.test_cod
+        ])?
     };
 
     if !mir_rec.tst_temp.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "TST_TEMP", &mir_rec.tst_temp])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "TST_TEMP",
+            &mir_rec.tst_temp
+        ])?
     };
 
     if !mir_rec.user_txt.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "USER_TXT", &mir_rec.user_txt])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "USER_TXT",
+            &mir_rec.user_txt
+        ])?
     };
 
     if !mir_rec.aux_file.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "AUX_FILE", &mir_rec.aux_file])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "AUX_FILE",
+            &mir_rec.aux_file
+        ])?
     };
 
     if !mir_rec.pkg_typ.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "PKG_TYP", &mir_rec.pkg_typ])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "PKG_TYP",
+            &mir_rec.pkg_typ
+        ])?
     };
 
     if !mir_rec.famly_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "FAMLY_ID", &mir_rec.famly_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "FAMLY_ID",
+            &mir_rec.famly_id
+        ])?
     };
 
     if !mir_rec.date_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "DATE_COD", &mir_rec.date_cod])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "DATE_COD",
+            &mir_rec.date_cod
+        ])?
     };
 
     if !mir_rec.facil_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "FACIL_ID", &mir_rec.facil_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "FACIL_ID",
+            &mir_rec.facil_id
+        ])?
     };
 
     if !mir_rec.floor_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "FLOOR_ID", &mir_rec.floor_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "FLOOR_ID",
+            &mir_rec.floor_id
+        ])?
     };
 
     if !mir_rec.proc_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "PROC_ID", &mir_rec.proc_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "PROC_ID",
+            &mir_rec.proc_id
+        ])?
     };
 
     if !mir_rec.oper_frq.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "OPER_FRQ", &mir_rec.oper_frq])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "OPER_FRQ",
+            &mir_rec.oper_frq
+        ])?
     };
 
     if !mir_rec.spec_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SPEC_NAM", &mir_rec.spec_nam])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SPEC_NAM",
+            &mir_rec.spec_nam
+        ])?
     };
 
     if !mir_rec.spec_ver.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SPEC_VER", &mir_rec.spec_ver])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SPEC_VER",
+            &mir_rec.spec_ver
+        ])?
     };
 
     if !mir_rec.flow_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "FLOW_ID", &mir_rec.flow_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "FLOW_ID",
+            &mir_rec.flow_id
+        ])?
     };
 
     if !mir_rec.setup_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SETUP_ID", &mir_rec.setup_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SETUP_ID",
+            &mir_rec.setup_id
+        ])?
     };
 
     if !mir_rec.dsgn_rev.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "DSGN_REV", &mir_rec.dsgn_rev])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "DSGN_REV",
+            &mir_rec.dsgn_rev
+        ])?
     };
 
     if !mir_rec.eng_id.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "ENG_ID", &mir_rec.eng_id])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "ENG_ID",
+            &mir_rec.eng_id
+        ])?
     };
 
     if !mir_rec.rom_cod.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "ROM_COD", &mir_rec.rom_cod])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "ROM_COD",
+            &mir_rec.rom_cod
+        ])?
     };
 
     if !mir_rec.serl_num.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SERL_NUM", &mir_rec.serl_num])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SERL_NUM",
+            &mir_rec.serl_num
+        ])?
     };
 
     if !mir_rec.supr_nam.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "SUPR_NAM", &mir_rec.supr_nam])?
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "SUPR_NAM",
+            &mir_rec.supr_nam
+        ])?
     };
 
     Ok(())
@@ -1262,11 +1431,13 @@ fn on_sbr_rec(
 fn on_wcr_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     wcr_rec: WCR,
 ) -> Result<(), StdfHelperError> {
     if wcr_rec.wafr_siz != 0.0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "WAFR_SIZ",
             format!("{}", wcr_rec.wafr_siz)
         ])?;
@@ -1275,6 +1446,7 @@ fn on_wcr_rec(
     if wcr_rec.die_ht != 0.0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "DIE_HT",
             format!("{}", wcr_rec.die_ht)
         ])?;
@@ -1283,6 +1455,7 @@ fn on_wcr_rec(
     if wcr_rec.die_wid != 0.0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "DIE_WID",
             format!("{}", wcr_rec.die_wid)
         ])?;
@@ -1291,6 +1464,7 @@ fn on_wcr_rec(
     if wcr_rec.wf_units != 0 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "WF_UNITS",
             match wcr_rec.wf_units {
                 1 => "inch",
@@ -1303,6 +1477,7 @@ fn on_wcr_rec(
 
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "WF_FLAT",
         format!("{}", wcr_rec.wf_flat),
     ])?;
@@ -1310,6 +1485,7 @@ fn on_wcr_rec(
     if wcr_rec.center_x != -32768 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "CENTER_X",
             format!("{}", wcr_rec.center_x)
         ])?;
@@ -1318,6 +1494,7 @@ fn on_wcr_rec(
     if wcr_rec.center_y != -32768 {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "CENTER_Y",
             format!("{}", wcr_rec.center_y)
         ])?;
@@ -1325,12 +1502,14 @@ fn on_wcr_rec(
 
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "POS_X",
         format!("{}", wcr_rec.pos_x)
     ])?;
 
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "POS_Y",
         format!("{}", wcr_rec.pos_y)
     ])?;
@@ -1505,10 +1684,12 @@ fn on_eps_rec(tracker: &mut RecordTracker, file_id: usize) -> Result<(), StdfHel
 fn on_rdr_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     rdr_rec: RDR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "Retest Hardware Bins",
         if rdr_rec.num_bins > 0 {
             rdr_rec
@@ -1528,11 +1709,13 @@ fn on_rdr_rec(
 fn on_sdr_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     sdr_rec: SDR,
 ) -> Result<(), StdfHelperError> {
     if !sdr_rec.hand_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Handler Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.hand_typ,
         ])?;
@@ -1541,6 +1724,7 @@ fn on_sdr_rec(
     if !sdr_rec.hand_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Handler ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.hand_id,
         ])?;
@@ -1549,6 +1733,7 @@ fn on_sdr_rec(
     if !sdr_rec.card_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Probe Card Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.card_typ,
         ])?;
@@ -1557,6 +1742,7 @@ fn on_sdr_rec(
     if !sdr_rec.card_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Probe Card ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.card_id,
         ])?;
@@ -1565,6 +1751,7 @@ fn on_sdr_rec(
     if !sdr_rec.load_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Load Board Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.load_typ,
         ])?;
@@ -1573,6 +1760,7 @@ fn on_sdr_rec(
     if !sdr_rec.load_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Load Board ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.load_id,
         ])?;
@@ -1581,6 +1769,7 @@ fn on_sdr_rec(
     if !sdr_rec.dib_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("DIB Board Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.dib_typ,
         ])?;
@@ -1589,6 +1778,7 @@ fn on_sdr_rec(
     if !sdr_rec.dib_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("DIB Board ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.dib_id,
         ])?;
@@ -1597,6 +1787,7 @@ fn on_sdr_rec(
     if !sdr_rec.cabl_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Interface Cable Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.cabl_typ,
         ])?;
@@ -1605,6 +1796,7 @@ fn on_sdr_rec(
     if !sdr_rec.cabl_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Interface Cable ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.cabl_id,
         ])?;
@@ -1613,6 +1805,7 @@ fn on_sdr_rec(
     if !sdr_rec.cont_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Handler Contactor Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.cont_typ,
         ])?;
@@ -1621,6 +1814,7 @@ fn on_sdr_rec(
     if !sdr_rec.cont_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Handler Contactor ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.cont_id,
         ])?;
@@ -1629,6 +1823,7 @@ fn on_sdr_rec(
     if !sdr_rec.lasr_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Laser Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.lasr_typ,
         ])?;
@@ -1637,6 +1832,7 @@ fn on_sdr_rec(
     if !sdr_rec.lasr_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Laser ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.lasr_id,
         ])?;
@@ -1645,6 +1841,7 @@ fn on_sdr_rec(
     if !sdr_rec.extr_typ.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Extra Equipment Type (Group {})", sdr_rec.site_grp),
             &sdr_rec.extr_typ,
         ])?;
@@ -1653,6 +1850,7 @@ fn on_sdr_rec(
     if !sdr_rec.extr_id.is_empty() {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             format!("Extra Equipment ID (Group {})", sdr_rec.site_grp),
             &sdr_rec.extr_id,
         ])?;
@@ -1664,10 +1862,12 @@ fn on_sdr_rec(
 fn on_mrr_rec(
     db_ctx: &mut DataBaseCtx,
     file_id: usize,
+    subfile_id: usize,
     mrr_rec: MRR,
 ) -> Result<(), StdfHelperError> {
     db_ctx.insert_file_info(rusqlite::params![
         file_id,
+        subfile_id,
         "FINISH_T",
         u32_to_localtime(mrr_rec.finish_t)
     ])?;
@@ -1675,17 +1875,28 @@ fn on_mrr_rec(
     if mrr_rec.disp_cod != ' ' {
         db_ctx.insert_file_info(rusqlite::params![
             file_id,
+            subfile_id,
             "DISP_COD",
             &mrr_rec.disp_cod.to_string(),
         ])?;
     }
 
     if !mrr_rec.usr_desc.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "USR_DESC", &mrr_rec.usr_desc,])?;
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "USR_DESC",
+            &mrr_rec.usr_desc,
+        ])?;
     }
 
     if !mrr_rec.exc_desc.is_empty() {
-        db_ctx.insert_file_info(rusqlite::params![file_id, "EXC_DESC", &mrr_rec.exc_desc,])?;
+        db_ctx.insert_file_info(rusqlite::params![
+            file_id,
+            subfile_id,
+            "EXC_DESC",
+            &mrr_rec.exc_desc,
+        ])?;
     }
     Ok(())
 }

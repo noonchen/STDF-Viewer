@@ -43,8 +43,10 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
             
                                 CREATE TABLE IF NOT EXISTS File_Info (
                                                         Fid INTEGER,
+                                                        SubFid INTEGER,
                                                         Field TEXT, 
-                                                        Value TEXT);
+                                                        Value TEXT,
+                                                        PRIMARY KEY (Fid, SubFid, Field));
                                                         
                                 CREATE TABLE IF NOT EXISTS Wafer_Info (
                                                         Fid INTEGER,
@@ -213,7 +215,7 @@ static UPDATE_FILE_LIST: &str = "UPDATE File_List SET
 static INSERT_FILE_INFO: &str = "INSERT OR REPLACE INTO 
                                     File_Info 
                                 VALUES 
-                                    (?,?,?)";
+                                    (?,?,?,?)";
 
 static INSERT_DUT: &str = "INSERT INTO 
                                 Dut_Info (Fid, HEAD_NUM, SITE_NUM, DUTIndex) 
