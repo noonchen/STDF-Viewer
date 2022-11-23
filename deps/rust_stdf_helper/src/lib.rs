@@ -3,7 +3,7 @@
 use pyo3::exceptions::PyValueError;
 // use pyo3::types::PyBytes;
 use pyo3::{
-    exceptions::{PyException, PyOSError},
+    exceptions::{PyException, PyLookupError, PyOSError},
     intern,
     prelude::*,
     types::{PyBool, PyDict},
@@ -739,7 +739,7 @@ fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
     let mut reader = match StdfReader::new(&fpath) {
         Ok(r) => r,
         Err(e) => {
-            return Err(PyException::new_err(format!(
+            return Err(PyOSError::new_err(format!(
                 "Cannot parse this file:\n{}\n\nMessage:\n{}",
                 &fpath, e
             )))
@@ -749,7 +749,7 @@ fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
         let rec = match rec {
             Ok(r) => r,
             Err(e) => {
-                return Err(PyException::new_err(format!(
+                return Err(PyOSError::new_err(format!(
                     "Error when reading MIR record of this file:\n{}\n\n{}",
                     &fpath, e
                 )))
@@ -784,7 +784,7 @@ fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
         }
     }
 
-    Err(PyException::new_err(format!(
+    Err(PyLookupError::new_err(format!(
         "MIR Record is not found in this file:\n{}\n",
         &fpath
     )))
