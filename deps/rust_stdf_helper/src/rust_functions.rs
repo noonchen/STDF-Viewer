@@ -566,7 +566,7 @@ pub fn process_summary_data(
 // database related functions
 
 #[inline(always)]
-fn u32_to_localtime(timestamp: u32) -> String {
+pub fn u32_to_localtime(timestamp: u32) -> String {
     // convert u32 timestamp to native datetime (without timezone info)
     let utc_native = NaiveDateTime::from_timestamp(timestamp as i64, 0);
     // treat the native datetime as if in UTC, converts to UTC datetime
