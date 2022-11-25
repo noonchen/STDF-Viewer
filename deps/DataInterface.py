@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -193,7 +193,8 @@ class DataInterface:
         
         return a dictionary contains:
         `TEST_NAME` / `TEST_NUM` / `flagList` / 
-        `LL` / `HL` / `Unit` / `dataList` / `DUTIndex` / 
+        `LLimit` / `HLimit` / `Unit` / `dataList` / `DUTIndex` / 
+        `LSpec` / `HSpec` / `OPT_Flag` / `VECT_NAM` / `SEQ_NAME`
         `Min` / `Max` / `Median` / `Mean` / `SDev` / `Cpk`
         '''
         outData = {}
@@ -658,6 +659,59 @@ class DataInterface:
             maxLen = max(maxLen, len(row))
         
         return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}    
+
+
+    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], _selectFiles: list[int] = []) -> dict:
+        '''
+        Get single-head, multi-site trend chart data of ONE test item
+        
+        `testTuple`:  selected test, e.g. (1000, 1, "name")
+        `head`: a selected STDF head
+        `selectSites`: list of selected STDF sites
+        `_selectFiles`: default read all files, currently not in use
+        
+        return a dictionary contains:
+        `TestInfo`: dict, key: file id, value: infoDict
+        `Data`: dict[dict[dict]], e.g.
+                Fid0 -> {Site0 -> testDataDict
+                         Site1 -> testDataDict
+                         ...}
+                Fid1 -> {Site0 -> testDataDict
+                         Site1 -> testDataDict
+                         ...}
+        '''
+        data = {}
+        testInfo = {}
+        for fid, site in itertools.product(range(self.num_files), selectSites):
+            sitesDict = data.setdefault(fid, {})
+            infoDict: dict = testInfo.setdefault(fid, {})
+            # retrieve single site data only
+            test_site_fid = self.getTestDataFromHeadSite(testTuple, [head], [site], fid)
+            if len(test_site_fid) == 0:
+                # skip this site if no data
+                continue
+            nestSiteData = sitesDict.setdefault(site, {})
+            # store all site related data to be drawn
+            nestSiteData["Min"] = test_site_fid.pop("Min")
+            nestSiteData["Max"] = test_site_fid.pop("Max")
+            nestSiteData["Mean"] = test_site_fid.pop("Mean")
+            nestSiteData["Median"] = test_site_fid.pop("Median")
+            nestSiteData["dutList"] = test_site_fid.pop("dutList")
+            nestSiteData["dataList"] = test_site_fid.pop("dataList")
+            nestSiteData["flagList"] = test_site_fid.pop("flagList")
+            if test_site_fid["recHeader"] == REC.MPR:
+                nestSiteData["stateList"] = test_site_fid.pop("stateList")
+            elif test_site_fid["recHeader"] == REC.PTR:
+                #TODO dynamic limit
+                pass
+            # info that are same for all sites 
+            # will be stored in testInfo
+            infoDict.update(test_site_fid)
+        
+        return {"TestInfo": testInfo, "Data": data}
+
+
+
 
 
 if __name__ == "__main__":

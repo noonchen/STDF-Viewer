@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -43,7 +43,7 @@ from deps.customizedQtClass import (StyleDelegateForTable_List,
                                     TestDataTableModel, 
                                     TestStatisticTableModel, 
                                     BinWaferTableModel)
-
+from deps.ChartWidgets import (TrendChart)
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
@@ -879,16 +879,12 @@ class MyWindow(QtWidgets.QMainWindow):
         # draw plots        
         selTests = self.getSelectedTests()
         #TODO clean all plots in the current layout
+        self.clearAllContents()
         tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
-        
-        if tabType == tab.Trend:
-            pass
-        elif tabType == tab.Histo:
-            pass
-        elif tabType == tab.Wafer:
-            pass
-        elif tabType == tab.Bin:
-            pass
+        for testTuple, head in product(selTests, selHeads):
+            chart = self.genPlot(testTuple, head, selSites, tabType)
+            if chart:
+                tabLayout.addWidget(chart)
         
     
     def updateStatTableContent(self):
@@ -952,9 +948,23 @@ class MyWindow(QtWidgets.QMainWindow):
                 
     
     #TODO
-    def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
+    def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
         '''testTuple: (test_num, pmr, test_name)'''
-        pass
+        if tabType == tab.Trend:
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            tchart = TrendChart()
+            tchart.setTrendData(tdata)
+            if tchart.validData:
+                return tchart
+        
+        elif tabType == tab.Histo:
+            pass
+        elif tabType == tab.Wafer:
+            pass
+        elif tabType == tab.Bin:
+            pass
+        
+        return None
             
             
     def clearOtherTab(self, currentTab):        
