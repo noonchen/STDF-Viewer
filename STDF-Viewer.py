@@ -35,14 +35,8 @@ from deps.SharedSrc import *
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
-from deps.customizedQtClass import (StyleDelegateForTable_List, 
-                                    DutSortFilter, 
-                                    ColorSqlQueryModel, 
-                                    DatalogSqlQueryModel, 
-                                    TestDataTableModel, 
-                                    TestStatisticTableModel, 
-                                    BinWaferTableModel)
-from deps.ChartWidgets import (TrendChart)
+from deps.customizedQtClass import *
+from deps.ChartWidgets import *
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter

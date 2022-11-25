@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -38,7 +38,6 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # from PySide6.QtCore import Signal, Slot, QTranslator
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
-# from .cystdf import stdfDataRetriever     # cython version
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
 

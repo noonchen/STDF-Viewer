@@ -197,3 +197,7 @@ class TrendChart(pg.GraphicsView):
         for v in self.view_list:
             v.enableAutoRange(enable=True)
                 
+
+
+__all__ = ["TrendChart", 
+           ]
