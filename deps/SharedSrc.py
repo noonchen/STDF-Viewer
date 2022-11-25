@@ -4,20 +4,19 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Nov 20 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
 # <<licensetext>>
 #
 
-from glob import glob
 import os, sys, logging, datetime
+import toml
 import numpy as np
 from enum import IntEnum
 from random import choice
-from operator import itemgetter
-from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5 import QtWidgets, QtGui
 
 import matplotlib
 matplotlib.use('QT5Agg')
@@ -27,13 +26,161 @@ from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import RendererAgg
 
 
+class SettingParams:
+    def __init__(self):
+        # trend
+        self.showHL_trend = True
+        self.showLL_trend = True
+        self.showHSpec_trend = True
+        self.showLSpec_trend = True
+        self.showMed_trend = True
+        self.showMean_trend = True
+        # histo
+        self.showHL_histo = True
+        self.showLL_histo = True
+        self.showHSpec_histo = True
+        self.showLSpec_histo = True
+        self.showMed_histo = True
+        self.showMean_histo = True
+        self.showGaus_histo = True
+        self.showBoxp_histo = True
+        self.binCount = 30
+        self.showSigma = "3, 6, 9"
+        # General
+        self.language = "English"
+        self.recentFolder = ""
+        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
+        self.dataPrecision = 3
+        self.checkCpk = False
+        self.cpkThreshold = 1.33
+        self.sortTestList = "Original"
+        # colors
+        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
+                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
+        self.sbinColor = {}
+        self.hbinColor = {}
+        
+    def getFloatFormat(self) -> str:
+        return "%%.%d%s" % (self.dataPrecision, self.dataNotation)
+
 
 # setting attr to human string
-settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
-                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   ("language", "Language"), ("recentFolder", "Recent Folder"), ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
+settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), 
+                   ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), 
+                   ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
+                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), 
+                   ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), 
+                   ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), 
+                   ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), 
+                   ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
+                   ("language", "Language"), ("recentFolder", "Recent Folder"), 
+                   ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), 
+                   ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
-setattr(sys, "CONFIG_NAME", settingNamePair)
+
+
+# This is the setting that will
+# be used across all files
+GlobalSetting = SettingParams()
+
+
+def getSetting() -> SettingParams:
+    return GlobalSetting
+
+
+def updateSetting(**kwargs):
+    global GlobalSetting
+    for key, value in kwargs.items():
+        if key in GlobalSetting.__dict__:
+            setattr(GlobalSetting, key, value)
+
+
+def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dict):
+    """
+    Update default color for hbin & sbin, needed
+    when loading a new file with different bin number
+    """
+    global GlobalSetting
+    # generate site color if not exist
+    for site in availableSites:
+        if site not in GlobalSetting.siteColor:
+            GlobalSetting.siteColor[site] = rHEX()
+    # init bin color by bin info
+    for (binColorDict, bin_info) in [(GlobalSetting.sbinColor, SBIN_Info),
+                                     (GlobalSetting.hbinColor, HBIN_Info)]:
+        for bin_num in bin_info.keys():
+            binType = bin_info[bin_num]["BIN_PF"]   # P, F or Unknown
+            defaultColor = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
+            if bin_num not in binColorDict:
+                binColorDict[bin_num] = defaultColor
+
+
+def loadConfigFile():
+    global GlobalSetting
+    try:
+        configData = toml.load(sys.CONFIG_PATH)
+        configString = dict([(v, k) for (k, v) in settingNamePair])
+        for sec, secDict in configData.items():
+            if sec == "Color Setting":
+                # convert string key (site/sbin/hbin) to int
+                for humanString, colorDict in secDict.items():
+                    if humanString in configString:
+                        attr = configString[humanString]    # e.g. siteColor
+                        oldColorDict = getattr(GlobalSetting, attr)
+                        for numString, hexColor in colorDict.items():
+                            try:
+                                num = int(numString)
+                            except ValueError:
+                                continue        # skip the invalid site or bin
+                            if isHexColor(hexColor): 
+                                oldColorDict[num] = hexColor
+            else:
+                for humanString, param in secDict.items():
+                    if humanString in configString:
+                        attr = configString[humanString]    # e.g. showHL_trend
+                        if type(param) == type(getattr(GlobalSetting, attr)):
+                            setattr(GlobalSetting, attr, param)
+    except (FileNotFoundError, TypeError, toml.TomlDecodeError):
+        # any error occurs in config file reading, simply ignore
+        pass
+    
+    
+def dumpConfigFile():
+    # save data to toml config
+    configData = {"General": {},
+                  "Trend Plot": {},
+                  "Histo Plot": {},
+                  "Color Setting": {}}
+    configName = dict(settingNamePair)
+    for k, v in GlobalSetting.__dict__.items():
+        if k in ["language", "recentFolder", 
+                 "dataNotation", "dataPrecision", 
+                 "checkCpk", "cpkThreshold", "sortTestList"]:
+            # General
+            configData["General"][configName[k]] = v
+            
+        elif k in ["showHL_trend", "showLL_trend", 
+                   "showHSpec_trend", "showLSpec_trend", 
+                   "showMed_trend", "showMean_trend"]:
+            # Trend
+            configData["Trend Plot"][configName[k]] = v
+            
+        elif k in ["showHL_histo", "showLL_histo", 
+                   "showHSpec_histo", "showLSpec_histo", 
+                   "showMed_histo", "showMean_histo", 
+                   "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
+            # Histo
+            configData["Histo Plot"][configName[k]] = v
+
+        elif k in ["siteColor", "sbinColor", "hbinColor"]:
+            # Color
+            # change Int key to string, since toml only support string keys
+            v = dict([(str(intKey), color) for intKey, color in v.items()])
+            configData["Color Setting"][configName[k]] = v
+            
+    with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
+        toml.dump(configData, fd)
+
 
 
 DUT_SUMMARY_QUERY = '''SELECT
@@ -218,33 +365,6 @@ def deleteWidget(w2delete: QtWidgets.QWidget):
     w2delete.deleteLater()
 
 
-def getCanvasDicts(qfigLayout: QtWidgets.QBoxLayout) -> dict:
-    '''Read canvas info (tn, head, site) from the layout 
-    and recording their index into a dict'''
-    canvasIndexDict = {}
-    for index in range(qfigLayout.count()):
-        mp_widget = qfigLayout.itemAt(index).widget()
-        mp_head = mp_widget.head
-        mp_test_num = mp_widget.test_num
-        mp_pmr = mp_widget.pmr
-        mp_site = mp_widget.site
-        mp_test_name = mp_widget.test_name
-        canvasIndexDict[(mp_head, mp_test_num, mp_pmr, mp_site, mp_test_name)] = index
-    return canvasIndexDict
-
-
-def calculateCanvasIndex(_test_num: int, _head: int, _site: int, _pmr: int, _test_name: str, canvasIndexDict: dict):
-    '''Given test info (tn, head, site) and calculate the proper index
-    to which the new canvas should be inserted'''
-    tupleList = list(canvasIndexDict.keys())
-    tupleList.append( (_head, _test_num, _pmr, _site, _test_name) )
-    # sort tuple by element 0 first, then 1, finally 2
-    tupleList_sort = sorted(tupleList, key=itemgetter(0, 1, 2, 3, 4))
-    # find the new tuple and get its index
-    newTupleIndex = tupleList_sort.index( (_head, _test_num, _pmr, _site, _test_name) )
-    return newTupleIndex
-
-
 # stdf v4 flag description
 dutFlagBitInfo = {}        # description of dut flag
 testFlagBitInfo = {}       # description of test flag
@@ -292,10 +412,8 @@ def translate_const_dicts(tr):
                         "R": tr("Right")}
 
 
-
 def dut_flag_parser(flagHexString: str) -> str:
     '''return detailed description of a DUT flag'''
-    global dutFlagBitInfo
     try:
         flag = int(flagHexString, 16)
         flagString = f"{flag:>08b}"
@@ -311,7 +429,6 @@ def dut_flag_parser(flagHexString: str) -> str:
 
 def test_flag_parser(flag: int) -> str:
     '''return detailed description of a test flag'''
-    global testFlagBitInfo
     # treat negative flag (indicate not tested) as pass
     flag = 0 if flag < 0 else flag
     
@@ -325,8 +442,6 @@ def test_flag_parser(flag: int) -> str:
 
 def return_state_parser(RTN_STAT: int) -> str:
     '''convert description of the given return state'''
-    global returnStateInfo
-    
     if RTN_STAT >= 0 and RTN_STAT <= 0xA:
         return returnStateInfo[RTN_STAT]
     else:
@@ -335,7 +450,6 @@ def return_state_parser(RTN_STAT: int) -> str:
 
 
 def wafer_direction_name(symbol: str) -> str:
-    global direction_symbol
     return direction_symbol.get(symbol, symbol)
 
 
@@ -822,3 +936,17 @@ def genWaferPlot(self, fig:plt.Figure, head:int, site:int, wafer_num:int):
         
     return ax
 
+
+__all__ = ["SettingParams", "tab", "REC", 
+           
+           "getSetting", "updateSetting", 
+           "setSettingDefaultColor", "loadConfigFile", "dumpConfigFile", 
+           
+           "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", 
+           
+           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
+           "calc_cpk", "deleteWidget", "isPass", 
+           
+           "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
+           "wafer_direction_name",
+           ]

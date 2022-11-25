@@ -52,6 +52,7 @@ class TrendChart(pg.GraphicsView):
         self.validData = False
         
     def setTrendData(self, trendData: dict):
+        settings = ss.getSetting()
         self.trendData = trendData
         testInfo: dict = trendData["TestInfo"]
         # testData  key: fid, 
@@ -125,44 +126,43 @@ class TrendChart(pg.GraphicsView):
                 x_max_list.append(np.nanmax(x))                
                 #TODO get file symbol
                 fsymbol = "o"
-                #TODO get site color
-                color = "#00dd00"
+                siteColor = settings.siteColor[site]
                 # test value
                 pitem.addItem(pg.PlotDataItem(x=x, y=y, pen=None,
                                               symbol=fsymbol, symbolPen="k",
-                                              symbolSize=8, symbolBrush=color,
+                                              symbolSize=8, symbolBrush=siteColor,
                                               name=f"Site {site}"))
                 # mean
                 mean = data_per_site["Mean"]
-                if True and ~np.isnan(mean):
+                if settings.showMean_trend and ~np.isnan(mean):
                     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
                                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
                 # median
                 median = data_per_site["Median"]
-                if True and ~np.isnan(median):
+                if settings.showMed_trend and ~np.isnan(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
             lolimit = infoDict["LLimit"]
-            if True and ~np.isnan(lolimit):
+            if settings.showLL_trend and ~np.isnan(lolimit):
                 pitem.addLine(y=lolimit, pen=self.lolimitPen, name="Low Limit", 
                               label="Low Limit = {value:0.2f}", 
                               labelOpts={"position":0.2, "color": self.lolimitPen.color(), 
                                          "movable": True, "anchors": [(0.5, 0), (0.5, 0)]})
             hilimit = infoDict["HLimit"]
-            if True and ~np.isnan(hilimit):
+            if settings.showHL_trend and ~np.isnan(hilimit):
                 pitem.addLine(y=hilimit, pen=self.hilimitPen, name="High Limit", 
                               label="High Limit = {value:0.2f}", 
                               labelOpts={"position":0.2, "color": self.hilimitPen.color(), 
                                          "movable": True, "anchors": [(0.5, 1), (0.5, 1)]})
             lspec = infoDict["LSpec"]
-            if True and ~np.isnan(lspec):
+            if settings.showLSpec_trend and ~np.isnan(lspec):
                 pitem.addLine(y=lspec, pen=self.lospecPen, name="Low Spec", 
                               label="Low Spec = {value:0.2f}", 
                               labelOpts={"position":0.2, "color": self.lospecPen.color(), 
                                          "movable": True, "anchors": [(0.5, 0), (0.5, 0)]})
             hspec = infoDict["HSpec"]
-            if True and ~np.isnan(hspec):
+            if settings.showHSpec_trend and ~np.isnan(hspec):
                 pitem.addLine(y=hspec, pen=self.hispecPen, name="High Spec", 
                               label="High Spec = {value:0.2f}", 
                               labelOpts={"position":0.2, "color": self.hispecPen.color(), 

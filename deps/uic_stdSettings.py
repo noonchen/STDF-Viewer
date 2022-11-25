@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue Nov 22 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -29,6 +29,7 @@ import platform
 from random import choice
 from copy import deepcopy
 from .ui.ImgSrc_svg import ImgDict
+import deps.SharedSrc as ss
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import QTranslator
@@ -69,43 +70,6 @@ indexDic_sortby = {0: "Original",
                    2: "Name"}
 indexDic_sortby_reverse = {v:k for k, v in indexDic_sortby.items()}
 
-rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
-
-
-class SettingParams:
-    def __init__(self):
-        # trend
-        self.showHL_trend = True
-        self.showLL_trend = True
-        self.showHSpec_trend = True
-        self.showLSpec_trend = True
-        self.showMed_trend = True
-        self.showMean_trend = True
-        # histo
-        self.showHL_histo = True
-        self.showLL_histo = True
-        self.showHSpec_histo = True
-        self.showLSpec_histo = True
-        self.showMed_histo = True
-        self.showMean_histo = True
-        self.showGaus_histo = True
-        self.showBoxp_histo = True
-        self.binCount = 30
-        self.showSigma = "3, 6, 9"
-        # General
-        self.language = "English"
-        self.recentFolder = ""
-        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
-        self.dataPrecision = 3
-        self.checkCpk = False
-        self.cpkThreshold = 1.33
-        self.sortTestList = "Original"
-        # colors
-        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
-                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
-        self.sbinColor = {}
-        self.hbinColor = {}
-
 
 class colorBtn(QtWidgets.QWidget):
     def __init__(self, parent=None, name="", num=None):
@@ -129,15 +93,13 @@ class colorBtn(QtWidgets.QWidget):
         self.hLayout.addWidget(self.square)
         self.square.mouseReleaseEvent = self.showPalette
         # spacer to avoid label from leaving button when resizing
-        spacerItem = QtWidgets.QSpacerItem(0, 0, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        spacerItem = QtWidgets.QSpacerItem(0, 0, 
+                                           QtWidgets.QSizePolicy.Policy.Expanding, 
+                                           QtWidgets.QSizePolicy.Policy.Expanding)
         self.hLayout.addItem(spacerItem)
         
-    def setColor(self, qcolor):
+    def setColor(self, qcolor: QtGui.QColor):
         self.square.setStyleSheet("border:1px solid #000000; background-color:%s;"%str(qcolor.name()))
-        # palette = self.square.palette()
-        # palette.setColor(QtGui.QPalette.Background, qcolor)
-        # self.square.setPalette(palette)
-        # self.square.setAutoFillBackground(True)        
     
     def getHEXColor(self):
         qcolor = self.square.palette().button().color()
@@ -159,13 +121,37 @@ class colorBtn(QtWidgets.QWidget):
             self.setColor(currentColor)
 
 
+def isTrendChanged(old, new):
+    return not all([getattr(old, attr) == getattr(new, attr) 
+                    for attr in ["showHL_trend", "showLL_trend", 
+                                 "showHSpec_trend", "showLSpec_trend", 
+                                 "showMed_trend", "showMean_trend"]])
+
+def isHistoChanged(old, new):
+    return not all([getattr(old, attr) == getattr(new, attr) 
+                    for attr in ["showHL_histo", "showLL_histo", 
+                                 "showHSpec_histo", "showLSpec_histo", 
+                                 "showMed_histo", "showMean_histo",
+                                 "showGaus_histo", "showBoxp_histo", 
+                                 "binCount", "showSigma"]])
+
+def isGeneralChanged(old, new):
+    return not all([getattr(old, attr) == getattr(new, attr) 
+                    for attr in ["language", "dataNotation", 
+                                 "dataPrecision", "checkCpk", 
+                                 "cpkThreshold", "sortTestList"]])
+
+def isColorChanged(old, new):
+    return not all([getattr(old, attr) == getattr(new, attr) 
+                    for attr in ["siteColor", "sbinColor", "hbinColor"]])
+
+
 class stdfSettings(QtWidgets.QDialog):
     
     def __init__(self, parent = None):
         super().__init__(parent)
         self.parent = parent
         self.translator = QTranslator(self)
-        if self.parent: self.originalParams = deepcopy(self.parent.settingParams)
         self.settingsUI = Ui_Setting()
         self.settingsUI.setupUi(self)
         self.settingsUI.Confirm.clicked.connect(self.applySettings)
@@ -180,166 +166,123 @@ class stdfSettings(QtWidgets.QDialog):
                 
         
     def initWithParentParams(self):
+        settings = ss.getSetting()
         # trend
-        self.settingsUI.showHL_trend.setChecked(self.originalParams.showHL_trend)
-        self.settingsUI.showLL_trend.setChecked(self.originalParams.showLL_trend)
-        self.settingsUI.showHSpec_trend.setChecked(self.originalParams.showHSpec_trend)
-        self.settingsUI.showLSpec_trend.setChecked(self.originalParams.showLSpec_trend)
-        self.settingsUI.showMedian_trend.setChecked(self.originalParams.showMed_trend)
-        self.settingsUI.showMean_trend.setChecked(self.originalParams.showMean_trend)
+        self.settingsUI.showHL_trend.setChecked(settings.showHL_trend)
+        self.settingsUI.showLL_trend.setChecked(settings.showLL_trend)
+        self.settingsUI.showHSpec_trend.setChecked(settings.showHSpec_trend)
+        self.settingsUI.showLSpec_trend.setChecked(settings.showLSpec_trend)
+        self.settingsUI.showMedian_trend.setChecked(settings.showMed_trend)
+        self.settingsUI.showMean_trend.setChecked(settings.showMean_trend)
         # histo
-        self.settingsUI.showHL_histo.setChecked(self.originalParams.showHL_histo)
-        self.settingsUI.showLL_histo.setChecked(self.originalParams.showLL_histo)
-        self.settingsUI.showHSpec_histo.setChecked(self.originalParams.showHSpec_histo)
-        self.settingsUI.showLSpec_histo.setChecked(self.originalParams.showLSpec_histo)
-        self.settingsUI.showMedian_histo.setChecked(self.originalParams.showMed_histo)
-        self.settingsUI.showMean_histo.setChecked(self.originalParams.showMean_histo)
-        self.settingsUI.showGaus_histo.setChecked(self.originalParams.showGaus_histo)
-        self.settingsUI.showBoxp_histo.setChecked(self.originalParams.showBoxp_histo)
-        self.settingsUI.lineEdit_binCount.setText(str(self.originalParams.binCount))
-        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(self.originalParams.showSigma, 0))
+        self.settingsUI.showHL_histo.setChecked(settings.showHL_histo)
+        self.settingsUI.showLL_histo.setChecked(settings.showLL_histo)
+        self.settingsUI.showHSpec_histo.setChecked(settings.showHSpec_histo)
+        self.settingsUI.showLSpec_histo.setChecked(settings.showLSpec_histo)
+        self.settingsUI.showMedian_histo.setChecked(settings.showMed_histo)
+        self.settingsUI.showMean_histo.setChecked(settings.showMean_histo)
+        self.settingsUI.showGaus_histo.setChecked(settings.showGaus_histo)
+        self.settingsUI.showBoxp_histo.setChecked(settings.showBoxp_histo)
+        self.settingsUI.lineEdit_binCount.setText(str(settings.binCount))
+        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(settings.showSigma, 0))
         # general
-        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(self.originalParams.language, 0))
-        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse.get(self.originalParams.dataNotation, 0))
-        self.settingsUI.precisionSlider.setValue(self.originalParams.dataPrecision)
-        self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if self.originalParams.checkCpk else 1)
-        self.settingsUI.lineEdit_cpk.setText(str(self.originalParams.cpkThreshold))
-        self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(self.originalParams.sortTestList, 0))
+        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(settings.language, 0))
+        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse.get(settings.dataNotation, 0))
+        self.settingsUI.precisionSlider.setValue(settings.dataPrecision)
+        self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if settings.checkCpk else 1)
+        self.settingsUI.lineEdit_cpk.setText(str(settings.cpkThreshold))
+        self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.sortTestList, 0))
         # color
-        for (orig_dict, layout) in [(self.originalParams.siteColor, self.settingsUI.gridLayout_site_color),
-                                    (self.originalParams.sbinColor, self.settingsUI.gridLayout_sbin_color),
-                                    (self.originalParams.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
+        for (orig_dict, layout) in [(settings.siteColor, self.settingsUI.gridLayout_site_color),
+                                    (settings.sbinColor, self.settingsUI.gridLayout_sbin_color),
+                                    (settings.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
             for i in range(layout.count()):
                 cB = layout.itemAt(i).widget()
-                orig_color = orig_dict.get(cB.num, rHEX())
+                orig_color = orig_dict.get(cB.num, ss.rHEX())
                 cB.setColor(QtGui.QColor(orig_color))
             
-        
-    def currentColorDict(self, get=True, group=""):
-        if get:
-            # get color dict from current settings
-            obj = self.originalParams
-        else:
-            # apply color dict setting
-            obj = self.parent.settingParams
-        
-        if group == "site": 
-            layout = self.settingsUI.gridLayout_site_color
-            color_dict = obj.siteColor
-        elif group == "sbin": 
-            layout = self.settingsUI.gridLayout_sbin_color
-            color_dict = obj.sbinColor
-        elif group == "hbin": 
-            layout = self.settingsUI.gridLayout_hbin_color
-            color_dict = obj.hbinColor
-        else: 
-            layout = None
-            color_dict = {}
-            
-        if layout:
-            for i in range(layout.count()):
-                cB = layout.itemAt(i).widget()
-                num = cB.num
-                hex = cB.getHEXColor()
-                color_dict[num] = hex
-        if get: return color_dict
-                            
     
-    def updateSettings(self):
+    def getUserSettings(self) -> ss.SettingParams:
+        '''
+        Read widgets value and create a new `SettingParams`
+        '''
+        userSettings = ss.SettingParams()
         # trend
-        self.parent.settingParams.showHL_trend = self.settingsUI.showHL_trend.isChecked()
-        self.parent.settingParams.showLL_trend = self.settingsUI.showLL_trend.isChecked()
-        self.parent.settingParams.showHSpec_trend = self.settingsUI.showHSpec_trend.isChecked()
-        self.parent.settingParams.showLSpec_trend = self.settingsUI.showLSpec_trend.isChecked()
-        self.parent.settingParams.showMed_trend = self.settingsUI.showMedian_trend.isChecked()
-        self.parent.settingParams.showMean_trend = self.settingsUI.showMean_trend.isChecked()
+        userSettings.showHL_trend = self.settingsUI.showHL_trend.isChecked()
+        userSettings.showLL_trend = self.settingsUI.showLL_trend.isChecked()
+        userSettings.showHSpec_trend = self.settingsUI.showHSpec_trend.isChecked()
+        userSettings.showLSpec_trend = self.settingsUI.showLSpec_trend.isChecked()
+        userSettings.showMed_trend = self.settingsUI.showMedian_trend.isChecked()
+        userSettings.showMean_trend = self.settingsUI.showMean_trend.isChecked()
         # histo
-        self.parent.settingParams.showHL_histo = self.settingsUI.showHL_histo.isChecked()
-        self.parent.settingParams.showLL_histo = self.settingsUI.showLL_histo.isChecked()
-        self.parent.settingParams.showHSpec_histo = self.settingsUI.showHSpec_histo.isChecked()
-        self.parent.settingParams.showLSpec_histo = self.settingsUI.showLSpec_histo.isChecked()
-        self.parent.settingParams.showMed_histo = self.settingsUI.showMedian_histo.isChecked()
-        self.parent.settingParams.showMean_histo = self.settingsUI.showMean_histo.isChecked()
-        self.parent.settingParams.showGaus_histo = self.settingsUI.showGaus_histo.isChecked()
-        self.parent.settingParams.showBoxp_histo = self.settingsUI.showBoxp_histo.isChecked()
-        self.parent.settingParams.binCount = int(self.settingsUI.lineEdit_binCount.text())
-        self.parent.settingParams.showSigma = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
+        userSettings.showHL_histo = self.settingsUI.showHL_histo.isChecked()
+        userSettings.showLL_histo = self.settingsUI.showLL_histo.isChecked()
+        userSettings.showHSpec_histo = self.settingsUI.showHSpec_histo.isChecked()
+        userSettings.showLSpec_histo = self.settingsUI.showLSpec_histo.isChecked()
+        userSettings.showMed_histo = self.settingsUI.showMedian_histo.isChecked()
+        userSettings.showMean_histo = self.settingsUI.showMean_histo.isChecked()
+        userSettings.showGaus_histo = self.settingsUI.showGaus_histo.isChecked()
+        userSettings.showBoxp_histo = self.settingsUI.showBoxp_histo.isChecked()
+        userSettings.binCount = int(self.settingsUI.lineEdit_binCount.text())
+        userSettings.showSigma = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
         # General
-        self.parent.settingParams.language = indexDic_lang[self.settingsUI.langCombobox.currentIndex()]
-        self.parent.settingParams.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
-        self.parent.settingParams.dataPrecision = self.settingsUI.precisionSlider.value()
-        self.parent.settingParams.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
-        self.parent.settingParams.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
-        self.parent.settingParams.sortTestList = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
+        userSettings.language = indexDic_lang[self.settingsUI.langCombobox.currentIndex()]
+        userSettings.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
+        userSettings.dataPrecision = self.settingsUI.precisionSlider.value()
+        userSettings.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
+        userSettings.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
+        userSettings.sortTestList = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
         # color
-        for group in ["site", "sbin", "hbin"]:
-            self.currentColorDict(get=False, group=group)
+        for (colorDict, layout) in [(userSettings.siteColor, self.settingsUI.gridLayout_site_color), 
+                                    (userSettings.sbinColor, self.settingsUI.gridLayout_sbin_color), 
+                                    (userSettings.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
+            if layout:
+                for i in range(layout.count()):
+                    cB = layout.itemAt(i).widget()
+                    num = cB.num
+                    hex = cB.getHEXColor()
+                    colorDict[num] = hex
         
-        self.parent.dumpConfigFile()
-        
-        
-    def isTrendChanged(self):
-        return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["showHL_trend", "showLL_trend", "showHSpec_trend", "showLSpec_trend", "showMed_trend", "showMean_trend"]])
-        
-        
-    def isHistoChanged(self):
-        return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["showHL_histo", "showLL_histo", "showHSpec_histo", "showLSpec_histo", "showMed_histo", "showMean_histo", 
-                                     "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]])
-        
-         
-    def isGeneralChanged(self):
-        return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["language", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold", "sortTestList"]])
-
-
-    def isColorChanged(self):
-        return not all([getattr(self.originalParams, attr) == getattr(self.parent.settingParams, attr) 
-                        for attr in ["siteColor", "sbinColor", "hbinColor"]])
+        return userSettings
     
     
     def applySettings(self):
         if self.parent:
-            # write setting to parent settings
-            self.updateSettings()
+            origSettings = ss.getSetting()
+            userSettings = self.getUserSettings()
+            
             refreshTab = False
             refreshTable = False
             refreshList = False
             clearListBG = False
             retranslate = False
-            if self.isTrendChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
+            if isTrendChanged(origSettings, userSettings) and (self.parent.ui.tabControl.currentIndex() == tab.Trend): 
                 refreshTab = True
-                
-            if self.isHistoChanged() and (self.parent.ui.tabControl.currentIndex() == tab.Histo): 
+            if isHistoChanged(origSettings, userSettings) and (self.parent.ui.tabControl.currentIndex() == tab.Histo): 
                 refreshTab = True
-                
-            if self.isGeneralChanged(): 
-                if self.originalParams.language != self.parent.settingParams.language:
-                    retranslate = True
-                if self.originalParams.sortTestList != self.parent.settingParams.sortTestList:
-                    refreshList = True
-                if self.parent.ui.tabControl.currentIndex() != tab.Bin:
-                    refreshTable = True
-                    # if raw data table is active, update as well
-                    if (self.parent.ui.tabControl.currentIndex() == tab.Info) and (self.parent.ui.infoBox.currentIndex() == 2):
-                        refreshTab = True
-                    # if cpk threshold changed, clear listView backgrounds
-                    if self.originalParams.cpkThreshold != self.parent.settingParams.cpkThreshold or self.originalParams.checkCpk != self.parent.settingParams.checkCpk:
-                        clearListBG = True
-                    
-            if self.isColorChanged():
+            # 
+            if origSettings.language != userSettings.language:
+                retranslate = True
+            if origSettings.sortTestList != userSettings.sortTestList:
+                refreshList = True
+            if self.parent.ui.tabControl.currentIndex() != tab.Bin:
+                refreshTable = True
+                # if cpk threshold changed, clear listView backgrounds
+                if (origSettings.cpkThreshold != userSettings.cpkThreshold or 
+                    origSettings.checkCpk != userSettings.checkCpk):
+                    clearListBG = True
+            if isColorChanged(origSettings, userSettings):
                 refreshTab = True
                 refreshTable = True
                 
+            # update global settings before updating UI
+            ss.updateSetting(**userSettings.__dict__)
+            # TODO replace with signals
             if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()
             if refreshList: self.parent.refreshTestList()
             if clearListBG: self.parent.clearTestItemBG()
             if retranslate: self.parent.changeLanguage()
-                
-            # need to update orignal params after updating parent settings
-            self.originalParams = deepcopy(self.parent.settingParams)
         QtWidgets.QApplication.processEvents()
         self.close()
     
@@ -393,7 +336,6 @@ class stdfSettings(QtWidgets.QDialog):
     
     def showUI(self):
         if self.parent: 
-            self.originalParams = deepcopy(self.parent.settingParams)
             self.initWithParentParams()
             currentTab = self.parent.ui.tabControl.currentIndex()
             if currentTab == 0: currentIndex = 0            # info tab
