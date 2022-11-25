@@ -25,11 +25,8 @@
 
 
 import sys
-import platform
-from random import choice
-from copy import deepcopy
 from .ui.ImgSrc_svg import ImgDict
-import deps.SharedSrc as ss
+from deps.SharedSrc import *
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import QTranslator
@@ -43,12 +40,6 @@ from .ui.stdfViewer_settingsUI import Ui_Setting
 # from PySide6.QtCore import QTranslator
 # from .ui.stdfViewer_settingsUI_side6 import Ui_Setting
 
-
-# simulate a Enum in python
-class Tab(tuple): __getattr__ = tuple.index
-tab = Tab(["Info", "Trend", "Histo", "Bin"])
-
-isMac = platform.system() == 'Darwin'
 
 indexDic_sigma = {0: "",
                   1: "3", 
@@ -166,7 +157,7 @@ class stdfSettings(QtWidgets.QDialog):
                 
         
     def initWithParentParams(self):
-        settings = ss.getSetting()
+        settings = getSetting()
         # trend
         self.settingsUI.showHL_trend.setChecked(settings.showHL_trend)
         self.settingsUI.showLL_trend.setChecked(settings.showLL_trend)
@@ -198,15 +189,15 @@ class stdfSettings(QtWidgets.QDialog):
                                     (settings.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
             for i in range(layout.count()):
                 cB = layout.itemAt(i).widget()
-                orig_color = orig_dict.get(cB.num, ss.rHEX())
+                orig_color = orig_dict.get(cB.num, rHEX())
                 cB.setColor(QtGui.QColor(orig_color))
             
     
-    def getUserSettings(self) -> ss.SettingParams:
+    def getUserSettings(self) -> SettingParams:
         '''
         Read widgets value and create a new `SettingParams`
         '''
-        userSettings = ss.SettingParams()
+        userSettings = SettingParams()
         # trend
         userSettings.showHL_trend = self.settingsUI.showHL_trend.isChecked()
         userSettings.showLL_trend = self.settingsUI.showLL_trend.isChecked()
@@ -248,7 +239,7 @@ class stdfSettings(QtWidgets.QDialog):
     
     def applySettings(self):
         if self.parent:
-            origSettings = ss.getSetting()
+            origSettings = getSetting()
             userSettings = self.getUserSettings()
             
             refreshTab = False
@@ -276,7 +267,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTable = True
                 
             # update global settings before updating UI
-            ss.updateSetting(**userSettings.__dict__)
+            updateSetting(**userSettings.__dict__)
             # TODO replace with signals
             if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()

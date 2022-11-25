@@ -12,7 +12,7 @@
 #
 
 import os, sys, logging, datetime
-import toml
+import toml, subprocess, platform
 import numpy as np
 from enum import IntEnum
 from random import choice
@@ -109,6 +109,12 @@ def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dic
                 binColorDict[bin_num] = defaultColor
 
 
+def updateRecentFolder(filepath: str):
+    dirpath = os.path.dirname(filepath)
+    # update settings
+    updateSetting(recentFolder = dirpath)
+
+
 def loadConfigFile():
     global GlobalSetting
     try:
@@ -175,6 +181,14 @@ def dumpConfigFile():
     with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
         toml.dump(configData, fd)
 
+
+isMac = platform.system() == 'Darwin'
+
+
+FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
+                STDF (*.std *.stdf);;
+                Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;
+                All Files (*.*)'''
 
 
 DUT_SUMMARY_QUERY = '''SELECT
@@ -517,6 +531,30 @@ def stringifyTestData(testDict: dict, valueFormat: str) -> list:
             test_data_list += ["-" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
             
     return test_data_list
+
+
+def openFileInOS(filepath: str):
+    # https://stackoverflow.com/a/435669
+    filepath = os.path.normpath(filepath)
+    if platform.system() == 'Darwin':       # macOS
+        subprocess.call(('open', filepath))
+    elif platform.system() == 'Windows':    # Windows
+        subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
+            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+    else:                                   # linux variants
+        subprocess.call(('xdg-open', filepath))        
+
+
+def revealFile(filepath: str):
+    filepath = os.path.normpath(filepath)
+    if platform.system() == 'Darwin':       # macOS
+        subprocess.call(('open', '-R', filepath))
+    elif platform.system() == 'Windows':    # Windows
+        subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
+            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+    else:                                   # linux variants
+        subprocess.call(('xdg-open', os.path.dirname(filepath)))
+
 
 
 # # TODO
@@ -933,13 +971,13 @@ def stringifyTestData(testDict: dict, valueFormat: str) -> list:
 
 __all__ = ["SettingParams", "tab", "REC", 
            
-           "getSetting", "updateSetting", 
+           "getSetting", "updateSetting", "updateRecentFolder", 
            "setSettingDefaultColor", "loadConfigFile", "dumpConfigFile", 
            
-           "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", 
+           "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
-           "calc_cpk", "deleteWidget", "isPass", 
+           "calc_cpk", "deleteWidget", "isPass", "openFileInOS", "revealFile", "rHEX", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",

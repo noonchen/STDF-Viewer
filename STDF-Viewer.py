@@ -25,8 +25,7 @@
 
 
 import os, sys, gc, traceback, atexit
-import json, urllib.request as rq
-import platform, logging
+import json, logging, urllib.request as rq
 import numpy as np
 from itertools import product
 from fontTools import ttLib
@@ -67,7 +66,6 @@ from PyQt5.QtCore import (Qt, QTranslator,
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
 Version = "V4.0.0"
-isMac = platform.system() == 'Darwin'
     
 # save config path to sys
 rootFolder = os.path.dirname(sys.argv[0])
@@ -271,25 +269,18 @@ class MyWindow(QtWidgets.QMainWindow):
         # need to rewrite file info table after changing language
         self.updateFileHeader()        
     
-    
-    def updateRecentFolder(self, filepath: str):
-        dirpath = os.path.dirname(filepath)
-        # update settings
-        updateSetting(recentFolder = dirpath)
-    
 
     def openNewFile(self, files: list[str]):
         if not files:
-            files, _ = QFileDialog.getOpenFileNames(self, 
-                                                  caption=self.tr("Select a STD File To Open"), 
-                                                  directory=getSetting().recentFolder,
-                                                  filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
+            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select a STD File To Open"), 
+                                                    directory=getSetting().recentFolder, 
+                                                    filter=self.tr(FILE_FILTER),)
         else:
             files = [f for f in map(os.path.normpath, files) if os.path.isfile(f)]
             
         if files:
             # store folder path
-            self.updateRecentFolder(files[0])
+            updateRecentFolder(files[0])
             # self.callFileLoader([files])
             self.callFileLoader([[f] for f in files])
               
