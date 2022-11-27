@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Sun Nov 27 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -180,6 +180,30 @@ def dumpConfigFile():
             
     with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
         toml.dump(configData, fd)
+
+
+class STDFFonts:
+    def __init__(self):
+        self.Chinese = "LXGW WenKai Mono"
+        self.English = "JetBrains Mono"
+
+
+def loadFonts() -> STDFFonts:
+    f = STDFFonts()
+    # reverse to put courier at the rear
+    for fn in os.listdir(os.path.join(sys.rootFolder, "fonts")):
+        if not fn.endswith(".ttf"): continue
+        fontPath = os.path.join(sys.rootFolder, "fonts", fn)
+        fontIdx = QtGui.QFontDatabase.addApplicationFont(fontPath)
+        if fontIdx < 0:
+            print(f"Font {fn} cannot be loaded to QT")
+        else:
+            fontFamilies = QtGui.QFontDatabase.applicationFontFamilies(fontIdx)
+            if fn.startswith("cn_") and len(fontFamilies) > 0:
+                f.Chinese = fontFamilies[0]
+            elif fn.startswith("en_") and len(fontFamilies) > 0:
+                f.English = fontFamilies[0]
+    return f
 
 
 isMac = platform.system() == 'Darwin'
@@ -976,7 +1000,7 @@ __all__ = ["SettingParams", "tab", "REC",
            
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
-           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
+           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "loadFonts", 
            "calc_cpk", "deleteWidget", "isPass", "openFileInOS", "revealFile", "rHEX", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 

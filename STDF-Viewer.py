@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Sun Nov 27 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,7 +28,6 @@ import os, sys, gc, traceback, atexit
 import json, logging, urllib.request as rq
 import numpy as np
 from itertools import product
-from fontTools import ttLib
 from base64 import b64decode
 from deps.SharedSrc import *
 from deps.ui.ImgSrc_svg import ImgDict
@@ -77,25 +76,20 @@ init_logger(rootFolder)
 logger = logging.getLogger("STDF-Viewer")
 
 
-class FontNames:
-    def __init__(self):
-        self.Chinese = "Microsoft Yahei"
-        self.English = "Tahoma"
-
-
 class signals4MainUI(QtCore.QObject):
     dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
 
 
 class MyWindow(QtWidgets.QMainWindow):
-    def __init__(self, defaultFontNames: FontNames):
+    def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
         # load config file
         loadConfigFile()
+        self.defaultFontNames = loadFonts()
         # data_interface for processing requests by GUI 
         # and reading data from database
         self.data_interface = None
@@ -110,7 +104,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.head_cb_dict = {}
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        self.defaultFontNames = defaultFontNames
         self.imageFont = self.defaultFontNames.English
         # init and connect signals
         self.signals = signals4MainUI()
@@ -558,8 +551,14 @@ class MyWindow(QtWidgets.QMainWindow):
         
         self.tmodel_dut.setQuery(QtSql.QSqlQuery(DUT_SUMMARY_QUERY, self.db_dut))
         
-        for column in range(1, header.count()):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        for column in range(0, header.count()):
+            if column in [2, 3, header.count()-1]:
+                # PartID, Head-Site and DUT Flag
+                # column may be too long to display
+                mode = QHeaderView.ResizeMode.ResizeToContents
+            else:
+                mode = QHeaderView.ResizeMode.Stretch
+            header.setSectionResizeMode(column, mode)
         
         # always hide dut index column
         self.ui.dutInfoTable.hideColumn(0)
@@ -1053,24 +1052,9 @@ def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication([])
     app.setStyle('Fusion')
-    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))
-    # default font for dialogs
-    # font_names = []
-    defaultFontNames = FontNames()
-    # reverse to put courier at the rear
-    for fn in sorted(os.listdir(os.path.join(sys.rootFolder, "fonts")), 
-                     key=lambda x:x.lower(), reverse=True):
-        if not fn.endswith(".ttf"): continue
-        fontPath = os.path.join(sys.rootFolder, "fonts", fn)
-        QtGui.QFontDatabase.addApplicationFont(fontPath)
-        font_name = ttLib.TTFont(fontPath)["name"].getDebugName(1)
-        if fn.startswith("cn_"):
-            defaultFontNames.Chinese = font_name
-        elif fn.startswith("en_"):
-            defaultFontNames.English = font_name
-    
+    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))    
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
-    window = MyWindow(defaultFontNames)
+    window = MyWindow()
     window.show()
     if pathFromArgs:
         window.callFileLoader(pathFromArgs)
