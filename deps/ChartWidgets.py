@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Sun Nov 27 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -39,6 +39,7 @@ class TrendChart(pg.GraphicsView):
                            QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.setMinimumWidth(800)
         self.setMinimumHeight(400)
+        self.setStyleSheet("QToolTip {background: red;}")
         self.plotlayout = pg.GraphicsLayout()
         self.setCentralWidget(self.plotlayout)
         self.meanPen = pg.mkPen({"color": "orange", "width": 1})
@@ -79,24 +80,32 @@ class TrendChart(pg.GraphicsView):
                 # TODO dynamic limits
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
-        # if these two list is empty, means no test value
-        # is found in all files. this is is rare but I've encountered
-        if len(y_min_list) == 0 or len(y_max_list) == 0:
+                # at least one site data should be valid
+                self.validData |= (~np.isnan(d_site["Min"]) and 
+                                   ~np.isnan(d_site["Max"]))
+        # validData means the valid data exists, 
+        # set the flag to True and put it in top GUI
+        if not self.validData:
             return
+        # # if these two list is empty, means no test value
+        # # is found in all files. this is is rare but I've encountered
+        # if len(y_min_list) == 0 or len(y_max_list) == 0:
+        #     return
         y_min = np.nanmin(y_min_list)
         y_max = np.nanmax(y_max_list)
         # add 15% as overhead
         oh = 0.15 * (y_max - y_min)
         y_min -= oh
         y_max += oh
-        # there is a possibility that y_min or y_max
-        # is nan, in this case we cannot draw anything
-        if np.isnan(y_min) or np.isnan(y_max):
-            return
-        # when code can reach here, means
-        # the data exists, set the flag to True
-        # and put it in top GUI
-        self.validData = True
+        # it's common that y_min == y_max for FTR
+        # in this case we need to manually assign y limits
+        if y_min == y_max:
+            y_min -= 1
+            y_max += 1
+        # # there is a possibility that y_min or y_max
+        # # is nan, in this case we cannot draw anything
+        # if np.isnan(y_min) or np.isnan(y_max):
+        #     return
         # add title
         self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
                                  rowspan=1, colspan=len(testInfo),
@@ -113,25 +122,37 @@ class TrendChart(pg.GraphicsView):
             # if mean and median is enabled, draw them as well
             sitesData = testData[fid]
             infoDict = testInfo[fid]
-            if len(sitesData) == 0 or len(infoDict) == 0:
-                # skip empty sites to ensure the 
-                # following operation is on valid data
-                continue
+            # if len(sitesData) == 0 or len(infoDict) == 0:
+            #     # skip this file if: 
+            #     #  - test is not in this file (empty sitesData)
+            #     #  - no data found in selected sites (test value is empty array)
+            #     # to ensure the following operation is on valid data
+            #     continue
             x_min_list = []
             x_max_list = []
             for site, data_per_site in sitesData.items():
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
+                if len(x) == 0 or len(y) == 0:
+                    # skip this site that contains 
+                    # no data
+                    continue
                 x_min_list.append(np.nanmin(x))
                 x_max_list.append(np.nanmax(x))                
                 #TODO get file symbol
                 fsymbol = "o"
                 siteColor = settings.siteColor[site]
                 # test value
-                pitem.addItem(pg.PlotDataItem(x=x, y=y, pen=None,
-                                              symbol=fsymbol, symbolPen="k",
-                                              symbolSize=8, symbolBrush=siteColor,
-                                              name=f"Site {site}"))
+                pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
+                                      symbol=fsymbol, symbolPen="k", 
+                                      symbolSize=8, symbolBrush=siteColor, 
+                                      name=f"Site {site}")
+                pdi.scatter.opts.update(hoverable=True, 
+                                        tip=f"Site {site}\nDUTIndex: {{x:.0f}}\nValue: {{y:.3g}}".format,
+                                        hoverSymbol="+",
+                                        hoverSize=12,
+                                        hoverPen=pg.mkPen("#ff0000", width=1))
+                pitem.addItem(pdi)
                 # mean
                 mean = data_per_site["Mean"]
                 if settings.showMean_trend and ~np.isnan(mean):
@@ -173,10 +194,15 @@ class TrendChart(pg.GraphicsView):
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
             if len(testInfo) > 1:
                 # only add if there are multiple files
-                pitem.addItem(pg.TextItem(f"File {fid}"))
+                file_text = pg.TextItem(f"File {fid}", color="#000000", anchor=(1, 0))
+                pitem.addItem(file_text)
             pitem.setClipToView(True)
             # set range and limits
-            x_min, x_max = min(x_min_list)-2, max(x_max_list)+2
+            x_min = min(x_min_list)
+            x_max = max(x_max_list)
+            oh = 0.02 * (x_max - x_min)
+            x_min -= oh
+            x_max += oh
             view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
                           yRange=(y_min, y_max))

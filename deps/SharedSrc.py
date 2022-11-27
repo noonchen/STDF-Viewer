@@ -319,9 +319,9 @@ def isHexColor(color: str) -> bool:
 
 def getProperFontColor(background: QtGui.QColor) -> QtGui.QColor:
     # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
-    if (background.red()*0.299 + 
-        background.green()*0.587 + 
-        background.blue()*0.114) > 186:
+    if (background.red()*0.2126 + 
+        background.green()*0.7152 + 
+        background.blue()*0.0722) > 140:
         return QtGui.QColor("#000000")
     else:
         return QtGui.QColor("#FFFFFF")
