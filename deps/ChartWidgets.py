@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Nov 27 2022
+# Last Modified: Tue Nov 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -212,6 +212,82 @@ class TrendChart(pg.GraphicsView):
             v.enableAutoRange(enable=True)
                 
 
+class WaferMap(pg.GraphicsView):
+    def __init__(self, *arg, **kargs):
+        super().__init__(*arg, **kargs)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
+                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+        self.plotlayout = pg.GraphicsLayout()
+        self.setCentralWidget(self.plotlayout)
+        self.validData = False
+        
+    def setWaferData(self, waferData: dict):
+        if len(waferData) == 0 or len(waferData["Legend"]) == 0:
+            return
+        
+        settings = ss.getSetting()
+        self.validData = True
+        view = pg.ViewBox()
+        pitem = pg.PlotItem(viewBox=view)
+        # put legend in another view
+        view_legend = pg.ViewBox()
+        legend = pg.LegendItem(labelTextSize="12pt")
+        view_legend.addItem(legend)
+        
+        xyData = waferData["Data"]
+        isStackMap = waferData["Stack"]
+        legendDict = waferData["Legend"]
+        
+        for num, xyDict in xyData.items():
+            spi = pg.ScatterPlotItem(
+                symbol="s",
+                pen=None,
+                size=0.95,
+                pxMode=False,
+                hoverable=True,
+                hoverPen=pg.mkPen('r', width=4),
+                hoverSize=1,
+                name=legendDict[num])
+            # for stack map, num = fail counts
+            # for wafer map, num = sbin number
+            if isStackMap:
+                color = "#FF0000"
+            else:
+                color = settings.sbinColor[num]
+            spi.addPoints(x=xyDict["x"], y=xyDict["y"], brush=color)
+            pitem.addItem(spi)
+            legend.addItem(spi, spi.name())
+        
+        (ratio, die_size, invertX, invertY, waferID, sites) = waferData["Info"]
+        view.setAspectLocked(lock=True, ratio=ratio)            
+        x_max, x_min, y_max, y_min = waferData["Bounds"]
+        view.setLimits(xMin=x_min-3, xMax=x_max+3, 
+                       yMin=y_min-3, yMax=y_max+3, 
+                       minXRange=2, minYRange=2)
+        view.setRange(xRange=(x_min-1, x_max+1), 
+                      yRange=(y_min-1, y_max+1),
+                      disableAutoRange=False)
+        if invertX:
+            view.invertX(True)
+        if invertY:
+            view.invertY(True)
+        view_legend.autoRange()
+        # title
+        site_info = "All Site" if -1 in sites else f"Site {','.join(map(str, sites))}"
+        self.plotlayout.addLabel(f"{waferID} - {site_info}", row=0, col=0, 
+                                 rowspan=1, colspan=2, size="20pt")
+        # die size
+        if die_size:
+            pitem.addItem(pg.TextItem(die_size, color="#000000"))
+        # add map and axis
+        self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)        
+        # add legend
+        legend.setOffset((30, 30))
+        self.plotlayout.addItem(view_legend, row=1, col=2, rowspan=1, colspan=1)
+
 
 __all__ = ["TrendChart", 
+           "WaferMap"
            ]

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Mon Nov 28 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -630,12 +630,27 @@ class DatabaseFetcher:
                     "flagList": flagList}
     
     
-    def getWaferBounds(self):
+    def getWaferBounds(self, waferIndex: int, fid: int) -> tuple:
+        '''
+        Get min/max of xy of the given wafer
+        return a tuple of
+        `xmax`, `xmin`, `ymax`, `ymin`
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        self.cursor.execute("SELECT max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) FROM Dut_Info")
-        sqlResult = self.cursor.fetchone()
-        return dict(zip( ["xmax", "xmin", "ymax", "ymin"], sqlResult))
+        if waferIndex == -1:
+            # -1 means stacked map, return bounds of all wafer
+            condition = " Fid >= 0 AND WaferIndex > 0"
+        else:
+            condition = f" Fid={fid} AND WaferIndex={waferIndex}"
+            
+        self.cursor.execute(f'''SELECT 
+                                    max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
+                                FROM 
+                                    Dut_Info
+                                WHERE
+                                    {condition}''')
+        return self.cursor.fetchone()
     
     
     def getWaferInfo(self):
@@ -654,53 +669,111 @@ class DatabaseFetcher:
             valueList = ["N/A" if ele is None else ele for ele in valueTuple]    # Replace all None to N/A
             waferDict[(waferIndex, fid)] = dict(zip(col, valueList))
             
+        # get wafer xy direction and die ratio from File_Info
+        sql = """
+            SELECT
+                Field, Value
+            FROM
+                File_Info
+            WHERE
+                Fid=? AND SubFid=0 AND Field in ('DIE_WID', 'DIE_HT', 'POS_X', 'POS_Y', 'WF_UNITS')
+                """
+        for fid in range(self.num_files):
+            ext_info = {}
+            for field, value in self.cursor.execute(sql, (fid,)):
+                if value is None or value in ["", " "]:
+                    pass
+                else:
+                    ext_info[field] = value
+            # update all wafers of same fid
+            for k, v in waferDict.items():
+                if k[-1] == fid:
+                    v.update(ext_info)
+            
         return waferDict
     
     
-    def getWaferCoordsDict(self, waferIndex: int, site: int, fid: int) -> dict[int, list]:
+    def getWaferCoordsDict(self, waferIndex: int, sites: list[int], fid: int) -> dict[int, list]:
         '''get xy of all dies in the given wafer and sites, indexed by SBIN, 
         `head` is not required since a wafer is tested on a single head'''
         
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        coordsDict: dict[int, list] = {}     # key: sbin, value: coords list
-        if site == -1:
-            sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, fid)
+        if -1 in sites:
+            site_condition = " AND SITE_NUM >= 0"
         else:
-            sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND SITE_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, site, fid)
-            
+            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+        
+        sql = f"""
+                SELECT 
+                    SBIN, XCOORD, YCOORD 
+                FROM 
+                    Dut_Info 
+                WHERE 
+                    WaferIndex=? AND Fid=? AND Supersede=0 {site_condition}
+                """
+        sql_param = (waferIndex, fid)
+        
+        coordsDict = {}
         for SBIN, XCOORD, YCOORD in self.cursor.execute(sql, sql_param):
-            coordsDict.setdefault(SBIN, []).append((XCOORD, YCOORD))
+            if XCOORD is None or YCOORD is None:
+                continue
+            nested = coordsDict.setdefault(SBIN, {})
+            nested.setdefault("x", []).append(XCOORD)
+            nested.setdefault("y", []).append(YCOORD)
+        
+        # convert list to np.array
+        for nested in coordsDict.values():
+            nested["x"] = np.array(nested["x"])
+            nested["y"] = np.array(nested["y"])
         
         return coordsDict
     
     
-    def getStackedWaferData(self, head: int, site: int) -> dict[tuple, int]:
-        ''' get fail count of every X,Y in the database (merge all STDF if opened multiple files) '''
+    def getStackedWaferData(self, sites: list[int]) -> dict[tuple, int]:
+        '''
+        get fail count of every X,Y in the database 
+        (merge all STDF if opened multiple files)
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         failDieDistribution: dict[tuple, int] = {}     # key: coords, value: fail counts
-        if site == -1:
-            sql = " SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
-            sql_param = (head,)
+        
+        if -1 in sites:
+            site_condition = " AND SITE_NUM >= 0"
         else:
-            sql = "SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
-            sql_param = (head, site)
+            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+        
+        sql = f"""
+            SELECT 
+                XCOORD, YCOORD, Flag, count(Flag) 
+            FROM 
+                Dut_Info
+            WHERE 
+                HEAD_NUM>=0 AND Supersede=0{site_condition} 
+            GROUP By 
+                XCOORD, YCOORD, Flag"""
             
-        for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
+        for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql):
             if isinstance(XCOORD, int) and isinstance(YCOORD, int) and isinstance(Flag, int):
                 # skip invalid dut (e.g. dut without PRR)
                 previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
                 if Flag & 24 == 8:
                     failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
+                    
+        # convert to dict using fail count as key, list of xy as value
+        failDict = {}
+        for (x, y), count in failDieDistribution.items():
+            nested = failDict.setdefault(count, {})
+            nested.setdefault("x", []).append(x)
+            nested.setdefault("y", []).append(y)
+            
+        # convert list to np.array
+        for nested in failDict.values():
+            nested["x"] = np.array(nested["x"])
+            nested["y"] = np.array(nested["y"])
         
-        return failDieDistribution
+        return failDict
     
     
     def getDUTIndexFromBin(self, head: int, site: int, bin: int, isHBIN: bool = True, fileId: int = -1) -> list:

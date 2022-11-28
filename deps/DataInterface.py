@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Mon Nov 28 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -629,8 +629,8 @@ class DataInterface:
             vHeaderLabels.append("{}#{} / {}".format("" if self.num_files == 1 else f"File{fid} / ",
                                                      waferIndex, 
                                                      "All Sites" if site == -1 else f"Site{site}"))
-            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, site, fid)
-            totalDies = sum([len(coordList) for coordList in coordsDict.values()])
+            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, [site], fid)
+            totalDies = sum([len(xyDict["x"]) for xyDict in coordsDict.values()])
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(-1, site, waferIndex, fid)
@@ -711,7 +711,68 @@ class DataInterface:
         return {"TestInfo": testInfo, "Data": data}
 
 
-
+    def getWaferMapData(self, testTuple: tuple, selectSites: list[int]) -> dict:
+        '''
+        Get single-head, multi-site trend chart data of ONE test item
+        
+        `testTuple`:  selected wafer (wafer index, file id, wafer name)
+        `selectSites`: list of selected STDF sites
+        
+        return a dictionary contains:
+        `Bounds`: a tuple contains wafer boundaries (`xmax`, `xmin`, `ymax`, `ymin`)
+        `Stack`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
+        `Info`: a tuple, (`ratio`, `die_size`, `invertX`, `invertY`, `wafer ID`, `sites`)
+        `Data`: a dict, key: sbin, value: {"x" -> x_array, "y" -> y_array}
+        `Legend`: for wafermap, a dict of sbin -> legend string
+        '''
+        waferInd, fid, waferID = testTuple
+        bounds = self.DatabaseFetcher.getWaferBounds(waferInd, fid)
+        
+        # bounds should all be int type, 
+        # otherwise we cannot creat numpy mesh
+        if any(map(lambda i: not isinstance(i, int), bounds)):
+            return {}
+        legends = {}
+        if waferInd == -1:
+            stack = True
+            data = self.DatabaseFetcher.getStackedWaferData(selectSites)
+            for count in data.keys():
+                legends[count] = f"Fail Count: {count}"
+        else:
+            stack = False
+            data = self.DatabaseFetcher.getWaferCoordsDict(waferInd, selectSites, fid)
+            totalDies = sum([len(xyDict["x"]) for xyDict in data.values()])
+            # key: sbin, value: {"x", "y"}
+            for sbin, xyDict in data.items():
+                # get legend label
+                sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
+                sbinCnt = len(xyDict["x"])
+                percent = 100 * sbinCnt / totalDies
+                legendlabel = f"SBIN {sbin} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
+                legends[sbin] = legendlabel
+        # info
+        try:
+            wid = self.waferInfoDict[waferInd, fid].get("DIE_WID", "0")
+            ht = self.waferInfoDict[waferInd, fid].get("DIE_HT", "0")
+            unit = self.waferInfoDict[waferInd, fid].get("WF_UNITS", "")
+            ratio = float(wid) / float(ht)
+            die_size = f"{wid} {unit} × {ht} {unit}"
+            # default positive direction
+            invertX = "R" != self.waferInfoDict[waferInd, fid].get("POS_X", "R")
+            invertY = "U" != self.waferInfoDict[waferInd, fid].get("POS_Y", "U")            
+        except (ValueError, KeyError, ZeroDivisionError):
+            ratio = 1
+            die_size = ""
+            invertX = False
+            invertY = False
+        
+        return {"Bounds": bounds, 
+                "Stack": stack, 
+                "Info": (ratio, die_size, 
+                         invertX, invertY, 
+                         waferID, selectSites), 
+                "Data": data,
+                "Legend": legends}
 
 
 if __name__ == "__main__":

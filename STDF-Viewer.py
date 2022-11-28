@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Nov 27 2022
+# Last Modified: Mon Nov 28 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -863,7 +863,10 @@ class MyWindow(QtWidgets.QMainWindow):
     
     #TODO
     def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
-        '''testTuple: (test_num, pmr, test_name)'''
+        '''
+        testTuple: (test_num, pmr, test_name)
+        For wafer: (wafer index, file id, wafer name)
+        '''
         if tabType == tab.Trend:
             tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
             tchart = TrendChart()
@@ -874,7 +877,12 @@ class MyWindow(QtWidgets.QMainWindow):
         elif tabType == tab.Histo:
             pass
         elif tabType == tab.Wafer:
-            pass
+            wdata = self.data_interface.getWaferMapData(testTuple, selectSites)
+            wchart = WaferMap()
+            wchart.setWaferData(wdata)
+            if wchart.validData:
+                return wchart
+        
         elif tabType == tab.Bin:
             pass
         
