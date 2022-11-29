@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Mon Nov 28 2022
+# Last Modified: Tue Nov 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -723,7 +723,7 @@ class DataInterface:
         `Stack`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
         `Info`: a tuple, (`ratio`, `die_size`, `invertX`, `invertY`, `wafer ID`, `sites`)
         `Data`: a dict, key: sbin, value: {"x" -> x_array, "y" -> y_array}
-        `Legend`: for wafermap, a dict of sbin -> legend string
+        `Statistic`: for wafermap, a dict of sbin -> (sbinName, sbinCnt, percent)
         '''
         waferInd, fid, waferID = testTuple
         bounds = self.DatabaseFetcher.getWaferBounds(waferInd, fid)
@@ -732,24 +732,25 @@ class DataInterface:
         # otherwise we cannot creat numpy mesh
         if any(map(lambda i: not isinstance(i, int), bounds)):
             return {}
-        legends = {}
+        statistic = {}
         if waferInd == -1:
             stack = True
             data = self.DatabaseFetcher.getStackedWaferData(selectSites)
             for count in data.keys():
-                legends[count] = f"Fail Count: {count}"
+                # for bypass validation check only
+                statistic[count] = count
         else:
             stack = False
             data = self.DatabaseFetcher.getWaferCoordsDict(waferInd, selectSites, fid)
             totalDies = sum([len(xyDict["x"]) for xyDict in data.values()])
             # key: sbin, value: {"x", "y"}
             for sbin, xyDict in data.items():
-                # get legend label
+                # get statistic
                 sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
                 sbinCnt = len(xyDict["x"])
                 percent = 100 * sbinCnt / totalDies
-                legendlabel = f"SBIN {sbin} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
-                legends[sbin] = legendlabel
+                # legendlabel = f"SBIN {sbin} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
+                statistic[sbin] = (sbinName, sbinCnt, percent)
         # info
         try:
             wid = self.waferInfoDict[waferInd, fid].get("DIE_WID", "0")
@@ -772,7 +773,7 @@ class DataInterface:
                          invertX, invertY, 
                          waferID, selectSites), 
                 "Data": data,
-                "Legend": legends}
+                "Statistic": statistic}
 
 
 if __name__ == "__main__":

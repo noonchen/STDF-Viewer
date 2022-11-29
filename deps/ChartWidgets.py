@@ -24,9 +24,12 @@
 
 
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 import numpy as np
 import pyqtgraph as pg
+import pyqtgraph.functions as fn
+from pyqtgraph.icons import getGraphIcon
+from pyqtgraph.graphicsItems.ScatterPlotItem import drawSymbol
 import deps.SharedSrc as ss
 
 pg.setConfigOptions(foreground='k', background='w', antialias=False)
@@ -212,6 +215,26 @@ class TrendChart(pg.GraphicsView):
             v.enableAutoRange(enable=True)
                 
 
+class WaferBlock(pg.ItemSample):
+    '''
+    Used for changing square sizes in legends
+    '''
+    def paint(self, p, *args):
+        opts = self.item.opts
+
+        visible = self.item.isVisible()
+        if not visible:
+            icon = getGraphIcon("invisibleEye")
+            p.drawPixmap(QtCore.QPoint(1, 1), icon.pixmap(18, 18))
+            return
+
+        symbol = opts.get('symbol', None)
+        if symbol is not None:
+            p.translate(10, 15)
+            drawSymbol(p, symbol, 20, fn.mkPen(opts['pen']),
+                       fn.mkBrush(opts['brush']))
+    
+
 class WaferMap(pg.GraphicsView):
     def __init__(self, *arg, **kargs):
         super().__init__(*arg, **kargs)
@@ -224,7 +247,7 @@ class WaferMap(pg.GraphicsView):
         self.validData = False
         
     def setWaferData(self, waferData: dict):
-        if len(waferData) == 0 or len(waferData["Legend"]) == 0:
+        if len(waferData) == 0 or len(waferData["Statistic"]) == 0:
             return
         
         settings = ss.getSetting()
@@ -233,14 +256,29 @@ class WaferMap(pg.GraphicsView):
         pitem = pg.PlotItem(viewBox=view)
         # put legend in another view
         view_legend = pg.ViewBox()
-        legend = pg.LegendItem(labelTextSize="12pt")
-        view_legend.addItem(legend)
-        
+        pitem_legend = pg.PlotItem(viewBox=view_legend, enableMenu=False)
+        pitem_legend.getAxis("left").hide()
+        pitem_legend.getAxis("bottom").hide()
+        legend = pitem_legend.addLegend(offset=(10, 10), 
+                                        verSpacing=5, 
+                                        labelTextSize="15pt")
         xyData = waferData["Data"]
         isStackMap = waferData["Stack"]
-        legendDict = waferData["Legend"]
         
-        for num, xyDict in xyData.items():
+        for num in sorted(xyData.keys()):
+            xyDict = xyData[num]
+            # for stack map, num = fail counts
+            # for wafer map, num = sbin number
+            if isStackMap:
+                color = "#FF0000"
+                tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
+                legendString = f"Fail Count: {num}"
+            else:
+                color = settings.sbinColor[num]
+                (sbinName, sbinCnt, percent) = waferData["Statistic"][num]
+                tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nSBIN {num}\nBin Name: {sbinName}".format
+                legendString = f"SBIN {num} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
+            
             spi = pg.ScatterPlotItem(
                 symbol="s",
                 pen=None,
@@ -249,26 +287,24 @@ class WaferMap(pg.GraphicsView):
                 hoverable=True,
                 hoverPen=pg.mkPen('r', width=4),
                 hoverSize=1,
-                name=legendDict[num])
-            # for stack map, num = fail counts
-            # for wafer map, num = sbin number
-            if isStackMap:
-                color = "#FF0000"
-            else:
-                color = settings.sbinColor[num]
+                tip=tipFunc,
+                name=legendString)
             spi.addPoints(x=xyDict["x"], y=xyDict["y"], brush=color)
             pitem.addItem(spi)
-            legend.addItem(spi, spi.name())
+            legend.addItem(WaferBlock(spi), spi.name())
         
         (ratio, die_size, invertX, invertY, waferID, sites) = waferData["Info"]
-        view.setAspectLocked(lock=True, ratio=ratio)            
-        x_max, x_min, y_max, y_min = waferData["Bounds"]
-        view.setLimits(xMin=x_min-3, xMax=x_max+3, 
-                       yMin=y_min-3, yMax=y_max+3, 
+        x_max, x_min, y_max, y_min = waferData["Bounds"]        
+        view.setLimits(xMin=x_min-50, xMax=x_max+50, 
+                       yMin=y_min-50, yMax=y_max+50, 
+                       maxXRange=(x_max-x_min+100), 
+                       maxYRange=(y_max-y_min+100),
                        minXRange=2, minYRange=2)
-        view.setRange(xRange=(x_min-1, x_max+1), 
-                      yRange=(y_min-1, y_max+1),
+        view.setRange(xRange=(x_min-5, x_max+5), 
+                      yRange=(y_min-5, y_max+5),
                       disableAutoRange=False)
+        view.setAspectLocked(lock=True, ratio=ratio)
+        
         if invertX:
             view.invertX(True)
         if invertY:
@@ -284,8 +320,7 @@ class WaferMap(pg.GraphicsView):
         # add map and axis
         self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)        
         # add legend
-        legend.setOffset((30, 30))
-        self.plotlayout.addItem(view_legend, row=1, col=2, rowspan=1, colspan=1)
+        self.plotlayout.addItem(pitem_legend, row=1, col=2, rowspan=1, colspan=1)
 
 
 __all__ = ["TrendChart", 
