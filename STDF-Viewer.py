@@ -794,15 +794,24 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateTestDataTable()
             return
         
-        # draw plots        
-        selTests = self.getSelectedTests()
-        #TODO clean all plots in the current layout
-        self.clearAllContents()
+        # get selected tests
+        if tabType == tab.Bin:
+            # BinChart is irrelevent to tests, 
+            # fake a list with only one element
+            selTests = [""]
+        else:
+            selTests = self.getSelectedTests()
+        # clean all plots in the current layout
+        self.clearCurrentTab(tabType)
         tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
         for testTuple, head in product(selTests, selHeads):
             chart = self.genPlot(testTuple, head, selSites, tabType)
-            if chart:
+            if isinstance(chart, QtWidgets.QGraphicsView):
                 tabLayout.addWidget(chart)
+            elif isinstance(chart, list):
+                for c in chart:
+                    if isinstance(c, QtWidgets.QGraphicsView):
+                        tabLayout.addWidget(c)
         
     
     def updateStatTableContent(self):
@@ -889,24 +898,37 @@ class MyWindow(QtWidgets.QMainWindow):
                 return wchart
         
         elif tabType == tab.Bin:
-            pass
+            bcharts = []
+            # one site per binchart
+            for site in selectSites:
+                bdata = self.data_interface.getBinChartData(head, site)
+                bchart = BinChart()
+                bchart.setBinData(bdata)
+                if bchart.validData:
+                    bcharts.append(bchart)
+            return bcharts
         
         return None
             
             
-    def clearOtherTab(self, currentTab):        
-        # clear other tabs' images
-        if currentTab != tab.Wafer:
-            # wafer tab and other tab is separated in the app
-            # we don't want to clean trend/histo/bin when we are in wafer tab
-            [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
+    def clearCurrentTab(self, currentTab: tab):
+        layout: QtWidgets.QVBoxLayout = self.tab_dict[currentTab]["layout"]
+        # put widgets in a list and delete at once
+        # if delete directly from layout, the widget index might be invalid
+        wl = []
+        for i in range(layout.count()):
+            wl.append(layout.itemAt(i).widget())
+        # delete from list
+        for w in wl:
+            deleteWidget(w)
+        del wl
         gc.collect()
     
     
     def clearAllContents(self):
         # clear tabs' images
-        [[deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
-        
+        for t in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+            self.clearCurrentTab(t)
         self.selectionTracker = {}
         gc.collect()
     

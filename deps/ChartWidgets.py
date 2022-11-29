@@ -215,6 +215,56 @@ class TrendChart(pg.GraphicsView):
             v.enableAutoRange(enable=True)
                 
 
+class BinChart(pg.GraphicsView):
+    def __init__(self, *arg, **kargs):
+        super().__init__(*arg, **kargs)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
+                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumWidth(800)
+        self.setMinimumHeight(800)
+        self.plotlayout = pg.GraphicsLayout()
+        self.setCentralWidget(self.plotlayout)
+        self.validData = False
+        
+    def setBinData(self, binData: dict):
+        if len(binData) == 0:
+            return
+        
+        settings = ss.getSetting()
+        self.validData = True
+        row = 0
+        (head, site) = binData["HS"]
+        hs_info = f" - Head {head} - " + f"All Site" if site == -1 else f"Site {site}"
+        # create two plot items for HBIN & SBIN
+        for binType in ["HBIN", "SBIN"]:
+            hsbin = binData[binType]
+            num_files = len(hsbin)
+            binColorDict = settings.hbinColor if binType == "HBIN" else settings.sbinColor
+            # add title
+            binTypeName = "Hardware Bin" if binType == "HBIN" else "Software Bin"
+            self.plotlayout.addLabel(f"{binTypeName}{hs_info}", row=row, col=0, rowspan=1, colspan=num_files)
+            row += 1
+            # iterate thru all files
+            for fid in sorted(hsbin.keys()):
+                view_bin = pg.ViewBox()
+                pitem = pg.PlotItem(viewBox=view_bin)
+                binStats = hsbin[fid]
+                # get data for barGraph
+                numList = sorted(binStats.keys())
+                cntList = [binStats[n] for n in numList]
+                colorList = [binColorDict[n] for n in numList]
+                
+                bar = pg.BarGraphItem(x=numList, height=cntList, width=0.3, brushes=colorList)
+                pitem.addItem(bar)
+                # add them to the same row
+                self.plotlayout.addItem(pitem, row=row, col=fid, rowspan=1, colspan=1)
+            row += 1
+        
+        
+        view_sbin = pg.ViewBox()
+        
+
+
 class WaferBlock(pg.ItemSample):
     '''
     Used for changing square sizes in legends
@@ -326,5 +376,6 @@ class WaferMap(pg.GraphicsView):
 
 
 __all__ = ["TrendChart", 
+           "BinChart",
            "WaferMap"
            ]

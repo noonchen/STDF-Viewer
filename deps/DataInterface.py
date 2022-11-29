@@ -713,6 +713,31 @@ class DataInterface:
         return {"TestInfo": testInfo, "Data": data}
 
 
+    def getBinChartData(self, head: int, site: int) -> dict:
+        '''
+        Get single-head, single-site HBIN & SBIN data from all files
+        
+        return a dictionary contains:
+        `HS`: (head, site)
+        `HBIN`: {fid -> {}}
+        `SBIN`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
+        '''
+        binData = {"HS": (head, site)}
+        for isHBIN in [True, False]:
+            # convert bin -> [count] 
+            # to fid -> {bin -> count}
+            orig = self.DatabaseFetcher.getBinStats(head, site, isHBIN=isHBIN)
+            new = {}
+            for bin_num, cntList in orig.items():
+                for fid, cnt in enumerate(cntList):
+                    binCntDict = new.setdefault(fid, {})
+                    if cnt:
+                        binCntDict[bin_num] = cnt
+            keyName = "HBIN" if isHBIN else "SBIN"
+            binData[keyName] = new
+        return binData
+    
+    
     def getWaferMapData(self, testTuple: tuple, selectSites: list[int]) -> dict:
         '''
         Get single-head, multi-site trend chart data of ONE test item
