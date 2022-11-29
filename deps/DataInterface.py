@@ -26,10 +26,10 @@ class DataInterface:
     The main purpose is to decouple IO code from GUI logic...
     '''
     
-    def __init__(self, paths: list[list[str]]):
-        self.file_paths = paths
-        self.num_files = len(paths)
-        self.DatabaseFetcher = DatabaseFetcher(self.num_files)
+    def __init__(self):
+        self.DatabaseFetcher = DatabaseFetcher()
+        self.file_paths = []
+        self.num_files = 0
         self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
@@ -51,11 +51,13 @@ class DataInterface:
         
         
     def loadDatabase(self):
-        if self.dbPath == "":
+        if not os.path.isfile(self.dbPath):
             raise ValueError("Invalid database path")
         
         self.DatabaseFetcher.connectDB(self.dbPath)
         self.dbConnected = True
+        self.file_paths = self.DatabaseFetcher.file_paths
+        self.num_files = self.DatabaseFetcher.num_files
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Nov 28 2022
+# Last Modified: Tue Nov 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -43,12 +43,10 @@ def tryDecode(b: bytes) -> str:
 
 
 class DatabaseFetcher:
-    def __init__(self, num_files: int):
+    def __init__(self):
         self.connection = None
         self.cursor = None
-        self.num_files = num_files
-        # dut array from all files
-        self.dutArrays = []
+        self.file_paths = []
     
     
     def connectDB(self, dataBasePath: str):
@@ -56,12 +54,37 @@ class DatabaseFetcher:
         self.connection = sqlite3.connect(dataBasePath)
         self.connection.text_factory = tryDecode
         self.cursor = self.connection.cursor()
+        self.readFilePaths()
         
     
     def closeDB(self):
         if not self.connection is None:
             self.connection.close()
         
+    
+    def readFilePaths(self):
+        '''read file paths stored in the database'''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        d = {}
+        for fid, path in self.cursor.execute('''SELECT 
+                                                    Fid, Filename 
+                                                FROM 
+                                                    File_List 
+                                                ORDER 
+                                                    By Fid, SubFid'''):
+            d.setdefault(fid, []).append(path)
+        
+        l = []
+        for fid in sorted(d.keys()):
+            l.append(d[fid])
+        self.file_paths = l
+        
+    
+    @property
+    def num_files(self):
+        return len(self.file_paths)
+    
     
     def getWaferCount(self) -> list[int]:
         '''return a list of int, where list[file_index] = count'''
@@ -318,40 +341,6 @@ class DatabaseFetcher:
             nested = TestFailCnt[(TEST_NUM, TEST_NAME)]
             nested[Fid] = FailCount
         return TestFailCnt
-    
-    
-    def getDUT_SiteInfo(self):
-        '''return a list of dutSiteInfo dict, which 
-        contains `dutIndex` to `site` information used for dut masking'''
-        if self.cursor is None: raise RuntimeError("No database is connected")
-        
-        # clear previous dutArrays if exist, avoid duplicates
-        self.dutArrays = []
-        dutSiteInfoList = []
-        for fid in range(self.num_files):
-            headList = set()
-            for head, in self.cursor.execute(f"SELECT DISTINCT HEAD_NUM FROM Dut_Info WHERE Fid={fid}"):
-                headList.add(head)
-            # initalize dutSiteInfo dict, head as key, [] as value
-            dutSiteInfo = dict( zip(headList, [[] for _ in range(len(headList))] ) )
-            completeDutList = []
-            
-            sql = f"SELECT HEAD_NUM, SITE_NUM, DUTIndex FROM Dut_Info WHERE Fid={fid} ORDER by DUTIndex"
-            for HEAD_NUM, SITE_NUM, DUTIndex in self.cursor.execute(sql):
-                completeDutList.append(DUTIndex)
-                for h, sl in dutSiteInfo.items():
-                    sl.append(SITE_NUM if h == HEAD_NUM else None)
-                        
-            # convert to numpy array for masking
-            completeDutArray = np.array(completeDutList, dtype=int)
-            for head, sitelist in dutSiteInfo.items():
-                dutSiteInfo[head] = np.array(sitelist, dtype=float)
-                
-            # store dut array for other functions
-            self.dutArrays.append(completeDutArray)
-            dutSiteInfoList.append(dutSiteInfo)
-        
-        return dutSiteInfoList
     
     
     def getDUTCountDict(self):

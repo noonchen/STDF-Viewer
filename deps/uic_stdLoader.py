@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Tue Nov 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -164,7 +164,7 @@ class stdReader(QtCore.QObject):
         
     @Slot()
     def readBegin(self):
-        di = DataInterface(self.stdPaths)
+        di = DataInterface()
         sendDI = True
         showWarning = False
         finalMsg = ""

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Nov 28 2022
+# Last Modified: Tue Nov 29 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -154,6 +154,7 @@ class MyWindow(QtWidgets.QMainWindow):
         atexit.register(self.onExit)
         # set language after initing subwindow & reading config
         self.changeLanguage()
+        self.restorePreviousSession()
         
         
     def checkNewVersion(self):
@@ -335,16 +336,20 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         self.db_dut.close()
         if self.data_interface:
+            currentDB = self.data_interface.dbPath
             self.data_interface.close()
+        else:
+            currentDB = "???"
         # save settings to file
         dumpConfigFile()
         # clean generated database
         dbFolder = os.path.join(sys.rootFolder, "logs")
         for f in os.listdir(dbFolder):
-            if f.endswith(".db"):
+            # save current database
+            if f.endswith(".db") and not currentDB.endswith(f):
                 try:
                     os.remove(os.path.join(dbFolder, f))
-                except:
+                except OSError:
                     pass
     
     
@@ -911,6 +916,24 @@ class MyWindow(QtWidgets.QMainWindow):
             self.loader.loadFile(paths)
 
         
+    def restorePreviousSession(self):
+        '''
+        looking for database of previous loaded
+        stdf files
+        '''
+        dbFolder = os.path.join(sys.rootFolder, "logs")
+        dbs = [f for f in os.listdir(dbFolder) if f.endswith(".db")]
+        if dbs:
+            dbPath = os.path.join(dbFolder, dbs[0])
+            self.loadDatabase(dbPath)
+    
+    
+    def loadDatabase(self, dbPath: str):
+        di = DataInterface()
+        di.dbPath = dbPath
+        self.signals.dataInterfaceSignal.emit(di)
+    
+    
     @Slot(object)
     def updateData(self, newDI: DataInterface):
         if newDI is not None:
@@ -933,8 +956,6 @@ class MyWindow(QtWidgets.QMainWindow):
             
             # disable/enable wafer tab
             self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
-            #TODO read waferDict
-            # self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
     
             # update listView
             self.completeTestList = self.data_interface.completeTestList
