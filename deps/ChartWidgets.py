@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Tue Nov 29 2022
+# Last Modified: Wed Nov 30 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -194,7 +194,7 @@ class TrendChart(pg.GraphicsView):
             oh = 0.02 * (x_max - x_min)
             x_min -= oh
             x_max += oh
-            view.setAutoPan()
+            # view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
                           yRange=(y_min, y_max))
             view.setLimits(xMin=x_min, xMax=x_max,      # avoid blank area
@@ -227,7 +227,9 @@ class BinChart(pg.GraphicsView):
         self.validData = False
         
     def setBinData(self, binData: dict):
-        if len(binData) == 0:
+        if not all([k in binData for k in ["HS", 
+                                           "HBIN", "SBIN", 
+                                           "HBIN_Ticks", "SBIN_Ticks"]]):
             return
         
         settings = ss.getSetting()
@@ -238,31 +240,55 @@ class BinChart(pg.GraphicsView):
         # create two plot items for HBIN & SBIN
         for binType in ["HBIN", "SBIN"]:
             hsbin = binData[binType]
+            binTicks = binData[binType+"_Ticks"]
             num_files = len(hsbin)
+            # use a list to track viewbox count
+            vbList = []
             binColorDict = settings.hbinColor if binType == "HBIN" else settings.sbinColor
             # add title
             binTypeName = "Hardware Bin" if binType == "HBIN" else "Software Bin"
-            self.plotlayout.addLabel(f"{binTypeName}{hs_info}", row=row, col=0, rowspan=1, colspan=num_files)
+            self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
+                                     row=row, col=0, 
+                                     rowspan=1, colspan=num_files, 
+                                     size="20pt")
             row += 1
             # iterate thru all files
             for fid in sorted(hsbin.keys()):
+                isFirstPlot = len(vbList) == 0
                 view_bin = pg.ViewBox()
+                view_bin.invertY(True)
                 pitem = pg.PlotItem(viewBox=view_bin)
                 binStats = hsbin[fid]
                 # get data for barGraph
-                numList = sorted(binStats.keys())
-                cntList = [binStats[n] for n in numList]
+                numList = sorted(binTicks.keys())
+                cntList = [binStats.get(n, 0) for n in numList]
                 colorList = [binColorDict[n] for n in numList]
-                
-                bar = pg.BarGraphItem(x=numList, height=cntList, width=0.3, brushes=colorList)
+                # draw horizontal bars, use `ind` instead of `bin_num` as y
+                bar = pg.BarGraphItem(x0=0, y=np.arange(len(numList)), width=cntList, height=0.8, brushes=colorList)
                 pitem.addItem(bar)
+                # set ticks to y
+                ticks = [[binTicks[n] for n in numList]]
+                pitem.getAxis("left").setTicks(ticks)
+                pitem.getAxis("bottom").setLabel(f"{binType} Count" 
+                                                 if num_files == 1 
+                                                 else f"{binType} Count in File {fid}")
+                # set visible range
+                x_max = max(cntList) * 1.15
+                y_max = len(numList)
+                view_bin.setLimits(xMin=0, xMax=x_max, 
+                                   yMin=-1, yMax=y_max, 
+                                   minXRange=2, minYRange=y_max+1)
+                view_bin.setRange(xRange=(0, x_max), 
+                                  yRange=(-1, y_max),
+                                  disableAutoRange=False)
                 # add them to the same row
                 self.plotlayout.addItem(pitem, row=row, col=fid, rowspan=1, colspan=1)
-            row += 1
-        
-        
-        view_sbin = pg.ViewBox()
-        
+                # for 2nd+ plots
+                if not isFirstPlot:
+                    pitem.getAxis("left").hide()
+                    view_bin.setYLink(vbList[0])
+                vbList.append(view_bin)
+            row += 1        
 
 
 class WaferBlock(pg.ItemSample):

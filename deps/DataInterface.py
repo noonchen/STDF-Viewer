@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Tue Nov 29 2022
+# Last Modified: Wed Nov 30 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -89,7 +89,6 @@ class DataInterface:
         if not self.dbConnected:
             return metaDataList
         # some basic os info
-        get_file_size = lambda p: "%.2f MB"%(os.stat(p).st_size / 2**20)
         add_i_ifmany = lambda l: l if len(l) < 2 else [f"#{i+1} → {e}" for i, e in enumerate(l)]
         metaDataList.append(["File Name: ", *list(["\n".join(add_i_ifmany(list(map(os.path.basename, fg)))) for fg in self.file_paths]) ])
         metaDataList.append(["Directory Path: ", *list([os.path.dirname(fg[0]) for fg in self.file_paths]) ])
@@ -719,8 +718,10 @@ class DataInterface:
         
         return a dictionary contains:
         `HS`: (head, site)
-        `HBIN`: {fid -> {}}
-        `SBIN`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
+        `HBIN`: {fid -> {hbin -> count}}
+        `SBIN`: {fid -> {hbin -> count}}
+        `HBIN_Ticks`: dict, key: all HBINs in `HBIN`, value: [(i, tick name)]
+        `SBIN_Ticks`: dict, key: all SBINs in `SBIN`, value: [(i, tick name)]
         '''
         binData = {"HS": (head, site)}
         for isHBIN in [True, False]:
@@ -735,6 +736,17 @@ class DataInterface:
                         binCntDict[bin_num] = cnt
             keyName = "HBIN" if isHBIN else "SBIN"
             binData[keyName] = new
+            # create ticks for pyqtgraph BarGraphItem
+            # all files share a same tick, all bin num should
+            # be included
+            tickDict = {}
+            binInfo = self.HBIN_dict if isHBIN else self.SBIN_dict
+            for i, bin_num in enumerate(sorted(orig.keys())):
+                # i is the real coordinate for Bars
+                bin_name = binInfo[bin_num].get("BIN_NAME", "")
+                tick_name = bin_name if bin_name else f"{keyName} {bin_num}"
+                tickDict[bin_num] = (i, tick_name)
+            binData[keyName+"_Ticks"] = tickDict
         return binData
     
     

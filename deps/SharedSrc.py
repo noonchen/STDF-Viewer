@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Nov 27 2022
+# Last Modified: Wed Nov 30 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -580,6 +580,12 @@ def revealFile(filepath: str):
         subprocess.call(('xdg-open', os.path.dirname(filepath)))
 
 
+def get_file_size(p: str) -> str:
+    try:
+        return "%.2f MB"%(os.stat(p).st_size / 2**20)
+    except:
+        return "?? MB"
+
 
 # # TODO
 # def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
@@ -1001,7 +1007,7 @@ __all__ = ["SettingParams", "tab", "REC",
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "loadFonts", 
-           "calc_cpk", "deleteWidget", "isPass", "openFileInOS", "revealFile", "rHEX", 
+           "calc_cpk", "deleteWidget", "isPass", "openFileInOS", "revealFile", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",
