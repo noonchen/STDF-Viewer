@@ -264,13 +264,15 @@ class WaferMap(pg.GraphicsView):
                                         labelTextSize="15pt")
         xyData = waferData["Data"]
         isStackMap = waferData["Stack"]
+        stackColorMap = pg.ColorMap(pos=None, color=["#00EE00", "#EEEE00", "#EE0000"])
+        sortedKeys = sorted(xyData.keys())
         
-        for num in sorted(xyData.keys()):
+        for num in sortedKeys:
             xyDict = xyData[num]
             # for stack map, num = fail counts
             # for wafer map, num = sbin number
             if isStackMap:
-                color = "#FF0000"
+                color = stackColorMap.mapToQColor(num/sortedKeys[-1])
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
                 legendString = f"Fail Count: {num}"
             else:
