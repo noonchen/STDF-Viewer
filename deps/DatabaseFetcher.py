@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -43,12 +43,10 @@ def tryDecode(b: bytes) -> str:
 
 
 class DatabaseFetcher:
-    def __init__(self, num_files: int):
+    def __init__(self):
         self.connection = None
         self.cursor = None
-        self.num_files = num_files
-        # dut array from all files
-        self.dutArrays = []
+        self.file_paths = []
     
     
     def connectDB(self, dataBasePath: str):
@@ -56,12 +54,37 @@ class DatabaseFetcher:
         self.connection = sqlite3.connect(dataBasePath)
         self.connection.text_factory = tryDecode
         self.cursor = self.connection.cursor()
+        self.readFilePaths()
         
     
     def closeDB(self):
         if not self.connection is None:
             self.connection.close()
         
+    
+    def readFilePaths(self):
+        '''read file paths stored in the database'''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        d = {}
+        for fid, path in self.cursor.execute('''SELECT 
+                                                    Fid, Filename 
+                                                FROM 
+                                                    File_List 
+                                                ORDER 
+                                                    By Fid, SubFid'''):
+            d.setdefault(fid, []).append(path)
+        
+        l = []
+        for fid in sorted(d.keys()):
+            l.append(d[fid])
+        self.file_paths = l
+        
+    
+    @property
+    def num_files(self):
+        return len(self.file_paths)
+    
     
     def getWaferCount(self) -> list[int]:
         '''return a list of int, where list[file_index] = count'''
@@ -318,40 +341,6 @@ class DatabaseFetcher:
             nested = TestFailCnt[(TEST_NUM, TEST_NAME)]
             nested[Fid] = FailCount
         return TestFailCnt
-    
-    
-    def getDUT_SiteInfo(self):
-        '''return a list of dutSiteInfo dict, which 
-        contains `dutIndex` to `site` information used for dut masking'''
-        if self.cursor is None: raise RuntimeError("No database is connected")
-        
-        # clear previous dutArrays if exist, avoid duplicates
-        self.dutArrays = []
-        dutSiteInfoList = []
-        for fid in range(self.num_files):
-            headList = set()
-            for head, in self.cursor.execute(f"SELECT DISTINCT HEAD_NUM FROM Dut_Info WHERE Fid={fid}"):
-                headList.add(head)
-            # initalize dutSiteInfo dict, head as key, [] as value
-            dutSiteInfo = dict( zip(headList, [[] for _ in range(len(headList))] ) )
-            completeDutList = []
-            
-            sql = f"SELECT HEAD_NUM, SITE_NUM, DUTIndex FROM Dut_Info WHERE Fid={fid} ORDER by DUTIndex"
-            for HEAD_NUM, SITE_NUM, DUTIndex in self.cursor.execute(sql):
-                completeDutList.append(DUTIndex)
-                for h, sl in dutSiteInfo.items():
-                    sl.append(SITE_NUM if h == HEAD_NUM else None)
-                        
-            # convert to numpy array for masking
-            completeDutArray = np.array(completeDutList, dtype=int)
-            for head, sitelist in dutSiteInfo.items():
-                dutSiteInfo[head] = np.array(sitelist, dtype=float)
-                
-            # store dut array for other functions
-            self.dutArrays.append(completeDutArray)
-            dutSiteInfoList.append(dutSiteInfo)
-        
-        return dutSiteInfoList
     
     
     def getDUTCountDict(self):
@@ -630,12 +619,27 @@ class DatabaseFetcher:
                     "flagList": flagList}
     
     
-    def getWaferBounds(self):
+    def getWaferBounds(self, waferIndex: int, fid: int) -> tuple:
+        '''
+        Get min/max of xy of the given wafer
+        return a tuple of
+        `xmax`, `xmin`, `ymax`, `ymin`
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        self.cursor.execute("SELECT max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) FROM Dut_Info")
-        sqlResult = self.cursor.fetchone()
-        return dict(zip( ["xmax", "xmin", "ymax", "ymin"], sqlResult))
+        if waferIndex == -1:
+            # -1 means stacked map, return bounds of all wafer
+            condition = " Fid >= 0 AND WaferIndex > 0"
+        else:
+            condition = f" Fid={fid} AND WaferIndex={waferIndex}"
+            
+        self.cursor.execute(f'''SELECT 
+                                    max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
+                                FROM 
+                                    Dut_Info
+                                WHERE
+                                    {condition}''')
+        return self.cursor.fetchone()
     
     
     def getWaferInfo(self):
@@ -654,53 +658,111 @@ class DatabaseFetcher:
             valueList = ["N/A" if ele is None else ele for ele in valueTuple]    # Replace all None to N/A
             waferDict[(waferIndex, fid)] = dict(zip(col, valueList))
             
+        # get wafer xy direction and die ratio from File_Info
+        sql = """
+            SELECT
+                Field, Value
+            FROM
+                File_Info
+            WHERE
+                Fid=? AND SubFid=0 AND Field in ('DIE_WID', 'DIE_HT', 'POS_X', 'POS_Y', 'WF_UNITS')
+                """
+        for fid in range(self.num_files):
+            ext_info = {}
+            for field, value in self.cursor.execute(sql, (fid,)):
+                if value is None or value in ["", " "]:
+                    pass
+                else:
+                    ext_info[field] = value
+            # update all wafers of same fid
+            for k, v in waferDict.items():
+                if k[-1] == fid:
+                    v.update(ext_info)
+            
         return waferDict
     
     
-    def getWaferCoordsDict(self, waferIndex: int, site: int, fid: int) -> dict[int, list]:
+    def getWaferCoordsDict(self, waferIndex: int, sites: list[int], fid: int) -> dict[int, list]:
         '''get xy of all dies in the given wafer and sites, indexed by SBIN, 
         `head` is not required since a wafer is tested on a single head'''
         
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        coordsDict: dict[int, list] = {}     # key: sbin, value: coords list
-        if site == -1:
-            sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, fid)
+        if -1 in sites:
+            site_condition = " AND SITE_NUM >= 0"
         else:
-            sql = "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-                WHERE WaferIndex=? AND SITE_NUM=? AND Fid=? AND Supersede=0 ORDER by SBIN"
-            sql_param = (waferIndex, site, fid)
-            
+            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+        
+        sql = f"""
+                SELECT 
+                    SBIN, XCOORD, YCOORD 
+                FROM 
+                    Dut_Info 
+                WHERE 
+                    WaferIndex=? AND Fid=? AND Supersede=0 {site_condition}
+                """
+        sql_param = (waferIndex, fid)
+        
+        coordsDict = {}
         for SBIN, XCOORD, YCOORD in self.cursor.execute(sql, sql_param):
-            coordsDict.setdefault(SBIN, []).append((XCOORD, YCOORD))
+            if XCOORD is None or YCOORD is None:
+                continue
+            nested = coordsDict.setdefault(SBIN, {})
+            nested.setdefault("x", []).append(XCOORD)
+            nested.setdefault("y", []).append(YCOORD)
+        
+        # convert list to np.array
+        for nested in coordsDict.values():
+            nested["x"] = np.array(nested["x"])
+            nested["y"] = np.array(nested["y"])
         
         return coordsDict
     
     
-    def getStackedWaferData(self, head: int, site: int) -> dict[tuple, int]:
-        ''' get fail count of every X,Y in the database (merge all STDF if opened multiple files) '''
+    def getStackedWaferData(self, sites: list[int]) -> dict[tuple, int]:
+        '''
+        get fail count of every X,Y in the database 
+        (merge all STDF if opened multiple files)
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         failDieDistribution: dict[tuple, int] = {}     # key: coords, value: fail counts
-        if site == -1:
-            sql = " SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
-            sql_param = (head,)
+        
+        if -1 in sites:
+            site_condition = " AND SITE_NUM >= 0"
         else:
-            sql = "SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-                WHERE HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 GROUP by XCOORD, YCOORD, Flag"
-            sql_param = (head, site)
+            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+        
+        sql = f"""
+            SELECT 
+                XCOORD, YCOORD, Flag, count(Flag) 
+            FROM 
+                Dut_Info
+            WHERE 
+                HEAD_NUM>=0 AND Supersede=0{site_condition} 
+            GROUP By 
+                XCOORD, YCOORD, Flag"""
             
-        for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql, sql_param):
+        for XCOORD, YCOORD, Flag, count in self.cursor.execute(sql):
             if isinstance(XCOORD, int) and isinstance(YCOORD, int) and isinstance(Flag, int):
                 # skip invalid dut (e.g. dut without PRR)
                 previousCount = failDieDistribution.setdefault((XCOORD, YCOORD), 0)
                 if Flag & 24 == 8:
                     failDieDistribution[(XCOORD, YCOORD)] = previousCount + count
+                    
+        # convert to dict using fail count as key, list of xy as value
+        failDict = {}
+        for (x, y), count in failDieDistribution.items():
+            nested = failDict.setdefault(count, {})
+            nested.setdefault("x", []).append(x)
+            nested.setdefault("y", []).append(y)
+            
+        # convert list to np.array
+        for nested in failDict.values():
+            nested["x"] = np.array(nested["x"])
+            nested["y"] = np.array(nested["y"])
         
-        return failDieDistribution
+        return failDict
     
     
     def getDUTIndexFromBin(self, head: int, site: int, bin: int, isHBIN: bool = True, fileId: int = -1) -> list:
@@ -840,45 +902,3 @@ class DatabaseFetcher:
         
         return info
 
-
-if __name__ == "__main__":
-    from time import time
-    count = 1
-    df = DatabaseFetcher(3)
-    df.connectDB("/Users/nochenon/Documents/GitHub/STDF-Viewer/deps/rust_stdf_helper/target/rust_test.db")
-    s = time()
-    # print(df.getFileInfo())
-    # print(df.getDUTCountDict())
-    # for _ in range(count):
-    # print(df.getDUT_TestInfo(5040, HeadList=[1], SiteList=[-1]))
-    
-    # ** test dut site info
-    # print("\n\ntest dut site info")
-    # dutArray, siteInfo = df.getDUT_SiteInfo()
-    # selHeads = [1]
-    # selSites = [1, 22, 34]
-    # mask = np.zeros(dutArray.size, dtype=bool)
-    # for head in selHeads:
-    #     for site in selSites:
-    #         mask |= (siteInfo[head]==site)
-    # print(mask)
-    # print(dutArray[mask])    
-    
-    # ** test info selDUTs
-    # print(df.getStackedWaferData(1, -1))
-    
-    # ** test wafer coords dict
-    # print(df.getWaferCoordsDict(1, 1, 0))
-    # print('\n', df.getWaferCoordsDict(1, 1, -1))
-    # print('\n', df.getWaferCoordsDict(1, 255, 0))
-    
-    # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
-    # print(df.getDUTIndexFromXY(40, -10, -1))
-    # print(df.getDTR_GDRs())
-    # print(df.getPinNames(21000, "Continuty_digital_pos:passVolt_mV[1]", True))
-    print(df.getByteOrder())
-    
-    
-    e = time()
-    print((e-s)/count, "s")
-    df.connection.close()

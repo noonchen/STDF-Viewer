@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -26,10 +26,10 @@ class DataInterface:
     The main purpose is to decouple IO code from GUI logic...
     '''
     
-    def __init__(self, paths: list[list[str]]):
-        self.file_paths = paths
-        self.num_files = len(paths)
-        self.DatabaseFetcher = DatabaseFetcher(self.num_files)
+    def __init__(self):
+        self.DatabaseFetcher = DatabaseFetcher()
+        self.file_paths = []
+        self.num_files = 0
         self.dbPath = ""
         self.dbConnected = False
         self.containsWafer = False
@@ -51,11 +51,13 @@ class DataInterface:
         
         
     def loadDatabase(self):
-        if self.dbPath == "":
+        if not os.path.isfile(self.dbPath):
             raise ValueError("Invalid database path")
         
         self.DatabaseFetcher.connectDB(self.dbPath)
         self.dbConnected = True
+        self.file_paths = self.DatabaseFetcher.file_paths
+        self.num_files = self.DatabaseFetcher.num_files
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
@@ -87,7 +89,6 @@ class DataInterface:
         if not self.dbConnected:
             return metaDataList
         # some basic os info
-        get_file_size = lambda p: "%.2f MB"%(os.stat(p).st_size / 2**20)
         add_i_ifmany = lambda l: l if len(l) < 2 else [f"#{i+1} → {e}" for i, e in enumerate(l)]
         metaDataList.append(["File Name: ", *list(["\n".join(add_i_ifmany(list(map(os.path.basename, fg)))) for fg in self.file_paths]) ])
         metaDataList.append(["Directory Path: ", *list([os.path.dirname(fg[0]) for fg in self.file_paths]) ])
@@ -193,7 +194,8 @@ class DataInterface:
         
         return a dictionary contains:
         `TEST_NAME` / `TEST_NUM` / `flagList` / 
-        `LL` / `HL` / `Unit` / `dataList` / `DUTIndex` / 
+        `LLimit` / `HLimit` / `Unit` / `dataList` / `DUTIndex` / 
+        `LSpec` / `HSpec` / `OPT_Flag` / `VECT_NAM` / `SEQ_NAME`
         `Min` / `Max` / `Median` / `Mean` / `SDev` / `Cpk`
         '''
         outData = {}
@@ -628,8 +630,8 @@ class DataInterface:
             vHeaderLabels.append("{}#{} / {}".format("" if self.num_files == 1 else f"File{fid} / ",
                                                      waferIndex, 
                                                      "All Sites" if site == -1 else f"Site{site}"))
-            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, site, fid)
-            totalDies = sum([len(coordList) for coordList in coordsDict.values()])
+            coordsDict = self.DatabaseFetcher.getWaferCoordsDict(waferIndex, [site], fid)
+            totalDies = sum([len(xyDict["x"]) for xyDict in coordsDict.values()])
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(-1, site, waferIndex, fid)
@@ -660,15 +662,158 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}    
 
 
-if __name__ == "__main__":
-    stdf_paths = [
-    "/Users/nochenon/Documents/STDF Files/10K_TTR-Log_NormalBinning_P020_05Sep2020_1244.std.gz",
-    "/Users/nochenon/Documents/STDF Files/S5643_62_NI_Fx2_V00_22May2021_TL18B087.3_P1_0941.std.gz",
-    "/Users/nochenon/Documents/STDF Files/IPD_G6S046-09C2_04Jun2022_1350.std",
-    ]
-    di = DataInterface(stdf_paths)
-    di.loadDatabase("deps/rust_stdf_helper/target/rust_test.db")
-    for i in di.getFileMetaData():
-        print(i)
+    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], _selectFiles: list[int] = []) -> dict:
+        '''
+        Get single-head, multi-site trend chart data of ONE test item
         
-    di.close()
+        `testTuple`:  selected test, e.g. (1000, 1, "name")
+        `head`: a selected STDF head
+        `selectSites`: list of selected STDF sites
+        `_selectFiles`: default read all files, currently not in use
+        
+        return a dictionary contains:
+        `TestInfo`: dict, key: file id, value: infoDict
+        `Data`: dict[dict[dict]], e.g.
+                Fid0 -> {Site0 -> testDataDict
+                         Site1 -> testDataDict
+                         ...}
+                Fid1 -> {Site0 -> testDataDict
+                         Site1 -> testDataDict
+                         ...}
+        '''
+        data = {}
+        testInfo = {}
+        for fid, site in itertools.product(range(self.num_files), selectSites):
+            sitesDict = data.setdefault(fid, {})
+            infoDict: dict = testInfo.setdefault(fid, {})
+            # retrieve single site data only
+            test_site_fid = self.getTestDataFromHeadSite(testTuple, [head], [site], fid)
+            if len(test_site_fid) == 0:
+                # skip this site if no data
+                continue
+            nestSiteData = sitesDict.setdefault(site, {})
+            # store all site related data to be drawn
+            nestSiteData["Min"] = test_site_fid.pop("Min")
+            nestSiteData["Max"] = test_site_fid.pop("Max")
+            nestSiteData["Mean"] = test_site_fid.pop("Mean")
+            nestSiteData["Median"] = test_site_fid.pop("Median")
+            # filter out nan from dataList
+            dataOrig = test_site_fid.pop("dataList")
+            validMask = ~np.isnan(dataOrig)
+            nestSiteData["dataList"] = dataOrig[validMask]
+            nestSiteData["dutList"] = test_site_fid.pop("dutList")[validMask]
+            nestSiteData["flagList"] = test_site_fid.pop("flagList")[validMask]
+            if test_site_fid["recHeader"] == REC.MPR:
+                nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
+            elif test_site_fid["recHeader"] == REC.PTR:
+                #TODO dynamic limit
+                pass
+            # info that are same for all sites 
+            # will be stored in testInfo
+            infoDict.update(test_site_fid)
+        
+        return {"TestInfo": testInfo, "Data": data}
+
+
+    def getBinChartData(self, head: int, site: int) -> dict:
+        '''
+        Get single-head, single-site HBIN & SBIN data from all files
+        
+        return a dictionary contains:
+        `HS`: (head, site)
+        `HBIN`: {fid -> {hbin -> count}}
+        `SBIN`: {fid -> {hbin -> count}}
+        `HBIN_Ticks`: dict, key: all HBINs in `HBIN`, value: [(i, tick name)]
+        `SBIN_Ticks`: dict, key: all SBINs in `SBIN`, value: [(i, tick name)]
+        '''
+        binData = {"HS": (head, site)}
+        for isHBIN in [True, False]:
+            # convert bin -> [count] 
+            # to fid -> {bin -> count}
+            orig = self.DatabaseFetcher.getBinStats(head, site, isHBIN=isHBIN)
+            new = {}
+            for bin_num, cntList in orig.items():
+                for fid, cnt in enumerate(cntList):
+                    binCntDict = new.setdefault(fid, {})
+                    if cnt:
+                        binCntDict[bin_num] = cnt
+            keyName = "HBIN" if isHBIN else "SBIN"
+            binData[keyName] = new
+            # create ticks for pyqtgraph BarGraphItem
+            # all files share a same tick, all bin num should
+            # be included
+            tickDict = {}
+            binInfo = self.HBIN_dict if isHBIN else self.SBIN_dict
+            for i, bin_num in enumerate(sorted(orig.keys())):
+                # i is the real coordinate for Bars
+                bin_name = binInfo[bin_num].get("BIN_NAME", "")
+                tick_name = bin_name if bin_name else f"{keyName} {bin_num}"
+                tickDict[bin_num] = (i, tick_name)
+            binData[keyName+"_Ticks"] = tickDict
+        return binData
+    
+    
+    def getWaferMapData(self, testTuple: tuple, selectSites: list[int]) -> dict:
+        '''
+        Get single-head, multi-site trend chart data of ONE test item
+        
+        `testTuple`:  selected wafer (wafer index, file id, wafer name)
+        `selectSites`: list of selected STDF sites
+        
+        return a dictionary contains:
+        `Bounds`: a tuple contains wafer boundaries (`xmax`, `xmin`, `ymax`, `ymin`)
+        `Stack`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
+        `Info`: a tuple, (`ratio`, `die_size`, `invertX`, `invertY`, `wafer ID`, `sites`)
+        `Data`: a dict, key: sbin, value: {"x" -> x_array, "y" -> y_array}
+        `Statistic`: for wafermap, a dict of sbin -> (sbinName, sbinCnt, percent)
+        '''
+        waferInd, fid, waferID = testTuple
+        bounds = self.DatabaseFetcher.getWaferBounds(waferInd, fid)
+        
+        # bounds should all be int type, 
+        # otherwise we cannot creat numpy mesh
+        if any(map(lambda i: not isinstance(i, int), bounds)):
+            return {}
+        statistic = {}
+        if waferInd == -1:
+            stack = True
+            data = self.DatabaseFetcher.getStackedWaferData(selectSites)
+            for count in data.keys():
+                # for bypass validation check only
+                statistic[count] = count
+        else:
+            stack = False
+            data = self.DatabaseFetcher.getWaferCoordsDict(waferInd, selectSites, fid)
+            totalDies = sum([len(xyDict["x"]) for xyDict in data.values()])
+            # key: sbin, value: {"x", "y"}
+            for sbin, xyDict in data.items():
+                # get statistic
+                sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
+                sbinCnt = len(xyDict["x"])
+                percent = 100 * sbinCnt / totalDies
+                # legendlabel = f"SBIN {sbin} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
+                statistic[sbin] = (sbinName, sbinCnt, percent)
+        # info
+        try:
+            wid = self.waferInfoDict[waferInd, fid].get("DIE_WID", "0")
+            ht = self.waferInfoDict[waferInd, fid].get("DIE_HT", "0")
+            unit = self.waferInfoDict[waferInd, fid].get("WF_UNITS", "")
+            ratio = float(wid) / float(ht)
+            die_size = f"{wid} {unit} × {ht} {unit}"
+            # default positive direction
+            invertX = "R" != self.waferInfoDict[waferInd, fid].get("POS_X", "R")
+            invertY = "U" != self.waferInfoDict[waferInd, fid].get("POS_Y", "U")            
+        except (ValueError, KeyError, ZeroDivisionError):
+            ratio = 1
+            die_size = ""
+            invertX = False
+            invertY = False
+        
+        return {"Bounds": bounds, 
+                "Stack": stack, 
+                "Info": (ratio, die_size, 
+                         invertX, invertY, 
+                         waferID, selectSites), 
+                "Data": data,
+                "Statistic": statistic}
+

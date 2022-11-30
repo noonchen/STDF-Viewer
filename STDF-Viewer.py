@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Wed Nov 23 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -24,30 +24,21 @@
 
 
 
-import io, os, sys, gc, traceback, toml, atexit
-import json, urllib.request as rq
-import platform, logging
+import os, sys, gc, traceback, atexit
+import json, logging, urllib.request as rq
 import numpy as np
 from itertools import product
-from fontTools import ttLib
 from base64 import b64decode
-from deps.SharedSrc import tab, REC
-import deps.SharedSrc as ss
+from deps.SharedSrc import *
 from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
-from deps.customizedQtClass import (StyleDelegateForTable_List, 
-                                    DutSortFilter, 
-                                    ColorSqlQueryModel, 
-                                    DatalogSqlQueryModel, 
-                                    TestDataTableModel, 
-                                    TestStatisticTableModel, 
-                                    BinWaferTableModel)
-
+from deps.customizedQtClass import *
+from deps.ChartWidgets import *
 from deps.uic_stdLoader import stdfLoader
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
-from deps.uic_stdSettings import stdfSettings, SettingParams
+from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataDisplayer
 from deps.uic_stdDebug import stdDebugPanel
 
@@ -74,7 +65,6 @@ from PyQt5.QtCore import (Qt, QTranslator,
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
 Version = "V4.0.0"
-isMac = platform.system() == 'Darwin'
     
 # save config path to sys
 rootFolder = os.path.dirname(sys.argv[0])
@@ -82,14 +72,8 @@ setattr(sys, "rootFolder", rootFolder)
 setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
 
 # logger
-ss.init_logger(rootFolder)
+init_logger(rootFolder)
 logger = logging.getLogger("STDF-Viewer")
-
-
-class FontNames:
-    def __init__(self):
-        self.Chinese = "Microsoft Yahei"
-        self.English = "Tahoma"
 
 
 class signals4MainUI(QtCore.QObject):
@@ -98,11 +82,14 @@ class signals4MainUI(QtCore.QObject):
 
 
 class MyWindow(QtWidgets.QMainWindow):
-    def __init__(self, defaultFontNames: FontNames):
+    def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
+        # load config file
+        loadConfigFile()
+        self.defaultFontNames = loadFonts()
         # data_interface for processing requests by GUI 
         # and reading data from database
         self.data_interface = None
@@ -115,10 +102,8 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
-        self.init_SettingParams()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        self.defaultFontNames = defaultFontNames
         self.imageFont = self.defaultFontNames.English
         # init and connect signals
         self.signals = signals4MainUI()
@@ -169,6 +154,7 @@ class MyWindow(QtWidgets.QMainWindow):
         atexit.register(self.onExit)
         # set language after initing subwindow & reading config
         self.changeLanguage()
+        self.restorePreviousSession()
         
         
     def checkNewVersion(self):
@@ -213,7 +199,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def changeLanguage(self):
         _app = QApplication.instance()
         # load language files based on the setting
-        curLang = self.settingParams.language
+        curLang = getSetting().language
         if curLang == "English":
             self.imageFont = self.defaultFontNames.English
             self.translatorUI.loadFromData(transDict["English"])
@@ -273,58 +259,22 @@ class MyWindow(QtWidgets.QMainWindow):
         # debugCode
         _app.installTranslator(self.debugPanel.translator_code)
         # update flag dictionarys
-        ss.translate_const_dicts(self.tr)
+        translate_const_dicts(self.tr)
         # need to rewrite file info table after changing language
         self.updateFileHeader()        
-    
-    
-    def dumpConfigFile(self):
-        # save data to toml config
-        configData = {"General": {},
-                      "Trend Plot": {},
-                      "Histo Plot": {},
-                      "Color Setting": {}}
-        configName = dict(sys.CONFIG_NAME)
-        for k, v in self.settingParams.__dict__.items():
-            if k in ["language", "recentFolder", "dataNotation", "dataPrecision", "checkCpk", "cpkThreshold", "sortTestList"]:
-                # General
-                configData["General"][configName[k]] = v
-            elif k in ["showHL_trend", "showLL_trend", "showHSpec_trend", "showLSpec_trend", "showMed_trend", "showMean_trend"]:
-                # Trend
-                configData["Trend Plot"][configName[k]] = v
-            elif k in ["showHL_histo", "showLL_histo", "showHSpec_histo", "showLSpec_histo", "showMed_histo", "showMean_histo", "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
-                # Histo
-                configData["Histo Plot"][configName[k]] = v
-
-            elif k in ["siteColor", "sbinColor", "hbinColor"]:
-                # Color
-                # change Int key to string, since toml only support string keys
-                v = dict([(str(intKey), color) for intKey, color in v.items()])
-                configData["Color Setting"][configName[k]] = v
-
-        with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
-            toml.dump(configData, fd)
-    
-    
-    def updateRecentFolder(self, filepath: str):
-        dirpath = os.path.dirname(filepath)
-        # update settings
-        self.settingParams.recentFolder = dirpath
-        self.dumpConfigFile()
     
 
     def openNewFile(self, files: list[str]):
         if not files:
-            files, _ = QFileDialog.getOpenFileNames(self, 
-                                                  caption=self.tr("Select a STD File To Open"), 
-                                                  directory=self.settingParams.recentFolder,
-                                                  filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
+            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select a STD File To Open"), 
+                                                    directory=getSetting().recentFolder, 
+                                                    filter=self.tr(FILE_FILTER),)
         else:
             files = [f for f in map(os.path.normpath, files) if os.path.isfile(f)]
             
         if files:
             # store folder path
-            self.updateRecentFolder(files[0])
+            updateRecentFolder(files[0])
             # self.callFileLoader([files])
             self.callFileLoader([[f] for f in files])
               
@@ -386,14 +336,20 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         self.db_dut.close()
         if self.data_interface:
+            currentDB = self.data_interface.dbPath
             self.data_interface.close()
+        else:
+            currentDB = "???"
+        # save settings to file
+        dumpConfigFile()
         # clean generated database
         dbFolder = os.path.join(sys.rootFolder, "logs")
         for f in os.listdir(dbFolder):
-            if f.endswith(".db"):
+            # save current database
+            if f.endswith(".db") and not currentDB.endswith(f):
                 try:
                     os.remove(os.path.join(dbFolder, f))
-                except:
+                except OSError:
                     pass
     
     
@@ -404,8 +360,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def showDutDataTable(self, selectedDutIndexes: list):
         # always update style in case user changed them in the setting
         self.dutDataDisplayer.setTextFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.dutDataDisplayer.setFloatFormat("%%.%d%s" % (self.settingParams.dataPrecision, 
-                                                          self.settingParams.dataNotation))
+        self.dutDataDisplayer.setFloatFormat(getSetting().getFloatFormat())
         self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
         self.dutDataDisplayer.showUI()
         
@@ -489,13 +444,13 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.TestList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
         self.ui.WaferList.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.ui.WaferList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)        
+        self.ui.WaferList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         # get select model and connect func to change event
         self.selModel = self.ui.TestList.selectionModel()
         self.selModel.selectionChanged.connect(self.onSelect)
         
         self.selModel_wafer = self.ui.WaferList.selectionModel()
-        self.selModel_wafer.selectionChanged.connect(self.onSelect)        
+        self.selModel_wafer.selectionChanged.connect(self.onSelect)
         
         
     def init_DataTable(self):
@@ -536,10 +491,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.rawDataTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.rawDataTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)        
+        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
-                            
+        
     def init_Head_SiteCheckbox(self):
         # bind functions to all checkboxes
         self.ui.All.clicked['bool'].connect(self.onSiteChecked)
@@ -553,50 +508,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         
-        
-    def init_SettingParams(self):
-        """
-        Read config file if exist, else use default params & file data (for bin color init)
-        """
-        # write default setting params
-        self.settingParams = SettingParams()
-        # init bin color by bin info
-        if isinstance(self.data_interface, DataInterface):
-            for (binColorDict, bin_info) in [(self.settingParams.sbinColor, self.data_interface.SBIN_dict), 
-                                            (self.settingParams.hbinColor, self.data_interface.HBIN_dict)]:
-                for bin in bin_info.keys():
-                    binType = bin_info[bin]["BIN_PF"]   # P, F or Unknown
-                    color = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
-                    binColorDict[bin] = color
-                    
-        # if config file is found, update setting params
-        try:
-            configData = toml.load(sys.CONFIG_PATH)
-            configString = dict([(v, k) for (k, v) in sys.CONFIG_NAME])
-            for sec, secDict in configData.items():
-                if sec == "Color Setting":
-                    # convert string key (site/sbin/hbin) to int
-                    for humanString, colorDict in secDict.items():
-                        if humanString in configString:
-                            attr = configString[humanString]    # e.g. siteColor
-                            oldColorDict = getattr(self.settingParams, attr)
-                            for numString, hexColor in colorDict.items():
-                                try:
-                                    num = int(numString)
-                                except ValueError:
-                                    continue        # skip the invalid site or bin
-                                if ss.isHexColor(hexColor): 
-                                    oldColorDict[num] = hexColor
-                else:
-                    for humanString, param in secDict.items():
-                        if humanString in configString:
-                            attr = configString[humanString]    # e.g. showHL_trend
-                            if type(param) == type(getattr(self.settingParams, attr)):
-                                setattr(self.settingParams, attr, param)
-        except (FileNotFoundError, TypeError, toml.TomlDecodeError):
-            # any error occurs in config file reading, simply ignore
-            pass
-            
         
     def updateModelContent(self, model, newList):
         # clear first
@@ -619,7 +530,7 @@ class MyWindow(QtWidgets.QMainWindow):
             for tmpRow in self.data_interface.getFileMetaData():
                 # translate the first element, which is the field names
                 qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
-                if self.settingParams.language != "English":
+                if getSetting().language != "English":
                     # fix weird font when switch to chinese-s
                     qfont = QtGui.QFont(self.imageFont)
                     [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
@@ -643,10 +554,16 @@ class MyWindow(QtWidgets.QMainWindow):
         header = self.ui.dutInfoTable.horizontalHeader()
         header.setVisible(True)
         
-        self.tmodel_dut.setQuery(QtSql.QSqlQuery(ss.DUT_SUMMARY_QUERY, self.db_dut))
+        self.tmodel_dut.setQuery(QtSql.QSqlQuery(DUT_SUMMARY_QUERY, self.db_dut))
         
-        for column in range(1, header.count()):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        for column in range(0, header.count()):
+            if column in [2, 3, header.count()-1]:
+                # PartID, Head-Site and DUT Flag
+                # column may be too long to display
+                mode = QHeaderView.ResizeMode.ResizeToContents
+            else:
+                mode = QHeaderView.ResizeMode.Stretch
+            header.setSectionResizeMode(column, mode)
         
         # always hide dut index column
         self.ui.dutInfoTable.hideColumn(0)
@@ -657,11 +574,11 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dutInfoTable.showColumn(1)
         
         
-    def updateGDR_DTR_Table(self):        
+    def updateGDR_DTR_Table(self):
         header = self.ui.datalogTable.horizontalHeader()
         header.setVisible(True)
         
-        self.tmodel_datalog.setQuery(QtSql.QSqlQuery(ss.DATALOG_QUERY, self.db_dut))
+        self.tmodel_datalog.setQuery(QtSql.QSqlQuery(DATALOG_QUERY, self.db_dut))
                     
         for column in [2, 3]:
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
@@ -707,7 +624,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 checkedSites.append(site_num)
                 
         return sorted(checkedSites)
-                    
+    
     
     def getSelectedTests(self) -> list:
         """return list of tuple(test number, pmr, test name), for non-MPR, pmr is set to 0"""
@@ -723,7 +640,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if selectedIndex:
             for ind in selectedIndex:
-                tnTuple = ss.parseTestString(ind.data(), inWaferTab)
+                tnTuple = parseTestString(ind.data(), inWaferTab)
                 testList.append(tnTuple)
             testList.sort()
         
@@ -791,12 +708,13 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def isTestFail(self, selected_string: str) -> str:
-        testTuple = ss.parseTestString(selected_string, False)
+        testTuple = parseTestString(selected_string, False)
         testPass = self.data_interface.checkTestPassFail(testTuple)
+        settings = getSetting()
         
         if testPass:
             # if user do not need to check Cpk, return to caller
-            if not self.settingParams.checkCpk:
+            if not settings.checkCpk:
                 return "Pass"
         else:
             return "Fail"
@@ -806,7 +724,7 @@ class MyWindow(QtWidgets.QMainWindow):
         for cpk in cpkList:
             if not np.isnan(cpk):
                 # check cpk only if it's valid
-                if cpk < self.settingParams.cpkThreshold:
+                if cpk < settings.cpkThreshold:
                     return "cpkFail"
             
         return "Pass"
@@ -824,9 +742,10 @@ class MyWindow(QtWidgets.QMainWindow):
         if self.data_interface is None:
             return
         
-        if self.settingParams.sortTestList == "Number":
-            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: ss.parseTestString(x)))
-        elif self.settingParams.sortTestList == "Name":
+        testSortMethod = getSetting().sortTestList
+        if testSortMethod == "Number":
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: parseTestString(x)))
+        elif testSortMethod == "Name":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: x.split("\t")[-1]))
         else:
             self.updateModelContent(self.sim_list, self.completeTestList)
@@ -852,8 +771,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
         self.tmodel_data.setFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.tmodel_data.setFloatFormat("%%.%d%s" % (self.settingParams.dataPrecision, 
-                                                     self.settingParams.dataNotation))
+        self.tmodel_data.setFloatFormat(getSetting().getFloatFormat())
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
@@ -876,19 +794,24 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateTestDataTable()
             return
         
-        # draw plots        
-        selTests = self.getSelectedTests()
-        #TODO clean all plots in the current layout
+        # get selected tests
+        if tabType == tab.Bin:
+            # BinChart is irrelevent to tests, 
+            # fake a list with only one element
+            selTests = [""]
+        else:
+            selTests = self.getSelectedTests()
+        # clean all plots in the current layout
+        self.clearCurrentTab(tabType)
         tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
-        
-        if tabType == tab.Trend:
-            pass
-        elif tabType == tab.Histo:
-            pass
-        elif tabType == tab.Wafer:
-            pass
-        elif tabType == tab.Bin:
-            pass
+        for testTuple, head in product(selTests, selHeads):
+            chart = self.genPlot(testTuple, head, selSites, tabType)
+            if isinstance(chart, QtWidgets.QGraphicsView):
+                tabLayout.addWidget(chart)
+            elif isinstance(chart, list):
+                for c in chart:
+                    if isinstance(c, QtWidgets.QGraphicsView):
+                        tabLayout.addWidget(c)
         
     
     def updateStatTableContent(self):
@@ -899,14 +822,14 @@ class MyWindow(QtWidgets.QMainWindow):
         selTests = self.getSelectedTests()
         horizontalHeader = self.ui.dataTable.horizontalHeader()
         verticalHeader = self.ui.dataTable.verticalHeader()
-        floatFormat = "%%.%d%s"%(self.settingParams.dataPrecision, self.settingParams.dataNotation)
+        settings = getSetting()
         
         if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
                                                       self.getCheckedSites(), 
-                                                      floatFormat=floatFormat)
+                                                      floatFormat=settings.getFloatFormat())
             HHeader = d["HHeader"]
             indexOfFail = HHeader.index("Fail Num")
             indexOfCpk = HHeader.index("Cpk")
@@ -914,7 +837,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.tmodel.setContent(d["Rows"])
             self.tmodel.setColumnCount(len(HHeader))
             self.tmodel.setFailCpkIndex(indexOfFail, indexOfCpk)
-            self.tmodel.setCpkThreshold(self.settingParams.cpkThreshold)
+            self.tmodel.setCpkThreshold(settings.cpkThreshold)
             self.tmodel.setHHeader(list(map(self.tr, HHeader)))
             self.tmodel.setVHeader(d["VHeader"])
             
@@ -939,7 +862,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.bwmodel.setColumnCount(d["maxLen"])
             self.bwmodel.setHHeader([])
             self.bwmodel.setVHeader(d["VHeader"])
-            self.bwmodel.setColorDict(self.settingParams.hbinColor, self.settingParams.sbinColor)
+            self.bwmodel.setColorDict(settings.hbinColor, 
+                                      settings.sbinColor)
         
             horizontalHeader.setVisible(False)
             verticalHeader.setVisible(True)
@@ -951,25 +875,64 @@ class MyWindow(QtWidgets.QMainWindow):
             self.bwmodel.layoutChanged.emit()
                 
     
-    #TODO
-    def genPlot(self, head:int, site:int, testTuple:tuple, tabType:tab, **kargs):
-        '''testTuple: (test_num, pmr, test_name)'''
-        pass
+    def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
+        '''
+        testTuple: (test_num, pmr, test_name)
+        For wafer: (wafer index, file id, wafer name)
+        '''
+        if tabType == tab.Trend:
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            tchart = TrendChart()
+            tchart.setTrendData(tdata)
+            if tchart.validData:
+                return tchart
+        
+        elif tabType == tab.Histo:
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            hchart = HistoChart()
+            hchart.setTrendData(tdata)
+            if hchart.validData:
+                return hchart
+        
+        elif tabType == tab.Wafer:
+            wdata = self.data_interface.getWaferMapData(testTuple, selectSites)
+            wchart = WaferMap()
+            wchart.setWaferData(wdata)
+            if wchart.validData:
+                return wchart
+        
+        elif tabType == tab.Bin:
+            bcharts = []
+            # one site per binchart
+            for site in selectSites:
+                bdata = self.data_interface.getBinChartData(head, site)
+                bchart = BinChart()
+                bchart.setBinData(bdata)
+                if bchart.validData:
+                    bcharts.append(bchart)
+            return bcharts
+        
+        return None
             
             
-    def clearOtherTab(self, currentTab):        
-        # clear other tabs' images
-        if currentTab != tab.Wafer:
-            # wafer tab and other tab is separated in the app
-            # we don't want to clean trend/histo/bin when we are in wafer tab
-            [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] if key != currentTab else None for key in [tab.Trend, tab.Histo, tab.Bin]]
+    def clearCurrentTab(self, currentTab: tab):
+        layout: QtWidgets.QVBoxLayout = self.tab_dict[currentTab]["layout"]
+        # put widgets in a list and delete at once
+        # if delete directly from layout, the widget index might be invalid
+        wl = []
+        for i in range(layout.count()):
+            wl.append(layout.itemAt(i).widget())
+        # delete from list
+        for w in wl:
+            deleteWidget(w)
+        del wl
         gc.collect()
     
     
     def clearAllContents(self):
         # clear tabs' images
-        [[ss.deleteWidget(self.tab_dict[key]["layout"].itemAt(index).widget()) for index in range(self.tab_dict[key]["layout"].count())] for key in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]]
-        
+        for t in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+            self.clearCurrentTab(t)
         self.selectionTracker = {}
         gc.collect()
     
@@ -979,6 +942,24 @@ class MyWindow(QtWidgets.QMainWindow):
             self.loader.loadFile(paths)
 
         
+    def restorePreviousSession(self):
+        '''
+        looking for database of previous loaded
+        stdf files
+        '''
+        dbFolder = os.path.join(sys.rootFolder, "logs")
+        dbs = [f for f in os.listdir(dbFolder) if f.endswith(".db")]
+        if dbs:
+            dbPath = os.path.join(dbFolder, dbs[0])
+            self.loadDatabase(dbPath)
+    
+    
+    def loadDatabase(self, dbPath: str):
+        di = DataInterface()
+        di.dbPath = dbPath
+        self.signals.dataInterfaceSignal.emit(di)
+    
+    
     @Slot(object)
     def updateData(self, newDI: DataInterface):
         if newDI is not None:
@@ -1001,8 +982,6 @@ class MyWindow(QtWidgets.QMainWindow):
             
             # disable/enable wafer tab
             self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
-            #TODO read waferDict
-            # self.waferInfoDict = self.DatabaseFetcher.getWaferInfo()
     
             # update listView
             self.completeTestList = self.data_interface.completeTestList
@@ -1034,7 +1013,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
                     if cb_layout_h is not None:
                         cb_layout_h.widget().deleteLater()
-                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)                    
+                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)
                                  
             # add & enable checkboxes for each sites and heads
             siteNum = 0     # pre-define local var in case there are no available sites
@@ -1060,18 +1039,21 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.head_cb_dict[headnum].setChecked(True)
                 row = headnum//3
                 col = headnum % 3
-                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)                
+                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)
             # set max height in order to resize site/head selection tab control
             nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
             self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
             # update UI
-            self.settingUI.removeColorBtns()               # remove existing color btns
+            setSettingDefaultColor(self.availableSites, 
+                                   self.data_interface.SBIN_dict, 
+                                   self.data_interface.HBIN_dict)
+            # remove existing color btns
+            self.settingUI.removeColorBtns()
             self.settingUI.initColorBtns(self.availableSites, 
                                          self.data_interface.SBIN_dict, 
                                          self.data_interface.HBIN_dict)
             self.exporter.removeSiteCBs()
             self.exporter.refreshUI(self.completeTestList)
-            self.init_SettingParams()
             self.init_Head_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummaryTable()
@@ -1111,7 +1093,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     event.accept()  # doesnt appear to be needed
                     self.openNewFile(paths)
                     return True
-        return False         
+        return False
       
         
     def onException(self, errorType, errorValue, tb):
@@ -1126,24 +1108,9 @@ def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication([])
     app.setStyle('Fusion')
-    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))
-    # default font for dialogs
-    # font_names = []
-    defaultFontNames = FontNames()
-    # reverse to put courier at the rear
-    for fn in sorted(os.listdir(os.path.join(sys.rootFolder, "fonts")), 
-                     key=lambda x:x.lower(), reverse=True):
-        if not fn.endswith(".ttf"): continue
-        fontPath = os.path.join(sys.rootFolder, "fonts", fn)
-        QtGui.QFontDatabase.addApplicationFont(fontPath)
-        font_name = ttLib.TTFont(fontPath)["name"].getDebugName(1)
-        if fn.startswith("cn_"):
-            defaultFontNames.Chinese = font_name
-        elif fn.startswith("en_"):
-            defaultFontNames.English = font_name
-    
+    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))    
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
-    window = MyWindow(defaultFontNames)
+    window = MyWindow()
     window.show()
     if pathFromArgs:
         window.callFileLoader(pathFromArgs)

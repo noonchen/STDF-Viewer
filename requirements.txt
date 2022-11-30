@@ -1,7 +1,4 @@
 numpy
-fonttools==4.32.0
-tomli==2.0.1
-
 PyQt5>=5.15.2
 toml==0.10.2
 XlsxWriter==3.0.3

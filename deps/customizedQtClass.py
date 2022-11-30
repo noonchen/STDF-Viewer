@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Tue Nov 22 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -27,10 +27,7 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
-from deps.SharedSrc import (dut_flag_parser, 
-                            test_flag_parser, 
-                            return_state_parser, 
-                            getProperFontColor, REC, isPass)
+from deps.SharedSrc import *
 import numpy as np
 
 
@@ -79,7 +76,7 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
                   isinstance(model, TestStatisticTableModel) or # test stat table
                   isinstance(model, BinWaferTableModel)):       # bin/wafer table
                 # abstract table model
-                return model.data(index, dataRole)                
+                return model.data(index, dataRole)
 
         # ListView
         if isinstance(self.parentWidget, QtWidgets.QListView):
@@ -265,7 +262,7 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         
-    def data(self, index: QtCore.QModelIndex, role: int):        
+    def data(self, index: QtCore.QModelIndex, role: int):
         if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
             # change default aligment to center
             return QtCore.Qt.AlignmentFlag.AlignCenter
@@ -745,24 +742,11 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
             return ""
         
     
-if __name__ == '__main__':
-    testStrings = ['Site 1', 'Site 10', 'Site 100', 'Site 2', 'Site 22']
-    
-    siteFilterString = QtCore.QRegularExpression(r"\b[A-Za-z]+\s(0|1|2)\b")
-    result = []
-    for s in testStrings:
-        result.append(siteFilterString.match(s).hasMatch())
-    print(result)
 
-    siteFilterString.setPattern("")
-    result = []
-    for s in testStrings:
-        result.append(siteFilterString.match(s).hasMatch())
-    print(result)
+__all__ = ["StyleDelegateForTable_List", "DutSortFilter", 
+           "FlippedProxyModel", "NormalProxyModel", 
+           "ColorSqlQueryModel", "DatalogSqlQueryModel", 
+           "TestDataTableModel", "TestStatisticTableModel", 
+           "BinWaferTableModel", 
+           ]
 
-    siteFilterString.setPattern("$-")
-    result = []
-    for s in testStrings:
-        result.append(siteFilterString.match(s).hasMatch())
-    print(result)
-    

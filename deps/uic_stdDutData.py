@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Tue Nov 22 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,16 +24,13 @@
 
 
 
-import subprocess, os, platform
 from xlsxwriter import Workbook
 from xlsxwriter.worksheet import Worksheet
-from .customizedQtClass import (StyleDelegateForTable_List, 
-                                FlippedProxyModel, 
-                                NormalProxyModel, 
-                                TestDataTableModel)
+from .customizedQtClass import *
+from .SharedSrc import *
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton
+from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton, QMessageBox
 from PyQt5.QtCore import QTranslator, Qt
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
@@ -120,8 +117,8 @@ class DutDataDisplayer(QtWidgets.QDialog):
         # use normal model as default
         self.activeModel = self.normalModel
         self.UI.tableView_dutData.setModel(self.tmodel)
-        self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
+        self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         
     def onTransposeTable(self):
@@ -164,21 +161,22 @@ class DutDataDisplayer(QtWidgets.QDialog):
             with open(outPath, "w") as f:
                 f.write(",".join([""] + hh)+"\n")
                 for row in range(rowTotal):
-                    rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), Qt.DisplayRole)) for col in range(columnTotal)]
+                    rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), 
+                                                                    Qt.ItemDataRole.DisplayRole)) for col in range(columnTotal)]
                     f.write(",".join([vh[row]] + rowDataList)+"\n")
             
-            msgbox = QtWidgets.QMessageBox(None)
+            msgbox = QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
-                self.revealFile(outPath)
+                revealFile(outPath)
             elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(outPath)
+                openFileInOS(outPath)
             
     
     def onSave_xlsx(self):
@@ -250,41 +248,16 @@ class DutDataDisplayer(QtWidgets.QDialog):
                 # resize columns
                 [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
                 
-            msgbox = QtWidgets.QMessageBox(None)
+            msgbox = QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
-                self.revealFile(outPath)
+                revealFile(outPath)
             elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(outPath)
-            
-    
-    def openFileInOS(self, filepath):
-        # https://stackoverflow.com/a/435669
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', filepath))        
-            
+                openFileInOS(outPath)
 
-    def revealFile(self, filepath):
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', '-R', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', os.path.dirname(filepath)))
-
-    
-    
