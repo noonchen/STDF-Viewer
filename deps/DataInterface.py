@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Wed Nov 30 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -697,11 +697,14 @@ class DataInterface:
             nestSiteData["Max"] = test_site_fid.pop("Max")
             nestSiteData["Mean"] = test_site_fid.pop("Mean")
             nestSiteData["Median"] = test_site_fid.pop("Median")
-            nestSiteData["dutList"] = test_site_fid.pop("dutList")
-            nestSiteData["dataList"] = test_site_fid.pop("dataList")
-            nestSiteData["flagList"] = test_site_fid.pop("flagList")
+            # filter out nan from dataList
+            dataOrig = test_site_fid.pop("dataList")
+            validMask = ~np.isnan(dataOrig)
+            nestSiteData["dataList"] = dataOrig[validMask]
+            nestSiteData["dutList"] = test_site_fid.pop("dutList")[validMask]
+            nestSiteData["flagList"] = test_site_fid.pop("flagList")[validMask]
             if test_site_fid["recHeader"] == REC.MPR:
-                nestSiteData["stateList"] = test_site_fid.pop("stateList")
+                nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
             elif test_site_fid["recHeader"] == REC.PTR:
                 #TODO dynamic limit
                 pass

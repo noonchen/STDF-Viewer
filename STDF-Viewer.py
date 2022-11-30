@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Nov 29 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -875,7 +875,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.bwmodel.layoutChanged.emit()
                 
     
-    #TODO
     def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
         '''
         testTuple: (test_num, pmr, test_name)
@@ -889,7 +888,12 @@ class MyWindow(QtWidgets.QMainWindow):
                 return tchart
         
         elif tabType == tab.Histo:
-            pass
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            hchart = HistoChart()
+            hchart.setTrendData(tdata)
+            if hchart.validData:
+                return hchart
+        
         elif tabType == tab.Wafer:
             wdata = self.data_interface.getWaferMapData(testTuple, selectSites)
             wchart = WaferMap()
