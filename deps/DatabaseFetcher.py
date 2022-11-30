@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Tue Nov 29 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -902,45 +902,3 @@ class DatabaseFetcher:
         
         return info
 
-
-if __name__ == "__main__":
-    from time import time
-    count = 1
-    df = DatabaseFetcher(3)
-    df.connectDB("/Users/nochenon/Documents/GitHub/STDF-Viewer/deps/rust_stdf_helper/target/rust_test.db")
-    s = time()
-    # print(df.getFileInfo())
-    # print(df.getDUTCountDict())
-    # for _ in range(count):
-    # print(df.getDUT_TestInfo(5040, HeadList=[1], SiteList=[-1]))
-    
-    # ** test dut site info
-    # print("\n\ntest dut site info")
-    # dutArray, siteInfo = df.getDUT_SiteInfo()
-    # selHeads = [1]
-    # selSites = [1, 22, 34]
-    # mask = np.zeros(dutArray.size, dtype=bool)
-    # for head in selHeads:
-    #     for site in selSites:
-    #         mask |= (siteInfo[head]==site)
-    # print(mask)
-    # print(dutArray[mask])    
-    
-    # ** test info selDUTs
-    # print(df.getStackedWaferData(1, -1))
-    
-    # ** test wafer coords dict
-    # print(df.getWaferCoordsDict(1, 1, 0))
-    # print('\n', df.getWaferCoordsDict(1, 1, -1))
-    # print('\n', df.getWaferCoordsDict(1, 255, 0))
-    
-    # print(df.getDUTIndexFromBin(1, -1, 2, "SBIN"))
-    # print(df.getDUTIndexFromXY(40, -10, -1))
-    # print(df.getDTR_GDRs())
-    # print(df.getPinNames(21000, "Continuty_digital_pos:passVolt_mV[1]", True))
-    print(df.getByteOrder())
-    
-    
-    e = time()
-    print((e-s)/count, "s")
-    df.connection.close()

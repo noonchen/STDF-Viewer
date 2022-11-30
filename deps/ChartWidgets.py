@@ -141,7 +141,7 @@ class TrendChart(pg.GraphicsView):
                     # no data
                     continue
                 x_min_list.append(np.nanmin(x))
-                x_max_list.append(np.nanmax(x))                
+                x_max_list.append(np.nanmax(x))
                 #TODO get file symbol
                 fsymbol = "o"
                 siteColor = settings.siteColor[site]
@@ -319,12 +319,14 @@ class HistoChart(pg.GraphicsView):
                 for ind, dut in zip(bin_ind, x):
                     bin_dut_dict.setdefault(ind, []).append(dut)
                 site_name = f"Site {site}"
+                # use normalized hist for better display
+                hist_normalize = hist / hist.max()
                 bar = pg.BarGraphItem(x0=bar_base, y0=bin_edges[:len(hist)], 
-                                      width=hist, height=bin_width, 
+                                      width=hist_normalize, height=bin_width, 
                                       brush=siteColor, name=site_name)
                 pitem.addItem(bar)
                 # set the bar base of histogram of next site
-                inc = 1.2 * hist.max()
+                inc = 1.2
                 ticks.append((bar_base + 0.5 * inc, site_name))
                 bar_base += inc
                 # #TODO mean
@@ -453,7 +455,7 @@ class BinChart(pg.GraphicsView):
                     pitem.getAxis("left").hide()
                     view_bin.setYLink(vbList[0])
                 vbList.append(view_bin)
-            row += 1        
+            row += 1
 
 
 class WaferBlock(pg.ItemSample):
@@ -537,7 +539,7 @@ class WaferMap(pg.GraphicsView):
             legend.addItem(WaferBlock(spi), spi.name())
         
         (ratio, die_size, invertX, invertY, waferID, sites) = waferData["Info"]
-        x_max, x_min, y_max, y_min = waferData["Bounds"]        
+        x_max, x_min, y_max, y_min = waferData["Bounds"]
         view.setLimits(xMin=x_min-50, xMax=x_max+50, 
                        yMin=y_min-50, yMax=y_max+50, 
                        maxXRange=(x_max-x_min+100), 
@@ -561,7 +563,7 @@ class WaferMap(pg.GraphicsView):
         if die_size:
             pitem.addItem(pg.TextItem(die_size, color="#000000"))
         # add map and axis
-        self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)        
+        self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)
         # add legend
         self.plotlayout.addItem(pitem_legend, row=1, col=2, rowspan=1, colspan=1)
 

@@ -444,13 +444,13 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.TestList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
         self.ui.WaferList.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.ui.WaferList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)        
+        self.ui.WaferList.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         # get select model and connect func to change event
         self.selModel = self.ui.TestList.selectionModel()
         self.selModel.selectionChanged.connect(self.onSelect)
         
         self.selModel_wafer = self.ui.WaferList.selectionModel()
-        self.selModel_wafer.selectionChanged.connect(self.onSelect)        
+        self.selModel_wafer.selectionChanged.connect(self.onSelect)
         
         
     def init_DataTable(self):
@@ -491,10 +491,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.rawDataTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.rawDataTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)        
+        self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
-                            
+        
     def init_Head_SiteCheckbox(self):
         # bind functions to all checkboxes
         self.ui.All.clicked['bool'].connect(self.onSiteChecked)
@@ -574,7 +574,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dutInfoTable.showColumn(1)
         
         
-    def updateGDR_DTR_Table(self):        
+    def updateGDR_DTR_Table(self):
         header = self.ui.datalogTable.horizontalHeader()
         header.setVisible(True)
         
@@ -624,7 +624,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 checkedSites.append(site_num)
                 
         return sorted(checkedSites)
-                    
+    
     
     def getSelectedTests(self) -> list:
         """return list of tuple(test number, pmr, test name), for non-MPR, pmr is set to 0"""
@@ -1013,7 +1013,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
                     if cb_layout_h is not None:
                         cb_layout_h.widget().deleteLater()
-                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)                    
+                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)
                                  
             # add & enable checkboxes for each sites and heads
             siteNum = 0     # pre-define local var in case there are no available sites
@@ -1039,7 +1039,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.head_cb_dict[headnum].setChecked(True)
                 row = headnum//3
                 col = headnum % 3
-                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)                
+                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)
             # set max height in order to resize site/head selection tab control
             nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
             self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
@@ -1047,7 +1047,8 @@ class MyWindow(QtWidgets.QMainWindow):
             setSettingDefaultColor(self.availableSites, 
                                    self.data_interface.SBIN_dict, 
                                    self.data_interface.HBIN_dict)
-            self.settingUI.removeColorBtns()               # remove existing color btns
+            # remove existing color btns
+            self.settingUI.removeColorBtns()
             self.settingUI.initColorBtns(self.availableSites, 
                                          self.data_interface.SBIN_dict, 
                                          self.data_interface.HBIN_dict)
@@ -1092,7 +1093,7 @@ class MyWindow(QtWidgets.QMainWindow):
                     event.accept()  # doesnt appear to be needed
                     self.openNewFile(paths)
                     return True
-        return False         
+        return False
       
         
     def onException(self, errorType, errorValue, tb):

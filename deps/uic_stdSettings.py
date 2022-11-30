@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -323,7 +323,7 @@ class stdfSettings(QtWidgets.QDialog):
             row = i//3
             col = i % 3
             hbin_gridLayout.addWidget(cB, row, col)
-                
+    
     
     def showUI(self):
         if self.parent: 
@@ -335,15 +335,6 @@ class stdfSettings(QtWidgets.QDialog):
             else: currentIndex = 3                          # bin & wafer
             self.settingsUI.settingBox.setCurrentIndex(currentIndex)
 
-        self.exec_()           
+        self.exec_()
            
            
-if __name__ == "__main__":
-    import sys
-    app = QtWidgets.QApplication([])
-    # test = stdfSettings()
-    # w = colorBtn(name="All site", num=1)
-    # w.show()
-    sys.exit(app.exec_())
-    
-    

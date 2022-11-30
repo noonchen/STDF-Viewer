@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -118,7 +118,7 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.activeModel = self.normalModel
         self.UI.tableView_dutData.setModel(self.tmodel)
         self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)    
+        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         
     def onTransposeTable(self):

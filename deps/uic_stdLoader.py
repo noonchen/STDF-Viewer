@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Tue Nov 29 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -104,7 +104,8 @@ class stdfLoader(QtWidgets.QDialog):
             event.accept()
         else:
             # close by clicking X
-            close = QtWidgets.QMessageBox.question(self, "QUIT", "Are you sure want to stop reading?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            close = QtWidgets.QMessageBox.question(self, "QUIT", "Are you sure want to stop reading?", 
+                                                   QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             if close == QtWidgets.QMessageBox.Yes:
                 # if user clicked yes, change thread flag and close window
                 self.reader.flag.stop = True
@@ -112,10 +113,9 @@ class stdfLoader(QtWidgets.QDialog):
                 # self.thread.wait()
                 # event.accept()
             # else:
-            """
-            lesson learned: do not enable the code above, as it would nullify the sender in the thread, causing the slot is not invoked
-            we should simply ingnore the close event, let the thread finish its job and send close signal.
-            """
+            # lesson learned: do not enable the code above, as it would nullify the sender in the thread, 
+            # causing the slot is not invoked
+            # we should simply ingnore the close event, let the thread finish its job and send close signal.
             event.ignore()
 
     @Slot(int)
@@ -141,7 +141,7 @@ class stdfLoader(QtWidgets.QDialog):
             self.thread.wait()
             self.reader = None
             self.close()
-                 
+        
         
         
 class stdReader(QtCore.QObject):
@@ -204,5 +204,3 @@ class stdReader(QtCore.QObject):
         self.closeSignal.emit(True)     # close loaderUI
         
 
-    
-    

@@ -817,16 +817,3 @@ class DataInterface:
                 "Data": data,
                 "Statistic": statistic}
 
-
-if __name__ == "__main__":
-    stdf_paths = [
-    "/Users/nochenon/Documents/STDF Files/10K_TTR-Log_NormalBinning_P020_05Sep2020_1244.std.gz",
-    "/Users/nochenon/Documents/STDF Files/S5643_62_NI_Fx2_V00_22May2021_TL18B087.3_P1_0941.std.gz",
-    "/Users/nochenon/Documents/STDF Files/IPD_G6S046-09C2_04Jun2022_1350.std",
-    ]
-    di = DataInterface(stdf_paths)
-    di.loadDatabase("deps/rust_stdf_helper/target/rust_test.db")
-    for i in di.getFileMetaData():
-        print(i)
-        
-    di.close()

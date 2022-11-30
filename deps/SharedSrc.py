@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Wed Nov 30 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -566,7 +566,7 @@ def openFileInOS(filepath: str):
         subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
             subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
     else:                                   # linux variants
-        subprocess.call(('xdg-open', filepath))        
+        subprocess.call(('xdg-open', filepath))
 
 
 def revealFile(filepath: str):
@@ -583,8 +583,10 @@ def revealFile(filepath: str):
 def get_file_size(p: str) -> str:
     try:
         return "%.2f MB"%(os.stat(p).st_size / 2**20)
-    except:
+    except Exception:
         return "?? MB"
+    except:
+        pass
 
 
 # # TODO
