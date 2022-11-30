@@ -24,7 +24,6 @@
 
 
 
-import sys
 from .ui.ImgSrc_svg import ImgDict
 from deps.SharedSrc import *
 # pyqt5
