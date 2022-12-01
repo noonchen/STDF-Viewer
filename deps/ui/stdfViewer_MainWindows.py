@@ -25,7 +25,7 @@ class Ui_MainWindow(object):
 "QScrollBar:vertical {\n"
 "border: 0px;\n"
 "background:transparent;\n"
-"width:20px;\n"
+"width:10px;\n"
 "margin: 0px 0px 0px 0px;\n"
 "}\n"
 " QScrollBar::handle:vertical {\n"
@@ -48,7 +48,7 @@ class Ui_MainWindow(object):
 "QScrollBar:horizontal {\n"
 "border: 0px;\n"
 "background:transparent;\n"
-"height:20px;\n"
+"height:10px;\n"
 "margin: 0px 0px 0px 0px;\n"
 "}\n"
 " QScrollBar::handle:horizontal {\n"
@@ -322,7 +322,7 @@ class Ui_MainWindow(object):
 "}")
         self.infoBox.setObjectName("infoBox")
         self.fileInfoPage = QtWidgets.QWidget()
-        self.fileInfoPage.setGeometry(QtCore.QRect(0, 0, 150, 129))
+        self.fileInfoPage.setGeometry(QtCore.QRect(0, 0, 1025, 423))
         self.fileInfoPage.setObjectName("fileInfoPage")
         self.verticalLayout_11 = QtWidgets.QVBoxLayout(self.fileInfoPage)
         self.verticalLayout_11.setContentsMargins(20, 10, 20, -1)
@@ -333,7 +333,6 @@ class Ui_MainWindow(object):
         self.fileInfoTable.setStyleSheet("QTableView {\n"
 "background: transparent;}")
         self.fileInfoTable.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.fileInfoTable.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.fileInfoTable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.fileInfoTable.setProperty("showDropIndicator", False)
         self.fileInfoTable.setDragDropOverwriteMode(False)
@@ -344,11 +343,11 @@ class Ui_MainWindow(object):
         self.fileInfoTable.setCornerButtonEnabled(False)
         self.fileInfoTable.setObjectName("fileInfoTable")
         self.fileInfoTable.horizontalHeader().setVisible(False)
-        self.fileInfoTable.verticalHeader().setVisible(False)
+        self.fileInfoTable.verticalHeader().setVisible(True)
         self.verticalLayout_11.addWidget(self.fileInfoTable)
         self.infoBox.addItem(self.fileInfoPage, "")
         self.dutInfoPage = QtWidgets.QWidget()
-        self.dutInfoPage.setGeometry(QtCore.QRect(0, 0, 132, 132))
+        self.dutInfoPage.setGeometry(QtCore.QRect(0, 0, 1025, 423))
         self.dutInfoPage.setObjectName("dutInfoPage")
         self.verticalLayout_12 = QtWidgets.QVBoxLayout(self.dutInfoPage)
         self.verticalLayout_12.setObjectName("verticalLayout_12")
@@ -360,7 +359,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_12.addWidget(self.dutInfoTable)
         self.infoBox.addItem(self.dutInfoPage, "")
         self.rawDataPage = QtWidgets.QWidget()
-        self.rawDataPage.setGeometry(QtCore.QRect(0, 0, 132, 132))
+        self.rawDataPage.setGeometry(QtCore.QRect(0, 0, 1025, 423))
         self.rawDataPage.setObjectName("rawDataPage")
         self.verticalLayout_9 = QtWidgets.QVBoxLayout(self.rawDataPage)
         self.verticalLayout_9.setObjectName("verticalLayout_9")
@@ -372,7 +371,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_9.addWidget(self.rawDataTable)
         self.infoBox.addItem(self.rawDataPage, "")
         self.datalogPage = QtWidgets.QWidget()
-        self.datalogPage.setGeometry(QtCore.QRect(0, 0, 1025, 390))
+        self.datalogPage.setGeometry(QtCore.QRect(0, 0, 1025, 423))
         self.datalogPage.setObjectName("datalogPage")
         self.verticalLayout_18 = QtWidgets.QVBoxLayout(self.datalogPage)
         self.verticalLayout_18.setObjectName("verticalLayout_18")
@@ -398,7 +397,7 @@ class Ui_MainWindow(object):
         self.scrollArea_trend.setWidgetResizable(True)
         self.scrollArea_trend.setObjectName("scrollArea_trend")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.verticalLayout_8 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_8.setContentsMargins(0, 0, 0, 0)
@@ -423,7 +422,7 @@ class Ui_MainWindow(object):
         self.scrollArea_histo.setWidgetResizable(True)
         self.scrollArea_histo.setObjectName("scrollArea_histo")
         self.scrollAreaWidgetContents_2 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents_2.setStyleSheet("")
         self.scrollAreaWidgetContents_2.setObjectName("scrollAreaWidgetContents_2")
         self.verticalLayout_6 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_2)
@@ -449,7 +448,7 @@ class Ui_MainWindow(object):
         self.scrollArea_ppqq.setWidgetResizable(True)
         self.scrollArea_ppqq.setObjectName("scrollArea_ppqq")
         self.scrollAreaWidgetContents_3 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents_3.setObjectName("scrollAreaWidgetContents_3")
         self.verticalLayout_21 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_3)
         self.verticalLayout_21.setContentsMargins(0, 0, 0, 0)
@@ -474,7 +473,7 @@ class Ui_MainWindow(object):
         self.scrollArea_bin.setWidgetResizable(True)
         self.scrollArea_bin.setObjectName("scrollArea_bin")
         self.scrollAreaWidgetContents_4 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_4.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents_4.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents_4.setObjectName("scrollAreaWidgetContents_4")
         self.horizontalLayout_3 = QtWidgets.QHBoxLayout(self.scrollAreaWidgetContents_4)
         self.horizontalLayout_3.setContentsMargins(0, 0, 0, 0)
@@ -499,7 +498,7 @@ class Ui_MainWindow(object):
         self.scrollArea_wafer.setWidgetResizable(True)
         self.scrollArea_wafer.setObjectName("scrollArea_wafer")
         self.scrollAreaWidgetContents_5 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_5.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents_5.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents_5.setObjectName("scrollAreaWidgetContents_5")
         self.verticalLayout_16 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_5)
         self.verticalLayout_16.setContentsMargins(0, 0, 0, 0)
@@ -524,7 +523,7 @@ class Ui_MainWindow(object):
         self.scrollArea_correlation.setWidgetResizable(True)
         self.scrollArea_correlation.setObjectName("scrollArea_correlation")
         self.scrollAreaWidgetContents_6 = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents_6.setGeometry(QtCore.QRect(0, 0, 1083, 548))
+        self.scrollAreaWidgetContents_6.setGeometry(QtCore.QRect(0, 0, 1083, 581))
         self.scrollAreaWidgetContents_6.setObjectName("scrollAreaWidgetContents_6")
         self.verticalLayout_22 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_6)
         self.verticalLayout_22.setContentsMargins(0, 0, 0, 0)
@@ -626,27 +625,21 @@ class Ui_MainWindow(object):
         self.actionReadDutData_DS.setObjectName("actionReadDutData_DS")
         self.actionReadDutData_TS = QtWidgets.QAction(MainWindow)
         self.actionReadDutData_TS.setObjectName("actionReadDutData_TS")
-        self.actionSession = QtWidgets.QAction(MainWindow)
-        font = QtGui.QFont()
-        font.setPointSize(14)
-        self.actionSession.setFont(font)
-        self.actionSession.setObjectName("actionSession")
         self.actionLoad_Session = QtWidgets.QAction(MainWindow)
         self.actionLoad_Session.setObjectName("actionLoad_Session")
         self.actionSave_Session = QtWidgets.QAction(MainWindow)
         self.actionSave_Session.setObjectName("actionSave_Session")
         self.toolBar.addAction(self.actionOpen)
         self.toolBar.addAction(self.actionMerge)
-        self.toolBar.addAction(self.actionSession)
         self.toolBar.addAction(self.actionFailMarker)
         self.toolBar.addAction(self.actionExport)
         self.toolBar.addAction(self.actionSettings)
 
         self.retranslateUi(MainWindow)
         self.Selection_stackedWidget.setCurrentIndex(0)
-        self.site_head_selection.setCurrentIndex(1)
-        self.tabControl.setCurrentIndex(6)
-        self.infoBox.setCurrentIndex(3)
+        self.site_head_selection.setCurrentIndex(0)
+        self.tabControl.setCurrentIndex(0)
+        self.infoBox.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
     def retranslateUi(self, MainWindow):
@@ -690,8 +683,6 @@ class Ui_MainWindow(object):
         self.actionFailMarker.setToolTip(_translate("MainWindow", "Mark failed test items in Test Selection"))
         self.actionReadDutData_DS.setText(_translate("MainWindow", "Read selected DUT data"))
         self.actionReadDutData_TS.setText(_translate("MainWindow", "Read selected DUT data"))
-        self.actionSession.setText(_translate("MainWindow", "Session"))
-        self.actionSession.setToolTip(_translate("MainWindow", "Save or load a session"))
         self.actionLoad_Session.setText(_translate("MainWindow", "Load Session"))
         self.actionLoad_Session.setToolTip(_translate("MainWindow", "Load a session to quick restore parsed data"))
         self.actionSave_Session.setText(_translate("MainWindow", "Save Session"))

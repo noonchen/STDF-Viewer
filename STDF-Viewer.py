@@ -125,6 +125,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.enableDragDrop()
         # init actions
         self.ui.actionOpen.triggered.connect(self.openNewFile)
+        self.ui.actionMerge.triggered.connect(self.onMerge)
+        self.ui.actionLoad_Session.triggered.connect(self.onLoadSession)
+        self.ui.actionSave_Session.triggered.connect(self.onSaveSession)
         self.ui.actionFailMarker.triggered.connect(self.onFailMarker)
         self.ui.actionExport.triggered.connect(self.onExportReport)
         self.ui.actionSettings.triggered.connect(self.onSettings)
@@ -137,11 +140,23 @@ class MyWindow(QtWidgets.QMainWindow):
         # manage tab layout
         self.tab_dict = {tab.Trend: {"scroll": self.ui.scrollArea_trend, "layout": self.ui.verticalLayout_trend},
                          tab.Histo: {"scroll": self.ui.scrollArea_histo, "layout": self.ui.verticalLayout_histo},
+                         tab.PPQQ: {"scroll": self.ui.scrollArea_ppqq, "layout": self.ui.verticalLayout_ppqq},
                          tab.Bin: {"scroll": self.ui.scrollArea_bin, "layout": self.ui.verticalLayout_bin},
-                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer}}
+                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer},
+                         tab.Correlate: {"scroll": self.ui.scrollArea_correlation, "layout": self.ui.verticalLayout_correlation}}
         # init callback for UI component
         self.ui.tabControl.currentChanged.connect(self.onSelect)
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
+        # set drop down menu for session action
+        self.sessionMenu = QtWidgets.QMenu()
+        self.sessionMenu.addActions([self.ui.actionLoad_Session, 
+                                     self.ui.actionSave_Session])
+        self.sessionBtn = QtWidgets.QToolButton()
+        self.sessionBtn.setText(self.tr("Session"))
+        self.sessionBtn.setMenu(self.sessionMenu)
+        self.sessionBtn.setStyleSheet("QToolButton::menu-indicator{image:none}")
+        self.sessionBtn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.ui.toolBar.insertWidget(self.ui.actionFailMarker, self.sessionBtn)
         # add a toolbar action at the right side
         self.spaceWidgetTB = QtWidgets.QWidget()
         self.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
@@ -149,12 +164,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.toolBar.addWidget(self.spaceWidgetTB)
         self.ui.toolBar.addAction(self.ui.actionAbout)
         # disable wafer tab in default
-        self.ui.tabControl.setTabEnabled(4, False)
+        self.ui.tabControl.setTabEnabled(tab.Wafer, False)
         # clean up before exiting
         atexit.register(self.onExit)
         # set language after initing subwindow & reading config
         self.changeLanguage()
         self.restorePreviousSession()
+        # hide unfinished feature
+        self.ui.file_selection.hide()
+        self.ui.tabControl.setTabVisible(tab.PPQQ, False)
+        self.ui.tabControl.setTabVisible(tab.Correlate, False)
         
         
     def checkNewVersion(self):
@@ -278,6 +297,18 @@ class MyWindow(QtWidgets.QMainWindow):
             # self.callFileLoader([files])
             self.callFileLoader([[f] for f in files])
               
+    
+    def onMerge(self):
+        pass
+    
+    
+    def onLoadSession(self):
+        pass
+    
+    
+    def onSaveSession(self):
+        pass
+    
     
     def onFailMarker(self):
         if self.data_interface is not None:
@@ -658,7 +689,7 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             self.ui.Selection_stackedWidget.setCurrentIndex(0)
         
-        if currentTab == tab.Bin:
+        if currentTab in [tab.Bin, tab.Correlate]:
             self.ui.TestList.setDisabled(True)
             self.ui.SearchBox.setDisabled(True)
             self.ui.ClearButton.setDisabled(True)
@@ -795,8 +826,8 @@ class MyWindow(QtWidgets.QMainWindow):
             return
         
         # get selected tests
-        if tabType == tab.Bin:
-            # BinChart is irrelevent to tests, 
+        if tabType in [tab.Bin, tab.Correlate]:
+            # BinChart & correlation are irrelevent to tests, 
             # fake a list with only one element
             selTests = [""]
         else:
@@ -824,7 +855,7 @@ class MyWindow(QtWidgets.QMainWindow):
         verticalHeader = self.ui.dataTable.verticalHeader()
         settings = getSetting()
         
-        if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
+        if tabType in [tab.Info, tab.Trend, tab.Histo, tab.PPQQ]:
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
@@ -850,6 +881,10 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dataTable.setModel(self.tmodel)
             self.tmodel.layoutChanged.emit()
                 
+        elif tabType == tab.Correlate:
+            #TODO
+            pass
+        
         else:
             if tabType == tab.Bin:
                 d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
@@ -931,7 +966,8 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def clearAllContents(self):
         # clear tabs' images
-        for t in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+        for t in [tab.Trend, tab.Histo, tab.PPQQ, 
+                  tab.Bin, tab.Wafer, tab.Correlate]:
             self.clearCurrentTab(t)
         self.selectionTracker = {}
         gc.collect()
@@ -981,7 +1017,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
             # disable/enable wafer tab
-            self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
+            self.ui.tabControl.setTabEnabled(tab.Wafer, self.data_interface.containsWafer)
     
             # update listView
             self.completeTestList = self.data_interface.completeTestList
