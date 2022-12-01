@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Fri Dec 02 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -87,9 +87,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
-        # load config file
+        # load fonts and config file
+        loadFonts()
         loadConfigFile()
-        self.defaultFontNames = loadFonts()
         # data_interface for processing requests by GUI 
         # and reading data from database
         self.data_interface = None
@@ -104,7 +104,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.head_cb_dict = {}
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        self.imageFont = self.defaultFontNames.English
         # init and connect signals
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
@@ -218,9 +217,10 @@ class MyWindow(QtWidgets.QMainWindow):
     def changeLanguage(self):
         _app = QApplication.instance()
         # load language files based on the setting
-        curLang = getSetting().language
+        settings = getSetting()
+        curLang = settings.language
+        font = settings.font
         if curLang == "English":
-            self.imageFont = self.defaultFontNames.English
             self.translatorUI.loadFromData(transDict["English"])
             self.translatorCode.loadFromData(transDict["English"])
             self.loader.translator.loadFromData(transDict["English"])
@@ -233,7 +233,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.debugPanel.translator_code.loadFromData(transDict["English"])
             
         elif curLang == "简体中文":
-            self.imageFont = self.defaultFontNames.Chinese
             self.translatorUI.loadFromData(transDict["MainUI_zh_CN"])
             self.translatorCode.loadFromData(transDict["MainCode_zh_CN"])
             self.loader.translator.loadFromData(transDict["loadingUI_zh_CN"])
@@ -245,7 +244,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.debugPanel.translator.loadFromData(transDict["debugUI_zh_CN"])
             self.debugPanel.translator_code.loadFromData(transDict["debugCode_zh_CN"])
             
-        newfont = QtGui.QFont(self.imageFont)
+        newfont = QtGui.QFont(font)
         _app.setFont(newfont)
         [w.setFont(newfont) if not isinstance(w, QtWidgets.QListView) else None for w in QApplication.allWidgets()]
         # actions is not listed in qapp all widgets, iterate separately
@@ -390,8 +389,9 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def showDutDataTable(self, selectedDutIndexes: list):
         # always update style in case user changed them in the setting
-        self.dutDataDisplayer.setTextFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.dutDataDisplayer.setFloatFormat(getSetting().getFloatFormat())
+        settings = getSetting()
+        self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.dutDataDisplayer.setFloatFormat(settings.getFloatFormat())
         self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
         self.dutDataDisplayer.showUI()
         
@@ -563,7 +563,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
                 if getSetting().language != "English":
                     # fix weird font when switch to chinese-s
-                    qfont = QtGui.QFont(self.imageFont)
+                    qfont = QtGui.QFont(getSetting().font)
                     [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
@@ -790,6 +790,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # do nothing if test data table is not selected
             return
 
+        settings = getSetting()
         d = self.data_interface.getTestDataTableContent(self.getSelectedTests(), 
                                                         self.getCheckedHeads(), 
                                                         self.getCheckedSites())
@@ -801,8 +802,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
-        self.tmodel_data.setFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.tmodel_data.setFloatFormat(getSetting().getFloatFormat())
+        self.tmodel_data.setFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.tmodel_data.setFloatFormat(settings.getFloatFormat())
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
@@ -957,9 +958,7 @@ class MyWindow(QtWidgets.QMainWindow):
         wl = []
         for i in range(layout.count()):
             wl.append(layout.itemAt(i).widget())
-        # delete from list
-        for w in wl:
-            deleteWidget(w)
+        deleteWidget(wl)
         del wl
         gc.collect()
     
@@ -1088,6 +1087,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.settingUI.initColorBtns(self.availableSites, 
                                          self.data_interface.SBIN_dict, 
                                          self.data_interface.HBIN_dict)
+            self.settingUI.removeSymbolBtns()
+            self.settingUI.initSymbolBtns(self.data_interface.num_files)
             self.exporter.removeSiteCBs()
             self.exporter.refreshUI(self.completeTestList)
             self.init_Head_SiteCheckbox()

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Fri Dec 02 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -36,18 +36,24 @@ class SettingParams:
         self.showLSpec_histo = True
         self.showMed_histo = True
         self.showMean_histo = True
-        self.showGaus_histo = True
         self.showBoxp_histo = True
+        self.showBoxpOl_histo = True
+        self.showBars_histo = True
         self.binCount = 30
         self.showSigma = "3, 6, 9"
+        # PPQQ
+        self.x_ppqq = "Normal Quantiles"
+        self.y_ppqq = "Data Quantiles"
         # General
         self.language = "English"
+        self.font = "JetBrains Mono"
         self.recentFolder = ""
         self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
         self.dataPrecision = 3
         self.checkCpk = False
         self.cpkThreshold = 1.33
         self.sortTestList = "Original"
+        self.fileSymbol = {0: "o"}
         # colors
         self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
                           3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
@@ -62,14 +68,20 @@ class SettingParams:
 settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), 
                    ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), 
                    ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
+                   # histo
                    ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), 
                    ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), 
                    ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), 
-                   ("showGaus_histo", "Show Gaussian Fit"), ("showBoxp_histo", "Show Boxplot"), 
-                   ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   ("language", "Language"), ("recentFolder", "Recent Folder"), 
+                   ("showBoxp_histo", "Show Boxplot"), ("showBoxpOl_histo", "Show Boxplot Outlier"), 
+                   ("showBars_histo", "Show Histogram Bars"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
+                   # PPQQ
+                   ("x_ppqq", "X of Normal Plot"), ("y_ppqq", "Y of Normal Plot"), 
+                   # general
+                   ("language", "Language"), ("font", "Font"), ("recentFolder", "Recent Folder"), 
                    ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), 
                    ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
+                   ("fileSymbol", "File Symbols (Scatter Points)"), 
+                   # color
                    ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
 
 
@@ -138,6 +150,17 @@ def loadConfigFile():
                 for humanString, param in secDict.items():
                     if humanString in configString:
                         attr = configString[humanString]    # e.g. showHL_trend
+                        # file symbol in general section is a dict
+                        if attr == "fileSymbol":
+                            oldSymbolDict = getattr(GlobalSetting, attr)
+                            for numString, symbol in param.items():
+                                try:
+                                    num = int(numString)
+                                except ValueError:
+                                    continue
+                                if isValidSymbol(symbol):
+                                    oldSymbolDict[num] = symbol
+                            continue
                         if type(param) == type(getattr(GlobalSetting, attr)):
                             setattr(GlobalSetting, attr, param)
     except (FileNotFoundError, TypeError, toml.TomlDecodeError):
@@ -150,10 +173,11 @@ def dumpConfigFile():
     configData = {"General": {},
                   "Trend Plot": {},
                   "Histo Plot": {},
+                  "PP/QQ Plot": {},
                   "Color Setting": {}}
     configName = dict(settingNamePair)
     for k, v in GlobalSetting.__dict__.items():
-        if k in ["language", "recentFolder", 
+        if k in ["language", "font", "recentFolder", 
                  "dataNotation", "dataPrecision", 
                  "checkCpk", "cpkThreshold", "sortTestList"]:
             # General
@@ -168,42 +192,51 @@ def dumpConfigFile():
         elif k in ["showHL_histo", "showLL_histo", 
                    "showHSpec_histo", "showLSpec_histo", 
                    "showMed_histo", "showMean_histo", 
-                   "showGaus_histo", "showBoxp_histo", "binCount", "showSigma"]:
+                   "showBoxp_histo", "showBoxpOl_histo", 
+                   "showBars_histo", "binCount", "showSigma"]:
             # Histo
             configData["Histo Plot"][configName[k]] = v
 
-        elif k in ["siteColor", "sbinColor", "hbinColor"]:
-            # Color
+        elif k in ["x_ppqq", "y_ppqq"]:
+            # PPQQ
+            configData["PP/QQ Plot"][configName[k]] = v
+        
+        elif k in ["fileSymbol", "siteColor", "sbinColor", "hbinColor"]:
+            # dict
             # change Int key to string, since toml only support string keys
             v = dict([(str(intKey), color) for intKey, color in v.items()])
-            configData["Color Setting"][configName[k]] = v
+            if k == "fileSymbol":
+                section = "General"
+            else:
+                section = "Color Setting"
+            configData[section][configName[k]] = v
             
     with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
         toml.dump(configData, fd)
 
 
-class STDFFonts:
-    def __init__(self):
-        self.Chinese = "LXGW WenKai Mono"
-        self.English = "JetBrains Mono"
-
-
-def loadFonts() -> STDFFonts:
-    f = STDFFonts()
-    # reverse to put courier at the rear
+def loadFonts():
     for fn in os.listdir(os.path.join(sys.rootFolder, "fonts")):
         if not fn.endswith(".ttf"): continue
         fontPath = os.path.join(sys.rootFolder, "fonts", fn)
         fontIdx = QtGui.QFontDatabase.addApplicationFont(fontPath)
         if fontIdx < 0:
             print(f"Font {fn} cannot be loaded to QT")
+
+
+def getLoadedFontNames() -> list:
+    '''
+    get top 100 font names from qt font db
+    '''
+    names = []
+    for i in range(100):
+        # get 100 fonts at most
+        ffamilies = QtGui.QFontDatabase.applicationFontFamilies(i)
+        if ffamilies:
+            names.append(ffamilies[0])
         else:
-            fontFamilies = QtGui.QFontDatabase.applicationFontFamilies(fontIdx)
-            if fn.startswith("cn_") and len(fontFamilies) > 0:
-                f.Chinese = fontFamilies[0]
-            elif fn.startswith("en_") and len(fontFamilies) > 0:
-                f.English = fontFamilies[0]
-    return f
+            break
+    return names
 
 
 isMac = platform.system() == 'Darwin'
@@ -284,8 +317,10 @@ class tab(IntEnum):
     Info = 0
     Trend = 1
     Histo = 2
-    Bin = 3
-    Wafer = 4
+    PPQQ = 3
+    Bin = 4
+    Wafer = 5
+    Correlate = 6
     
 class REC(IntEnum):
     '''Constants of STDF Test Records: sub'''
@@ -341,6 +376,17 @@ def isHexColor(color: str) -> bool:
         return False
 
 
+symbolName = ['o', 's', 'd', '+', 't', 't1', 't2', 't3', 'p', 'h', 'star', 'x', 'arrow_up', 'arrow_right', 'arrow_down', 'arrow_left', 'crosshair']
+symbolChar = ['○', '▢', '◇', '+', '▽', '△', '▷', '◁', '⬠', '⬡', '☆', '⨯', '↑', '→', '↓', '←', '⊕']
+symbolChar2Name = dict(zip(symbolChar, symbolName))
+
+rSymbol = lambda: choice(symbolName)
+
+def isValidSymbol(s: str) -> bool:
+    '''check if `s` is in pyqtgraph symbol list'''
+    return s in symbolName
+
+
 def getProperFontColor(background: QtGui.QColor) -> QtGui.QColor:
     # https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color
     if (background.red()*0.2126 + 
@@ -391,10 +437,14 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
     return mean, sdev, Cpk
 
 
-def deleteWidget(w2delete: QtWidgets.QWidget):
-    '''delete QWidget and release its memory'''
-    w2delete.setParent(None)
-    w2delete.deleteLater()
+def deleteWidget(w2delete):
+    '''delete QWidget(s) and release its memory'''
+    if isinstance(w2delete, QtWidgets.QWidget):
+        w2delete.setParent(None)
+        w2delete.deleteLater()
+    elif isinstance(w2delete, list):
+        for w in w2delete:
+            deleteWidget(w)
 
 
 # stdf v4 flag description
@@ -1001,15 +1051,17 @@ def get_file_size(p: str) -> str:
 #     return ax
 
 
-__all__ = ["SettingParams", "tab", "REC", 
+__all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
            "getSetting", "updateSetting", "updateRecentFolder", 
            "setSettingDefaultColor", "loadConfigFile", "dumpConfigFile", 
            
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
-           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "loadFonts", 
-           "calc_cpk", "deleteWidget", "isPass", "openFileInOS", "revealFile", "rHEX", "get_file_size",
+           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
+           "loadFonts", "getLoadedFontNames", "rSymbol", 
+           "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
+           "openFileInOS", "revealFile", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",

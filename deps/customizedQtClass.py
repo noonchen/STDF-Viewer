@@ -308,7 +308,8 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
 class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
     def __init__(self, parent, fontsize: int) -> None:
         super().__init__(parent)
-        self.fontsize = fontsize
+        self.defaultFont = QtGui.QFont()
+        self.defaultFont.setPointSize(fontsize)
         
     def data(self, index: QtCore.QModelIndex, role: int):        
         if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
@@ -321,7 +322,7 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         
         if role == QtCore.Qt.ItemDataRole.FontRole:
             # set default font and size
-            return QtGui.QFont("Courier New", self.fontsize)
+            return self.defaultFont
         
         # return original data otherwise
         return super().data(index, role)
