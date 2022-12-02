@@ -24,7 +24,6 @@
 
 
 
-from .ui.ImgSrc_svg import ImgDict
 from deps.SharedSrc import *
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
@@ -202,10 +201,11 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.ppqqBtn.clicked.connect(lambda: self.settingsUI.stackedWidget.setCurrentIndex(3))
         self.settingsUI.colorBtn.clicked.connect(lambda: self.settingsUI.stackedWidget.setCurrentIndex(4))
         # set icon for buttons
-        self.settingsUI.generalBtn.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["table"], format = 'SVG'))))
-        self.settingsUI.trendBtn.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
-        self.settingsUI.histoBtn.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
-        self.settingsUI.colorBtn.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["color_palette"], format = 'SVG'))))
+        self.settingsUI.generalBtn.setIcon(getIcon("tab_info"))
+        self.settingsUI.trendBtn.setIcon(getIcon("tab_trend"))
+        self.settingsUI.histoBtn.setIcon(getIcon("tab_hist"))
+        self.settingsUI.ppqqBtn.setIcon(getIcon("tab_ppqq"))
+        self.settingsUI.colorBtn.setIcon(getIcon("ColorPalette"))
                 
         
     def initWithParentParams(self):
@@ -231,7 +231,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(settings.showSigma, 0))
         # PPQQ
         self.settingsUI.xDataCombobox.setCurrentIndex(indexDic_ppqq_reverse.get(settings.x_ppqq, 2))
-        self.settingsUI.yDataCombobox.setCurrentIndex(indexDic_ppqq_reverse.get(settings.x_ppqq, 0))
+        self.settingsUI.yDataCombobox.setCurrentIndex(indexDic_ppqq_reverse.get(settings.y_ppqq, 0))
         # general
         self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(settings.language, 0))
         self.settingsUI.fontComboBox.setCurrentText(settings.font)

@@ -28,9 +28,8 @@ import os, sys, gc, traceback, atexit
 import json, logging, urllib.request as rq
 import numpy as np
 from itertools import product
-from base64 import b64decode
 from deps.SharedSrc import *
-from deps.ui.ImgSrc_svg import ImgDict
+# from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
@@ -147,15 +146,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.tabControl.currentChanged.connect(self.onSelect)
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
         # set drop down menu for session action
-        self.sessionMenu = QtWidgets.QMenu()
-        self.sessionMenu.addActions([self.ui.actionLoad_Session, 
+        self.utilityMenu = QtWidgets.QMenu()
+        self.utilityMenu.addActions([self.ui.actionLoad_Session, 
                                      self.ui.actionSave_Session])
-        self.sessionBtn = QtWidgets.QToolButton()
-        self.sessionBtn.setText(self.tr("Session"))
-        self.sessionBtn.setMenu(self.sessionMenu)
-        self.sessionBtn.setStyleSheet("QToolButton::menu-indicator{image:none}")
-        self.sessionBtn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.ui.toolBar.insertWidget(self.ui.actionFailMarker, self.sessionBtn)
+        self.utilityBtn = QtWidgets.QToolButton()
+        self.utilityBtn.setText(self.tr("Utility"))
+        self.utilityBtn.setMenu(self.utilityMenu)
+        self.utilityBtn.setIcon(getIcon("Tools"))
+        self.utilityBtn.setStyleSheet("QToolButton::menu-indicator{image:none}")
+        self.utilityBtn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.ui.toolBar.addWidget(self.utilityBtn)
         # add a toolbar action at the right side
         self.spaceWidgetTB = QtWidgets.QWidget()
         self.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
@@ -302,11 +302,23 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onLoadSession(self):
-        pass
+        p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a STDF-Viewer session"), 
+                                           directory=getSetting().recentFolder, 
+                                           filter=self.tr("Database (*.db)"))
+        if p:
+            #TODO validation
+            self.loadDatabase(p)
     
     
     def onSaveSession(self):
-        pass
+        if self.data_interface is not None:
+            dbPath = self.data_interface.dbPath
+            outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Session As"), filter=self.tr("Database (*.db)"))
+            if outPath:
+                print(dbPath, outPath)
+        else:
+            # no data is found, show a warning dialog
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
     
     
     def onFailMarker(self):
@@ -343,9 +355,9 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox.setInformativeText("{0}:\
             <br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a>\
             <br>\
-            <br><span style='font-size:8px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
+            <br><span style='font-size:10px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
                                                                self.tr("Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.")))
-        appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
+        appIcon = getIcon("App").pixmap(250, 250)
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
         dbgBtn = msgBox.addButton(self.tr("Debug"), QMessageBox.ButtonRole.ResetRole)   # leftmost
@@ -441,18 +453,23 @@ class MyWindow(QtWidgets.QMainWindow):
 
     
     def updateIcons(self):
-        self.ui.actionOpen.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Open"], format = 'PNG'))))
-        self.ui.actionFailMarker.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["FailMarker"], format = 'SVG'))))
-        self.ui.actionExport.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Export"], format = 'SVG'))))
-        self.ui.actionSettings.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Settings"], format = 'SVG'))))
-        self.ui.actionAbout.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["About"], format = 'SVG'))))
+        self.ui.actionOpen.setIcon(getIcon("Open"))
+        self.ui.actionMerge.setIcon(getIcon("Merge"))
+        self.ui.actionFailMarker.setIcon(getIcon("FailMarker"))
+        self.ui.actionExport.setIcon(getIcon("Export"))
+        self.ui.actionSettings.setIcon(getIcon("Settings"))
+        self.ui.actionLoad_Session.setIcon(getIcon("LoadSession"))
+        self.ui.actionSave_Session.setIcon(getIcon("SaveSession"))
+        self.ui.actionAbout.setIcon(getIcon("About"))
         self.ui.toolBar.setIconSize(QtCore.QSize(20, 20))
         
-        self.ui.tabControl.setTabIcon(tab.Info, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_info"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Trend, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Histo, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Bin, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_bin"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Wafer, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(b64decode(ImgDict["tab_wafer"]), format = 'PNG'))))
+        self.ui.tabControl.setTabIcon(tab.Info, getIcon("tab_info"))
+        self.ui.tabControl.setTabIcon(tab.Trend, getIcon("tab_trend"))
+        self.ui.tabControl.setTabIcon(tab.Histo, getIcon("tab_hist"))
+        self.ui.tabControl.setTabIcon(tab.PPQQ, getIcon("tab_ppqq"))
+        self.ui.tabControl.setTabIcon(tab.Bin, getIcon("tab_bin"))
+        self.ui.tabControl.setTabIcon(tab.Wafer, getIcon("tab_wafer"))
+        self.ui.tabControl.setTabIcon(tab.Correlate, getIcon("tab_correlation"))
     
     
     def init_TestList(self):
@@ -1082,6 +1099,7 @@ class MyWindow(QtWidgets.QMainWindow):
             setSettingDefaultColor(self.availableSites, 
                                    self.data_interface.SBIN_dict, 
                                    self.data_interface.HBIN_dict)
+            setSettingDefaultSymbol(self.data_interface.num_files)
             # remove existing color btns
             self.settingUI.removeColorBtns()
             self.settingUI.initColorBtns(self.availableSites, 
@@ -1145,7 +1163,9 @@ def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication([])
     app.setStyle('Fusion')
-    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))    
+    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+    constructQIcons()
+    app.setWindowIcon(getIcon("App"))
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
     window.show()

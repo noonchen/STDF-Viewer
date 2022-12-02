@@ -13,10 +13,13 @@
 
 import os, sys, logging, datetime
 import toml, subprocess, platform
+import zlib
+from base64 import b64decode
 import numpy as np
 from enum import IntEnum
 from random import choice
 from PyQt5 import QtWidgets, QtGui
+from .ui.ImgSrcSvgCompressed import *
 
 
 
@@ -250,6 +253,46 @@ def getLoadedFontNames() -> list:
 
 
 isMac = platform.system() == 'Darwin'
+
+
+# icon related
+iconDict = {}
+
+
+convert2QIcon = lambda raw: \
+    QtGui.QIcon(
+        QtGui.QPixmap.fromImage(
+            QtGui.QImage.fromData(zlib.decompress(b64decode(raw)), 
+                                  format = 'SVG')))
+
+
+def constructQIcons():
+    global iconDict
+    iconDict = {"About": convert2QIcon(About),
+                "AddFont": convert2QIcon(AddFont),
+                "App": convert2QIcon(App),
+                "ColorPalette": convert2QIcon(ColorPalette),
+                "Convert": convert2QIcon(Convert),
+                "Export": convert2QIcon(Export),
+                "FailMarker": convert2QIcon(FailMarker),
+                "LoadSession": convert2QIcon(LoadSession),
+                "Merge": convert2QIcon(Merge),
+                "Open": convert2QIcon(Open),
+                "SaveSession": convert2QIcon(SaveSession),
+                "Settings": convert2QIcon(Settings),
+                "Tools": convert2QIcon(Tools),
+                "tab_bin": convert2QIcon(tab_bin),
+                "tab_correlation": convert2QIcon(tab_correlation),
+                "tab_hist": convert2QIcon(tab_hist),
+                "tab_info": convert2QIcon(tab_info),
+                "tab_ppqq": convert2QIcon(tab_ppqq),
+                "tab_trend": convert2QIcon(tab_trend),
+                "tab_wafer": convert2QIcon(tab_wafer),
+                }
+
+
+def getIcon(name: str) -> QtGui.QIcon:
+    return iconDict[name]
 
 
 FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
@@ -1069,7 +1112,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
-           "loadFonts", "getLoadedFontNames", "rSymbol", 
+           "loadFonts", "getLoadedFontNames", "rSymbol", "constructQIcons", "getIcon", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
            "openFileInOS", "revealFile", "rHEX", "get_file_size",
            
