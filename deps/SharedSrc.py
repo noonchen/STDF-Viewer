@@ -121,6 +121,16 @@ def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dic
                 binColorDict[bin_num] = defaultColor
 
 
+def setSettingDefaultSymbol(num_files: int):
+    """
+    Update file symbols if multiple files loaded
+    """    
+    global GlobalSetting
+    for fid in range(num_files):
+        if fid not in GlobalSetting.fileSymbol:
+            GlobalSetting.fileSymbol[fid] = rSymbol()
+
+
 def updateRecentFolder(filepath: str):
     dirpath = os.path.dirname(filepath)
     # update settings
@@ -1054,7 +1064,7 @@ def get_file_size(p: str) -> str:
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
            "getSetting", "updateSetting", "updateRecentFolder", 
-           "setSettingDefaultColor", "loadConfigFile", "dumpConfigFile", 
+           "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            

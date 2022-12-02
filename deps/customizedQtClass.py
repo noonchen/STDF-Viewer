@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Fri Dec 02 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -43,7 +43,8 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
         self.highlightColor = QtGui.QColor("#0096FF")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        self.initStyleOption(option, index)
+        # this line causes text color flicking
+        # self.initStyleOption(option, index)
         if (option.state & QtWidgets.QStyle.StateFlag.State_Selected and 
             option.state & QtWidgets.QStyle.StateFlag.State_Active):
             # get foreground color

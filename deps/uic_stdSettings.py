@@ -365,7 +365,7 @@ class stdfSettings(QtWidgets.QDialog):
             cBList = []
             for i in range(layout.count()):
                 cB = layout.itemAt(i).widget()
-                layout.removeWidget(cB)
+                # layout.removeWidget(cB)
                 cBList.append(cB)
             deleteWidget(cBList)
     
@@ -407,7 +407,7 @@ class stdfSettings(QtWidgets.QDialog):
         fsList = []
         for i in range(layout.count()):
             fsBox = layout.itemAt(i).widget()
-            layout.removeWidget(fsBox)
+            # layout.removeWidget(fsBox)
             fsList.append(fsBox)
         deleteWidget(fsList)
     
