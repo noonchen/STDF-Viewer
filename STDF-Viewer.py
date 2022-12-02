@@ -29,7 +29,6 @@ import json, logging, urllib.request as rq
 import numpy as np
 from itertools import product
 from deps.SharedSrc import *
-# from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
@@ -154,6 +153,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.utilityBtn.setMenu(self.utilityMenu)
         self.utilityBtn.setIcon(getIcon("Tools"))
         self.utilityBtn.setStyleSheet("QToolButton::menu-indicator{image:none}")
+        self.utilityBtn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.utilityBtn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         self.ui.toolBar.addWidget(self.utilityBtn)
         # add a toolbar action at the right side
@@ -1164,7 +1164,6 @@ def run():
     app = QApplication([])
     app.setStyle('Fusion')
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
-    constructQIcons()
     app.setWindowIcon(getIcon("App"))
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
