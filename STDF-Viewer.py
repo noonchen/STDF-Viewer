@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Dec 02 2022
+# Last Modified: Sat Dec 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -34,6 +34,7 @@ from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
 from deps.ChartWidgets import *
 from deps.uic_stdLoader import stdfLoader
+from deps.uic_stdMerge import MergePanel
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings
@@ -108,6 +109,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals.statusSignal.connect(self.updateStatus)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
+        self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
         self.settingUI = stdfSettings(self)
@@ -284,7 +286,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def openNewFile(self, files: list[str]):
         if not files:
-            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select a STD File To Open"), 
+            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select STDF Files To Open"), 
                                                     directory=getSetting().recentFolder, 
                                                     filter=self.tr(FILE_FILTER),)
         else:
@@ -298,7 +300,7 @@ class MyWindow(QtWidgets.QMainWindow):
               
     
     def onMerge(self):
-        pass
+        self.mergePanel.showUI()
     
     
     def onLoadSession(self):
