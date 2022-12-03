@@ -26,6 +26,7 @@
 
 import os, sys, gc, traceback, atexit
 import json, logging, urllib.request as rq
+import shutil
 import numpy as np
 from itertools import product
 from deps.SharedSrc import *
@@ -133,6 +134,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionAbout.triggered.connect(self.onAbout)
         self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
         self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
+        self.ui.actionAddFont.triggered.connect(self.onAddFont)
+        self.ui.actionToXLSX.triggered.connect(self.onToXLSX)
         # init search-related UI
         self.ui.SearchBox.textChanged.connect(self.proxyModel_list.setFilterWildcard)
         self.ui.ClearButton.clicked.connect(self.clearSearchBox)
@@ -149,7 +152,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # set drop down menu for session action
         self.utilityMenu = QtWidgets.QMenu()
         self.utilityMenu.addActions([self.ui.actionLoad_Session, 
-                                     self.ui.actionSave_Session])
+                                     self.ui.actionSave_Session,
+                                     self.ui.actionAddFont,
+                                     self.ui.actionToXLSX])
         self.utilityBtn = QtWidgets.QToolButton()
         self.utilityBtn.setText(self.tr("Utility"))
         self.utilityBtn.setMenu(self.utilityMenu)
@@ -315,9 +320,25 @@ class MyWindow(QtWidgets.QMainWindow):
     def onSaveSession(self):
         if self.data_interface is not None:
             dbPath = self.data_interface.dbPath
-            outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Session As"), filter=self.tr("Database (*.db)"))
+            dbSize = os.stat(dbPath).st_size / 2**20
+            # show confirm message if size is > 50M
+            if dbSize >= 50:
+                msg = QMessageBox.information(None, self.tr("Notice"), 
+                                              self.tr("Current session size is {}, proceed?").format("%.2f MB"%dbSize),
+                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                              QMessageBox.StandardButton.No)
+                if msg == QMessageBox.StandardButton.No:
+                    return
+            outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Session As"), 
+                                                     filter=self.tr("Database (*.db)"))
             if outPath:
-                print(dbPath, outPath)
+                def saveSessionTask(pIn: str, pOut: str):
+                    shutil.copy(pIn, pOut)
+                # tmp is only used for preventing thread being deleted before finished
+                self.tmp = runInQThread(saveSessionTask, 
+                                        (dbPath, outPath), 
+                                        self.tr("Saving session"), 
+                                        self.signals.statusSignal)
         else:
             # no data is found, show a warning dialog
             QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
@@ -374,6 +395,14 @@ class MyWindow(QtWidgets.QMainWindow):
             msgBox.close()
         
         
+    def onAddFont(self):
+        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+    
+    
+    def onToXLSX(self):
+        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+    
+    
     def onExit(self):
         '''
         Clean up before closing app
@@ -463,6 +492,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionLoad_Session.setIcon(getIcon("LoadSession"))
         self.ui.actionSave_Session.setIcon(getIcon("SaveSession"))
         self.ui.actionAbout.setIcon(getIcon("About"))
+        self.ui.actionAddFont.setIcon(getIcon("AddFont"))
+        self.ui.actionToXLSX.setIcon(getIcon("Convert"))
         self.ui.toolBar.setIconSize(QtCore.QSize(20, 20))
         
         self.ui.tabControl.setTabIcon(tab.Info, getIcon("tab_info"))

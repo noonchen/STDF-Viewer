@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Fri Dec 02 2022
+# Last Modified: Sat Dec 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -18,6 +18,7 @@ import numpy as np
 from enum import IntEnum
 from random import choice
 from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 
 
 
@@ -667,6 +668,41 @@ def get_file_size(p: str) -> str:
         pass
 
 
+class GeneralWorker(QObject):
+    finished = Signal()
+    
+    def __init__(self, jobFunc, jobArgs: tuple, jobName: str, messageSignal=None):
+        super().__init__()
+        self.job = jobFunc
+        self.jobArgs = jobArgs
+        self.name = jobName
+        self.msgSignal = messageSignal
+        
+    def run(self):
+        if self.msgSignal:
+            self.msgSignal.emit(f"{self.name} started", False, False, False)
+        self.job(*self.jobArgs)
+        if self.msgSignal:
+            self.msgSignal.emit(f"{self.name} done!", False, False, False)
+        self.finished.emit()
+
+
+def runInQThread(jobFunc, args: tuple, jobName: str, messageSignal):
+    thread = QThread()
+    worker = GeneralWorker(jobFunc, args, jobName, messageSignal)
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    worker.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+    # start
+    thread.start()
+    # let caller hold reference to prevent
+    # being garbage collected
+    return (worker, thread)
+    
+
+
 # # TODO
 # def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
 #     test_num, _, test_name = testTuple
@@ -1086,7 +1122,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
-           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", 
+           "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
            "openFileInOS", "revealFile", "rHEX", "get_file_size",
