@@ -46,9 +46,9 @@ class Ui_mergeDialog(object):
         self.page.setObjectName("page")
         self.verticalLayout = QtWidgets.QVBoxLayout(self.page)
         self.verticalLayout.setObjectName("verticalLayout")
-        self.filetable1 = QtWidgets.QTableView(self.page)
-        self.filetable1.setObjectName("filetable1")
-        self.verticalLayout.addWidget(self.filetable1)
+        self.defaultTable = QtWidgets.QTableView(self.page)
+        self.defaultTable.setObjectName("defaultTable")
+        self.verticalLayout.addWidget(self.defaultTable)
         self.toolBox.addItem(self.page, "")
         self.horizontalLayout.addWidget(self.toolBox)
         self.verticalLayout_4 = QtWidgets.QVBoxLayout()
@@ -124,8 +124,8 @@ class Ui_mergeDialog(object):
 
     def retranslateUi(self, mergeDialog):
         _translate = QtCore.QCoreApplication.translate
-        mergeDialog.setWindowTitle(_translate("mergeDialog", "Dialog"))
-        self.toolBox.setItemText(self.toolBox.indexOf(self.page), _translate("mergeDialog", "Merge Group 0"))
+        mergeDialog.setWindowTitle(_translate("mergeDialog", "Merge Panel"))
+        self.toolBox.setItemText(self.toolBox.indexOf(self.page), _translate("mergeDialog", "Default Merge Group"))
         self.addf.setToolTip(_translate("mergeDialog", "Add STDF files into selected merge group"))
         self.addf.setText(_translate("mergeDialog", "   Add Files   "))
         self.removef.setToolTip(_translate("mergeDialog", "Remove selected STDF files from current merge group"))

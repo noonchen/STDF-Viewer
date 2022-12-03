@@ -32,7 +32,7 @@ import rust_stdf_helper
 from PyQt5.QtWidgets import (QFileDialog, QMessageBox, QHeaderView, 
                              QAbstractItemView, QTableView, QDialog,
                              QWidget, QVBoxLayout)
-from PyQt5.QtCore import QTranslator, Qt
+from PyQt5.QtCore import QTranslator, Qt, QItemSelection, QItemSelectionModel
 
 
 def setTableStyle(view: QTableView, model: MergeTableModel):
@@ -77,13 +77,14 @@ class MergePanel(QDialog):
         self.mergeUI.cancel.clicked.connect(self.close)
         # used for naming new merge group
         self.newGroupIndex = 0
+        self.selectMode = QItemSelectionModel.SelectionFlag.Rows | QItemSelectionModel.SelectionFlag.Select
         # add model for default page
-        self.dataModel = MergeTableModel()
-        setTableStyle(self.mergeUI.filetable1, self.dataModel)
+        defaultModel = MergeTableModel()
+        setTableStyle(self.mergeUI.defaultTable, defaultModel)
         
         
     def showUI(self):
-        self.exec()
+        self.show()
 
 
     def onAddFiles(self):
@@ -132,10 +133,19 @@ class MergePanel(QDialog):
         view, model = self.getCurrentViewModel()
         rows = [ind.row() for ind in view.selectionModel().selectedRows()]
         if rows:
+            # clear previous selection and 
+            # select moved rows
+            selectionModel = view.selectionModel()
+            selectionModel.clearSelection()
+            
             for row in rows:
                 # move if it's not 1st row
                 if row > 0:
                     model.moveFile(row, up=True)
+                    row_new = row - 1
+                else:
+                    row_new = row
+                selectionModel.select(model.index(row_new, 0), self.selectMode)
             model.layoutChanged.emit()
     
     
@@ -143,10 +153,17 @@ class MergePanel(QDialog):
         view, model = self.getCurrentViewModel()
         rows = [ind.row() for ind in view.selectionModel().selectedRows()]
         if rows:
+            selectionModel = view.selectionModel()
+            selectionModel.clearSelection()
+            
             for row in sorted(rows):
                 # move if it's not last row
                 if row != model.rowCount() - 1:
                     model.moveFile(row, up=False)
+                    row_new = row + 1
+                else:
+                    row_new = row
+                selectionModel.select(model.index(row_new, 0), self.selectMode)
             model.layoutChanged.emit()
     
     
