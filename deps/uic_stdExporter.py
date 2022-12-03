@@ -27,6 +27,7 @@
 import re
 import os, io, logging
 from enum import IntEnum
+from itertools import product
 from xlsxwriter import Workbook
 from xlsxwriter.worksheet import Worksheet
 
@@ -125,6 +126,35 @@ def ceil(n):
     return int(-1 * n // 1 * -1)
 
 
+def write_row_col(sheet:Worksheet, row:int, col:int, dataL:list, cellFormat, writeRow:bool):
+    # if cellFormat is a list, assign cellFormat to the corresponding data, 
+    # else assign the same cellFormat to all data
+    broadcast = (not isinstance(cellFormat, list))
+    if not broadcast:
+        if len(dataL) != len(cellFormat):
+            raise ValueError("The length of data and formats should be the same")
+            
+    for i in range(len(dataL)):
+        if writeRow:
+            # row not changed, col increases with i
+            tmpRow = row
+            tmpCol = col+i
+        else:
+            # row increases with i, col not changed
+            tmpRow = row+i
+            tmpCol = col
+            
+        # write as number in default, otherwise as string
+        try:
+            sheet.write_number(tmpRow, tmpCol, float(dataL[i]), cellFormat if broadcast else cellFormat[i])
+        except (TypeError, ValueError):
+            sheet.write_string(tmpRow, tmpCol, dataL[i], cellFormat if broadcast else cellFormat[i])
+
+
+def getMaxLength(lenList: list[int], dataList: list[str]) -> list[int]:
+    return [max(w, len(d)) for w, d in zip(lenList, dataList)]
+
+
 class dataChannel:
     # for sharing data between threads
     imageChannel = None
@@ -140,7 +170,6 @@ class signals(QtCore.QObject):
     # get close signal
     closeSignal = Signal(bool)
     # signals from report generation thread for requesting data
-    prepareDataSignal = Signal(tuple)    # testID
     retrieveImageSignal = Signal(int, int, tuple, int)     # head, site, testTuple, chartType
     retrieveDataListSignal = Signal(int, dict)      # chartType, {site, testTuple} / {site, bin}
     retrieveTableDataSignal = Signal(int)           # FileInfo table
@@ -149,12 +178,20 @@ class signals(QtCore.QObject):
     
     
 class reportGenerator(QtCore.QObject):
-    def __init__(self, signals:signals, mutex:QtCore.QMutex, conditionWait:QtCore.QWaitCondition, settings:tuple, channel:dataChannel):
+    def __init__(self, signals:signals, mutex:QtCore.QMutex, conditionWait:QtCore.QWaitCondition, reportInfo:tuple, channel:dataChannel):
         super().__init__()
         self.forceQuit = False
         self.mutex = mutex
         self.condWait = conditionWait
-        self.contL, self.numTupL, self.testRecTypes, self.headL, self.siteL, self.path, self.numWafer, self.totalLoopCnt = settings
+        self.loopCount = 0
+        (self.selectedContents, 
+         self.testTuples, 
+         self.selectedFiles, 
+         self.selectedHeads, 
+         self.selectedSites, 
+         self.reportPath, 
+         self.waferTuples, 
+         self.totalLoopCnt) = reportInfo
         # for sharing data from gui thread
         self.channel = channel
         # signals for updating progress bar dialog
@@ -162,7 +199,6 @@ class reportGenerator(QtCore.QObject):
         self.progressBarSignal = signals.progressBarSignal
         self.closeSignal = signals.closeSignal
         # signals for data communication
-        self.prepareDataSignal = signals.prepareDataSignal
         self.retrieveImageSignal = signals.retrieveImageSignal
         self.retrieveDataListSignal = signals.retrieveDataListSignal
         self.retrieveTableDataSignal = signals.retrieveTableDataSignal
@@ -183,7 +219,6 @@ class reportGenerator(QtCore.QObject):
         # pause thread until the data is received from gui thread
         self.mutex.lock()
         self.retrieveDataListSignal.emit(chartType, kargs)
-
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         # same as waitForImage
@@ -206,306 +241,350 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel
             
         
+    def sendProgress(self):
+        self.progressBarSignal.emit(int(10000 * self.loopCount/self.totalLoopCnt))
+    
+    
+    def writeFileInfo(self):
+        InfoSheet = self.sheetDict.get(ReportSelection.FileInfo, None)
+        if InfoSheet is None:
+            return
+        
+        headerLabels = [self.tr("Property Name"), self.tr("Value")]
+        maxColWidth = [len(s) for s in headerLabels]
+        
+        InfoSheet.write_row(sv.finfoRow, sv.finfoCol, headerLabels, self.centerStyle)
+        sv.finfoRow += 1
+        #TODO get file info table
+        dataTable = self.waitForTableData(tab.FileInfo)
+                                
+        for dataRow in dataTable:
+            if self.forceQuit: return
+            write_row_col(InfoSheet, 
+                          sv.finfoRow, sv.finfoCol, 
+                          dataRow, self.centerStyle, 
+                          writeRow=True)
+            maxColWidth = getMaxLength(maxColWidth, dataRow)
+            sv.finfoRow += 1
+            
+        self.loopCount += 1
+        self.sendProgress()
+        _ = [InfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(maxColWidth)]
+
+
+    def writeGDR_DTR(self):
+        GDR_DTR_Sheet = self.sheetDict.get(ReportSelection.GDR_DTR, None)
+        if GDR_DTR_Sheet is None:
+            return
+        
+        headerLabels = [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")]
+        maxColWidth = [len(s) for s in headerLabels]
+        
+        GDR_DTR_Sheet.write_row(sv.drRow, sv.drCol, headerLabels, self.centerStyle)
+        sv.drRow += 1
+        #TODO
+        dataTable = self.waitForTableData(tab.GDR_DTR)
+                                
+        for dataRow in dataTable:
+            if self.forceQuit: return
+            # remove \n that added besides values
+            dataRow = [ele.strip("\n") for ele in dataRow]
+            write_row_col(GDR_DTR_Sheet, 
+                          sv.drRow, sv.drCol, 
+                          dataRow, self.centerStyle, 
+                          writeRow=True)
+            maxColWidth = getMaxLength(maxColWidth, dataRow)
+            sv.drRow += 1
+            
+        self.loopCount += 1
+        self.sendProgress()
+        _ = [GDR_DTR_Sheet.set_column(col, col, width*1.1) for col, width in enumerate(maxColWidth)]
+
+
+    def writeDUT_Summary(self):
+        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
+        if DutSheet is None:
+            return
+        
+        headerLabelList = [["", self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
+                            [self.tr("Test Number")],
+                            [self.tr("Upper Limit")],
+                            [self.tr("Lower Limit")],
+                            [self.tr("Unit")]]
+        maxColWidth = [len(s) for s in headerLabelList[0]]
+        maxColWidth[0] = max([len(row[0]) for row in headerLabelList])
+        
+        # write headers
+        for h in headerLabelList:
+            DutSheet.write_row(sv.dutRow, sv.dutCol, h, self.centerStyle)
+            sv.dutRow += 1
+        # write DUT info
+        # 2d, row: dut info of a dut, col: [id, site, ...]
+        summaryTable = self.waitForDutSummary(self.selectedHeads, self.selectedSites, {})
+        for ind, dataRow in enumerate(summaryTable):
+            if self.forceQuit: return
+            
+            dataRow = ["#%d" % (ind+1)] + dataRow
+            # choose style by dut flag
+            dutFlag: str = dataRow[-1]
+            if dutFlag.startswith("P"):
+                cellStyle = self.centerStyle
+            elif dutFlag.startswith("F"):
+                cellStyle = self.failedStyle
+            elif dutFlag.startswith("Super"):
+                cellStyle = self.overrideStyle
+            else:
+                cellStyle = self.unknownStyle
+            write_row_col(DutSheet, sv.dutRow, sv.dutCol, dataRow, cellStyle, writeRow=True)
+            maxColWidth = getMaxLength(maxColWidth, dataRow)
+            sv.dutRow += 1
+            
+        self.loopCount += 1
+        self.sendProgress()
+        _ = [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(maxColWidth)]
+        # set current col to the last empty column
+        sv.dutCol = len(headerLabelList[0])
+    
+    
+    def writeDUT_Testdata(self, testTuple):
+        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
+        if DutSheet is None:
+            return
+
+        #append test raw data to the last column
+        max_width = 0
+        test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, self.selectedSites, {"testTuple": testTuple})
+        data_style_list = [self.centerStyle if stat else self.failedStyle for stat in test_stat_list]
+        write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
+        max_width = max([len(s) for s in test_data_list])
+        DutSheet.set_column(sv.dutCol, sv.dutCol, max_width*1.1)
+        sv.dutCol += 1
+        # loop cnt + 1 at the end
+        self.loopCount += 1
+        self.sendProgress()
+
+
+    def writeBinChart(self, BinSheet: Worksheet):
+        BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
+        if BinSheet is None:
+            return
+        
+        # discard bin number (ele[1])
+        extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]
+        maxColWidth = []
+        for head, site in product(self.selectedHeads, self.selectedSites):
+            if self.forceQuit: return
+            # get bin image from GUI thread and insert to the sheet
+            image_io = self.waitForImage(head=head, site=site, testTuple=(0, 0, ""), chartType=tab.Bin)
+            image_width, image_height = get_png_size(image_io)
+            
+            # rescale the width of the image to 12 inches
+            bin_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+            BinSheet.insert_image(sv.binRow, 0, "", {'x_scale': bin_scale, 'y_scale': bin_scale, 'image_data': image_io})
+            sv.binRow += ceil((image_height / 200) * bin_scale / 0.21)
+            
+            # get hard bin list
+            dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
+            BinSheet.write_row(sv.binRow, 0, dataList_HB, self.txWrapStyle)
+            # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
+            sv.binRow += 1
+            # get soft bin list
+            dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
+            BinSheet.write_row(sv.binRow, 0, dataList_SB, self.txWrapStyle)
+            # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
+            sv.binRow += 3
+            
+        self.loopCount += 1
+        self.sendProgress()
+        # _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+
+
+    def writeWaferMap(self):
+        WaferSheet = self.sheetDict.get(ReportSelection.Wafer, None)
+        if WaferSheet is None:
+            return
+        
+        for wafer in self.waferTuples:
+            if self.forceQuit: return
+            image_io = self.waitForImage(chartType=tab.Wafer)
+            image_width, image_height = get_png_size(image_io)
+            # rescale the width of the image to 12 inches
+            wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+            WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': wafer_scale, 'y_scale': wafer_scale, 'image_data': image_io})
+            sv.waferRow += ceil((image_height / 200) * wafer_scale / 0.21) + 2
+            # gap between images
+            sv.waferRow += 3
+            self.loopCount += 1
+            self.sendProgress()
+
+
+    def writeTrendPlot(self, testTuple, head, site):
+        TrendSheet:Worksheet = self.sheetDict.get(ReportSelection.Trend, None)
+        if TrendSheet is None:
+            return
+        
+        # get image and stat from main thread
+        image_io = self.waitForImage(head, site, testTuple, tab.Trend)
+        image_width, image_height = get_png_size(image_io)
+        # rescale the width of the image to 12 inches
+        trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+        dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple})
+        # insert into the work sheet
+        TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
+        sv.trendRow += ceil((image_height / 200) * trend_scale / 0.21)
+        # TrendSheet.write_row(sv.trendRow, 0, header_stat, self.centerStyle)
+        sv.trendRow += 1
+        write_row_col(TrendSheet, sv.trendRow, 0, dataList, self.centerStyle, writeRow=True)
+        trend_col_width = [trend_col_width[col] if trend_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        sv.trendRow += 2
+        
+        self.loopCount += 1
+        self.sendProgress()
+
+
+    def writeHistogram(self, testTuple, head, site):
+        HistoSheet:Worksheet = self.sheetDict.get(ReportSelection.Histo, None)
+        if HistoSheet is None:
+            return
+        
+        image_io = self.waitForImage(head, site, testTuple, tab.Histo)
+        dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "testTuple": testTuple})
+        #
+        image_width, image_height = get_png_size(image_io)
+        # rescale the width of the image to 12 inches
+        histo_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+        HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': histo_scale, 'y_scale': histo_scale, 'image_data': image_io})
+        sv.histoRow += ceil((image_height / 200) * histo_scale / 0.21)
+        # HistoSheet.write_row(sv.histoRow, 0, header_stat, self.centerStyle)
+        sv.histoRow += 1
+        write_row_col(HistoSheet, sv.histoRow, 0, dataList, self.centerStyle, writeRow=True)
+        histo_col_width = [histo_col_width[col] if histo_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        sv.histoRow += 2
+
+        self.loopCount += 1
+        self.sendProgress()
+        
+    
+    def writeStatistic(self, testTuple, head, site):
+        # Sheet for statistics of test items, e.g. cpk, mean, etc.
+        StatSheet:Worksheet = self.sheetDict.get(ReportSelection.Stat, None)
+        if StatSheet is None:
+            return
+        
+        if not hasStatHeader:
+            # StatSheet.write_row(sv.statRow, 0, header_stat, self.centerStyle)
+            sv.statRow += 1
+            hasStatHeader = True    # avoid duplicated header
+            
+        dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple})
+        write_row_col(StatSheet, sv.statRow, 0, dataList, self.centerStyle, writeRow=True)
+        stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        sv.statRow += 1
+        
+        self.loopCount += 1
+        self.sendProgress()
+        
+        
+    
     @Slot()
     def generate_report(self):
-        def write_row_col(sheet:Worksheet, row:int, col:int, dataL:list, cellFormat, writeRow:bool):
-            # if cellFormat is a list, assign cellFormat to the corresponding data, 
-            # else assign the same cellFormat to all data
-            broadcast = (not isinstance(cellFormat, list))
-            if not broadcast:
-                if len(dataL) != len(cellFormat):
-                    raise ValueError("The length of data and formats should be the same")
-                    
-            for i in range(len(dataL)):
-                if writeRow:
-                    # row not changed, col increases with i
-                    tmpRow = row
-                    tmpCol = col+i
-                else:
-                    # row increases with i, col not changed
-                    tmpRow = row+i
-                    tmpCol = col
-                    
-                # write as number in default, otherwise as string
-                try:
-                    sheet.write_number(tmpRow, tmpCol, float(dataL[i]), cellFormat if broadcast else cellFormat[i])
-                except (TypeError, ValueError):
-                    sheet.write_string(tmpRow, tmpCol, dataL[i], cellFormat if broadcast else cellFormat[i])
-                    
-        sendProgress = lambda loopCnt: self.progressBarSignal.emit(int(10000 * loopCnt/self.totalLoopCnt))
-        
+        import time
+        time.sleep(5)
+        print("done")
+        print(self.selectedContents, 
+         self.testTuples, 
+         self.selectedFiles, 
+         self.selectedHeads, 
+         self.selectedSites, 
+         self.reportPath, 
+         self.waferTuples, 
+         self.totalLoopCnt)
+        self.closeSignal.emit(True)
+        return
         # test if the filepath is writable
         try:
-            test_f = open(self.path, "ab+")
+            test_f = open(self.reportPath, "ab+")
             test_f.close()
         except Exception as e:
             self.msgSignal.emit("Error@@@" + repr(e))
             self.closeSignal.emit(True)
             return
             
-        with Workbook(self.path) as wb:
-            centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
-            failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#CC0000", "bold": True})
-            unknownStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#FE7B00", "bold": True})
+        with Workbook(self.reportPath) as wb:
+            self.centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
+            self.failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#CC0000", "bold": True})
+            self.unknownStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#FE7B00", "bold": True})
             # style with newline
-            txWrapStyle = wb.add_format({"align": "center", "valign": "vjustify"})
-            txWrapStyle.set_text_wrap()
-            # header for thrend/histo
-            header_stat = [self.tr("Test Number / Site"), self.tr("Test Name"), self.tr("Unit"), self.tr("Low Limit"), 
-                           self.tr("High Limit"), self.tr("Fail Count"), self.tr("Cpk"), self.tr("Average"), 
-                           self.tr("Median"), self.tr("St. Dev."), self.tr("Min"), self.tr("Max")]
-            if REC.FTR in self.testRecTypes:
-                header_stat[2:2] = [self.tr("Pattern Name")]
-            if REC.MPR in self.testRecTypes:
-                header_stat[2:2] = [self.tr("PMR Index"), self.tr("Logical Name"), self.tr("Physical Name"), self.tr("Channel Name")]
+            self.txWrapStyle = wb.add_format({"align": "center", "valign": "vjustify"})
+            self.txWrapStyle.set_text_wrap()
             
-            sheetDict = {}
-            loopCnt = 0     # used for representing generation progress
+            # 1. create sheets for each selected contents, create a dict to store the sheet object.
+            # 2. write the contents that don't relay on the test numbers: file header, bin, wafer, dut summary (dut info part)
+            # 3. loop thru test numbers, write dut summary (test data part).
+            # 4. loop thru site & head to get images
+            self.sheetDict = {}
+            loopCnt = 0
             sv.init_variables()
-            '''
-            1. create sheets for each selected contents, create a dict to fetch the sheet object.
-            2. write the contents that don't relay on the test numbers: file header, bin, wafer, dut summary (dut info part)
-            3. loop thru test numbers, prepare the test data, write dut summary (test data part), then loop thru site & head to get trend/histo images
-            '''
-            for cont in [tab.FileInfo, tab.DUT, tab.GDR_DTR, tab.Stat, tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+                        
+            for cont in [ReportSelection.FileInfo, ReportSelection.DUT, 
+                         ReportSelection.GDR_DTR, ReportSelection.Stat, 
+                         ReportSelection.Trend, ReportSelection.Histo, 
+                         ReportSelection.Bin, ReportSelection.Wafer,
+                         ReportSelection.PPQQ, ReportSelection.Correlation]:
                 # sheet order in the xlsx is fixed
-                sheetName = ""
-                if   cont == tab.FileInfo:  sheetName = self.tr("File Info")
-                elif cont == tab.DUT:       sheetName = self.tr("DUT Summary")
-                elif cont == tab.GDR_DTR:   sheetName = self.tr("GDR & DTR Summary")
-                elif cont == tab.Stat:      sheetName = self.tr("Test Statistics")
-                elif cont == tab.Trend:     sheetName = self.tr("Trend Chart")
-                elif cont == tab.Histo:     sheetName = self.tr("Histogram")
-                elif cont == tab.Bin:       sheetName = self.tr("Bin Chart")
-                elif cont == tab.Wafer:     sheetName = self.tr("Wafer Map")
-                if cont in self.contL:      sheetDict[cont] = wb.add_worksheet(sheetName)
+                if   cont == ReportSelection.FileInfo:  sheetName = self.tr("File Info")
+                elif cont == ReportSelection.DUT:       sheetName = self.tr("DUT Summary")
+                elif cont == ReportSelection.GDR_DTR:   sheetName = self.tr("GDR & DTR Summary")
+                elif cont == ReportSelection.Stat:      sheetName = self.tr("Test Statistics")
+                elif cont == ReportSelection.Trend:     sheetName = self.tr("Trend Chart")
+                elif cont == ReportSelection.Histo:     sheetName = self.tr("Histogram")
+                elif cont == ReportSelection.Bin:       sheetName = self.tr("Bin Chart")
+                elif cont == ReportSelection.Wafer:     sheetName = self.tr("Wafer Map")
+                elif cont == ReportSelection.PPQQ:      sheetName = self.tr("Normal Validation")
+                else:                                   sheetName = self.tr("Correlation")
+                if cont in self.selectedContents:       self.sheetDict[cont] = wb.add_worksheet(sheetName)
             
             # ** write contents independent of test numbers
-            # file info
-            if tab.FileInfo in self.contL:
-                # Sheet for file information
-                FileInfoSheet:Worksheet = sheetDict[tab.FileInfo]
-                headerLabels = [self.tr("Property Name"), self.tr("Value")]
-                col_width = [len(s) for s in headerLabels]
-                
-                FileInfoSheet.write_row(sv.finfoRow, sv.finfoCol, headerLabels, centerStyle)
-                sv.finfoRow += 1
-                data = self.waitForTableData(tab.FileInfo)
-                                        
-                for row in data:
-                    if self.forceQuit: return
-                    write_row_col(FileInfoSheet, sv.finfoRow, sv.finfoCol, row, centerStyle, writeRow=True)
-                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
-                    sv.finfoRow += 1
-                    
-                loopCnt += 1
-                sendProgress(loopCnt)
-                _ = [FileInfoSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                
+            # file info                
+            self.writeFileInfo()
+            if self.forceQuit: return
             # GDR & DTR Summary
-            if tab.GDR_DTR in self.contL:
-                # Sheet for GDR & DTR
-                GDR_DTR_Sheet:Worksheet = sheetDict[tab.GDR_DTR]
-                headerLabels = [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")]
-                col_width = [len(s) for s in headerLabels]
-                
-                GDR_DTR_Sheet.write_row(sv.drRow, sv.drCol, headerLabels, centerStyle)
-                sv.drRow += 1
-                data = self.waitForTableData(tab.GDR_DTR)
-                                        
-                for row in data:
-                    if self.forceQuit: return
-                    # remove \n that added besides values
-                    row = [ele.strip("\n") for ele in row]
-                    write_row_col(GDR_DTR_Sheet, sv.drRow, sv.drCol, row, centerStyle, writeRow=True)
-                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(row)]
-                    sv.drRow += 1
-                    
-                loopCnt += 1
-                sendProgress(loopCnt)
-                _ = [GDR_DTR_Sheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                
+            self.writeGDR_DTR()
+            if self.forceQuit: return
             # dut summary (dut part)
-            if tab.DUT in self.contL:
-                # Sheet for DUT summary & Test raw data
-                DutSheet:Worksheet = sheetDict[tab.DUT]
-                headerLabelList = [["", self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
-                                    [self.tr("Test Number")],
-                                    [self.tr("Upper Limit")],
-                                    [self.tr("Lower Limit")],
-                                    [self.tr("Unit")]]
-                col_width = [len(s) for s in headerLabelList[0]]
-                col_width[0] = max([len(row[0]) for row in headerLabelList])
-                
-                # write headers
-                for h in headerLabelList:
-                    DutSheet.write_row(sv.dutRow, sv.dutCol, h, centerStyle)
-                    sv.dutRow += 1
-                # write DUT info
-                DutInfoList = self.waitForDutSummary(self.headL, self.siteL, {})    # 2d, row: dut info of a dut, col: [id, site, ...]
-                for count, infoRow in enumerate(DutInfoList):
-                    L = ["#%d" % (count+1)] + infoRow
-                    cellStyle =  centerStyle if infoRow[-1].startswith("P") else (failedStyle if infoRow[-1].startswith("F") else unknownStyle)     # the last element is dut status: "Failed / 0x08" or "Passed / 0x00"
-                    write_row_col(DutSheet, sv.dutRow, sv.dutCol, L, cellStyle, writeRow=True)
-                    col_width = [col_width[col] if col_width[col]>len(s) else len(s) for col, s in enumerate(L)]
-                    sv.dutRow += 1
-                    
-                loopCnt += 1
-                sendProgress(loopCnt)
-                _ = [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-                # set current col to the last empty column
-                sv.dutCol = len(headerLabelList[0])
-            
+            self.writeDUT_Summary()
+            if self.forceQuit: return
             # bin sheet
-            if tab.Bin in self.contL:
-                # Sheet for bin distribution
-                BinSheet:Worksheet = sheetDict[tab.Bin]
-                extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]  # discard bin number (ele[1])
-                col_width = []
-                for head in self.headL:
-                    for site in self.siteL:
-                        if self.forceQuit: return
-                        # get bin image from GUI thread and insert to the sheet
-                        image_io = self.waitForImage(head=head, site=site, testTuple=(0, 0, ""), chartType=tab.Bin)
-                        image_width, image_height = get_png_size(image_io)
-                        # rescale the width of the image to 12 inches
-                        bin_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-                        BinSheet.insert_image(sv.binRow, 0, "", {'x_scale': bin_scale, 'y_scale': bin_scale, 'image_data': image_io})
-                        sv.binRow += ceil((image_height / 200) * bin_scale / 0.21)
-                        # get hard bin list
-                        dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
-                        BinSheet.write_row(sv.binRow, 0, dataList_HB, txWrapStyle)
-                        col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
-                        sv.binRow += 1
-                        # get soft bin list
-                        dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
-                        BinSheet.write_row(sv.binRow, 0, dataList_SB, txWrapStyle)
-                        col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
-                        sv.binRow += 3
-                        
-                        loopCnt += 1
-                        sendProgress(loopCnt)
-                _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
-            
+            self.writeBinChart()
+            if self.forceQuit: return
             # wafer sheet
-            if tab.Wafer in self.contL:
-                # Sheet for wafer map
-                WaferSheet:Worksheet = sheetDict[tab.Wafer]
-
-                for wafer in self.numWafer:
-                    for head in self.headL:
-                        for site in self.siteL:
-                            if self.forceQuit: return
-                            image_io = self.waitForImage(head=head, site=site, testTuple=(wafer, 0, ""), chartType=tab.Wafer)
-                            image_width, image_height = get_png_size(image_io)
-                            # rescale the width of the image to 12 inches
-                            wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-                            WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': wafer_scale, 'y_scale': wafer_scale, 'image_data': image_io})
-                            sv.waferRow += ceil((image_height / 200) * wafer_scale / 0.21) + 2
-                            
-                            loopCnt += 1
-                            sendProgress(loopCnt)
-                    sv.waferRow += 3
+            self.writeWaferMap()
+            if self.forceQuit: return
             
             # ** write contents related to test numbers
-            trend_col_width = [len(s) for s in header_stat]
-            histo_col_width = [len(s) for s in header_stat]
-            stat_col_width = [len(s) for s in header_stat]
+            trend_col_width = []#[len(s) for s in header_stat]
+            histo_col_width = []#[len(s) for s in header_stat]
+            stat_col_width = []#[len(s) for s in header_stat]
             hasStatHeader = False
             
-            for testTuple in self.numTupL:
-                # prepare data (all sites all heads)
-                self.prepareDataSignal.emit( (testTuple[0], testTuple[-1]) )
+            for testTuple in self.testTuples:                
+                self.writeDUT_Testdata()
                 
-                # if dut summary is selected
-                if tab.DUT in self.contL:
-                    DutSheet:Worksheet = sheetDict[tab.DUT]
-                    #append test raw data to the last column
-                    max_width = 0
-                    test_data_list, test_stat_list = self.waitForDutSummary(self.headL, self.siteL, {"testTuple": testTuple})
-                    data_style_list = [centerStyle if stat else failedStyle for stat in test_stat_list]
-                    write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
-                    max_width = max([len(s) for s in test_data_list])
-                    DutSheet.set_column(sv.dutCol, sv.dutCol, max_width*1.1)
-                    sv.dutCol += 1
-                    # loop cnt + 1 at the end
-                    loopCnt += 1
-                    sendProgress(loopCnt)
+                for head, site in product(self.selectedHeads, self.selectedSites):
+                    if self.forceQuit: return
+
+                    self.writeTrendPlot(testTuple, head, site)
+                    self.writeHistogram(testTuple, head, site)
+                    self.writeStatistic(testTuple, head, site)
                 
-                for head in self.headL:
-                    for site in self.siteL:
-                        if self.forceQuit: return
-                                                
-                        # if Trend is selected
-                        if tab.Trend in self.contL:
-                            # Sheet for trend plot and test data
-                            TrendSheet:Worksheet = sheetDict[tab.Trend]
-                            # get image and stat from main thread
-                            image_io = self.waitForImage(head, site, testTuple, tab.Trend)
-                            image_width, image_height = get_png_size(image_io)
-                            # rescale the width of the image to 12 inches
-                            trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
-                            # insert into the work sheet
-                            TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
-                            sv.trendRow += ceil((image_height / 200) * trend_scale / 0.21)
-                            TrendSheet.write_row(sv.trendRow, 0, header_stat, centerStyle)
-                            sv.trendRow += 1
-                            write_row_col(TrendSheet, sv.trendRow, 0, dataList, centerStyle, writeRow=True)
-                            trend_col_width = [trend_col_width[col] if trend_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                            sv.trendRow += 2
-                            # loop cnt + 1 at the end
-                            loopCnt += 1
-                            sendProgress(loopCnt)
-                        
-                        # if histo is selected
-                        if tab.Histo in self.contL:
-                            # Sheet for histogram plot and test data
-                            HistoSheet:Worksheet = sheetDict[tab.Histo]
-                            #
-                            image_io = self.waitForImage(head, site, testTuple, tab.Histo)
-                            dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
-                            #
-                            image_width, image_height = get_png_size(image_io)
-                            # rescale the width of the image to 12 inches
-                            histo_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-                            HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': histo_scale, 'y_scale': histo_scale, 'image_data': image_io})
-                            sv.histoRow += ceil((image_height / 200) * histo_scale / 0.21)
-                            HistoSheet.write_row(sv.histoRow, 0, header_stat, centerStyle)
-                            sv.histoRow += 1
-                            write_row_col(HistoSheet, sv.histoRow, 0, dataList, centerStyle, writeRow=True)
-                            histo_col_width = [histo_col_width[col] if histo_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                            sv.histoRow += 2
-                            # loop cnt + 1 at the end
-                            loopCnt += 1
-                            sendProgress(loopCnt)
-                        
-                        # if stat is selected
-                        if tab.Stat in self.contL:
-                            # Sheet for statistics of test items, e.g. cpk, mean, etc.
-                            StatSheet:Worksheet = sheetDict[tab.Stat]
-                            if not hasStatHeader:
-                                StatSheet.write_row(sv.statRow, 0, header_stat, centerStyle)
-                                sv.statRow += 1
-                                hasStatHeader = True    # avoid duplicated header
-                                
-                            dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple, "testRecTypes": self.testRecTypes})
-                            write_row_col(StatSheet, sv.statRow, 0, dataList, centerStyle, writeRow=True)
-                            stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-                            sv.statRow += 1
-                            # loop cnt + 1 at the end
-                            loopCnt += 1
-                            sendProgress(loopCnt)
-                        
                 # we can safely modify these constants without if statement checking
                 sv.trendRow += 2     # add gap between different test items
                 sv.histoRow += 2     # add gap between different test items
                 sv.statRow += 1     # add gap between different test items
             
-            if tab.Trend in self.contL: [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(trend_col_width)]
-            if tab.Histo in self.contL: [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(histo_col_width)]
-            if tab.Stat in self.contL: [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(stat_col_width)]
-        
+            # if tab.Trend in self.contL: [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(trend_col_width)]
+            # if tab.Histo in self.contL: [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(histo_col_width)]
+            # if tab.Stat in self.contL: [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(stat_col_width)]
         self.closeSignal.emit(True)
         
           
@@ -521,7 +600,7 @@ class progressDisplayer(QtWidgets.QDialog):
         # thread sync
         self.mutex = QtCore.QMutex()
         self.condWait = QtCore.QWaitCondition()
-        self.thread = QtCore.QThread(parent=self)
+        self.workThread = QtCore.QThread(parent=self)
         # for sharing data between threads
         self.channel = dataChannel()
         
@@ -531,25 +610,27 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.msgSignal.connect(self.showMsg)
         self.signals.progressBarSignal.connect(self.updateProgressBar)
         self.signals.closeSignal.connect(self.closeExporter)
-        self.signals.prepareDataSignal.connect(self.prepareData)
         self.signals.retrieveImageSignal.connect(self.getImageFromParentMethod)
         self.signals.retrieveDataListSignal.connect(self.getDataListFromParentMethod)
         self.signals.retrieveTableDataSignal.connect(self.getTableDataFromParent)
         self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
         
+        
+    def setReportInfo(self, reportInfo: tuple):
         self.rg = reportGenerator(self.signals, 
                                   self.mutex, 
                                   self.condWait, 
-                                  (parent.contL, parent.numTupL, parent.testRecTypes, parent.headL, parent.siteL, parent.path, parent.numWafer, parent.totalLoopCnt),
+                                  reportInfo,
                                   self.channel)
-        
-        self.rg.moveToThread(self.thread)
-        self.thread.started.connect(self.rg.generate_report)
-        self.thread.start()
-        # self.rg.generate_report()
+        self.rg.moveToThread(self.workThread)
+        self.workThread.started.connect(self.rg.generate_report)
+
+
+    def start(self):
+        self.workThread.start()
         self.exec_()
-        
-        
+    
+    
     def closeEvent(self, event):
         if self.closeEventByThread:
             event.accept()
@@ -559,7 +640,7 @@ class progressDisplayer(QtWidgets.QDialog):
             if close == QMessageBox.Yes:
                 # if user clicked yes, temrinate thread and close window
                 self.rg.forceQuit = True
-                self.thread.quit()
+                self.workThread.quit()
                 # self.thread.wait()
                 event.accept()
             else:
@@ -591,17 +672,11 @@ class progressDisplayer(QtWidgets.QDialog):
         self.closeEventByThread = closeUI
         if closeUI:
             # gracefully quit thread before close export ui
-            self.thread.quit()
-            self.thread.wait()
+            self.workThread.quit()
+            self.workThread.wait()
             self.close()
 
 
-    @Slot(tuple)
-    def prepareData(self, testID):
-        # print_thread("prepareData")
-        self.parent().parent.prepareData([testID])
-    
-    
     @Slot(int, int, tuple, int)
     def getImageFromParentMethod(self, head, site, testTuple, chartType):
         '''
@@ -1034,39 +1109,43 @@ class stdfExporter(QtWidgets.QDialog):
             waferTuples = []
        
         # determine the max value of progress bar
-        self.totalLoopCnt = 0
+        totalLoopCnt = 0
         if ReportSelection.Trend in selectedContents:
-            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.Histo in selectedContents:
-            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.Stat in selectedContents:
-            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.Bin in selectedContents:
-            self.totalLoopCnt += len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(selectedSites) * len(selectedHeads)
         if ReportSelection.FileInfo in selectedContents:
-            self.totalLoopCnt += 1
+            totalLoopCnt += 1
         if ReportSelection.DUT in selectedContents:
-            self.totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
+            totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
         if ReportSelection.Wafer in selectedContents:
-            self.totalLoopCnt += len(waferTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(waferTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.GDR_DTR in selectedContents:
-            self.totalLoopCnt += 1
+            totalLoopCnt += 1
                     
-        # self.pd = progressDisplayer(parent=self)
-        # if self.pd.errorOccured:
-        #     # error occured
-        #     title = self.tr("Error occurred")
-        #     msg = self.tr("Something's wrong when exporting, you can still check the report in:")
-        # elif self.pd.closeEventByThread:
-        #     # end normally
-        #     title = self.tr("Export completed!")
-        #     msg = self.tr("Report path:")
-        # else:
-        #     # aborted
-        #     title = self.tr("Process Aborted!")
-        #     msg = self.tr("Partial report is saved in:")
-        title = "???"
-        msg = "xxx"
+        self.pd = progressDisplayer(parent=self)
+        rinfo = (selectedContents, testTuples,
+                 selectedFiles, selectedHeads, 
+                 selectedSites, reportPath, 
+                 waferTuples, totalLoopCnt)
+        self.pd.setReportInfo(rinfo)
+        self.pd.start()
+        if self.pd.errorOccured:
+            # error occured
+            title = self.tr("Error occurred")
+            msg = self.tr("Something's wrong when exporting, you can still check the report in:")
+        elif self.pd.closeEventByThread:
+            # end normally
+            title = self.tr("Export completed!")
+            msg = self.tr("Report path:")
+        else:
+            # aborted
+            title = self.tr("Process Aborted!")
+            msg = self.tr("Partial report is saved in:")
             
         msgbox = QMessageBox(None)
         msgbox.setText(title)

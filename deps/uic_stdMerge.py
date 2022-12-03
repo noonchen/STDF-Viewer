@@ -32,7 +32,7 @@ import rust_stdf_helper
 from PyQt5.QtWidgets import (QFileDialog, QMessageBox, QHeaderView, 
                              QAbstractItemView, QTableView, QDialog,
                              QWidget, QVBoxLayout)
-from PyQt5.QtCore import QTranslator, Qt, QItemSelection, QItemSelectionModel
+from PyQt5.QtCore import QTranslator, Qt, QItemSelectionModel
 
 
 def setTableStyle(view: QTableView, model: MergeTableModel):
