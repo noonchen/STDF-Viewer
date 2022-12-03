@@ -30,7 +30,8 @@ from .SharedSrc import *
 import rust_stdf_helper
 
 from PyQt5.QtWidgets import (QFileDialog, QMessageBox, QHeaderView, 
-                             QAbstractItemView, QTableView, QDialog)
+                             QAbstractItemView, QTableView, QDialog,
+                             QWidget, QVBoxLayout)
 from PyQt5.QtCore import QTranslator, Qt
 
 
@@ -62,6 +63,7 @@ class MergePanel(QDialog):
         self.mergeUI = Ui_mergeDialog()
         self.mergeUI.setupUi(self)
         self.mainUI = parent
+        self.box = self.mergeUI.toolBox
         self.translator = QTranslator(self)
         self.translator_code = QTranslator(self)
         # connect btns
@@ -73,14 +75,14 @@ class MergePanel(QDialog):
         self.mergeUI.moveDown.clicked.connect(self.onMoveDown)
         self.mergeUI.confirm.clicked.connect(self.onConfirm)
         self.mergeUI.cancel.clicked.connect(self.close)
-        
+        # used for naming new merge group
+        self.newGroupIndex = 0
+        # add model for default page
         self.dataModel = MergeTableModel()
         setTableStyle(self.mergeUI.filetable1, self.dataModel)
         
         
     def showUI(self):
-        #TODO clear all contents
-        # self.mergeUI
         self.exec()
 
 
@@ -105,8 +107,7 @@ class MergePanel(QDialog):
         
         updateRecentFolder(files[-1])
         # get active table view and model
-        view = self.mergeUI.filetable1
-        model = self.dataModel
+        view, model = self.getCurrentViewModel()
         
         model.addFiles(d)
         model.layoutChanged.emit()
@@ -115,31 +116,74 @@ class MergePanel(QDialog):
     
     
     def onRemoveFiles(self):
-        pass
+        view, model = self.getCurrentViewModel()
+        index2Removes = view.selectionModel().selectedRows()
+        if index2Removes:
+            row2Removes = [ind.row() for ind in index2Removes]
+            # remove in reverse order to ensure
+            # index validity
+            for r in sorted(row2Removes, reverse=True):
+                model.removeFile(r)
+            model.layoutChanged.emit()
+            autoHideResize(view, model)
     
     
     def onMoveUp(self):
-        pass
+        view, model = self.getCurrentViewModel()
+        rows = [ind.row() for ind in view.selectionModel().selectedRows()]
+        if rows:
+            for row in rows:
+                # move if it's not 1st row
+                if row > 0:
+                    model.moveFile(row, up=True)
+            model.layoutChanged.emit()
     
     
     def onMoveDown(self):
-        pass
+        view, model = self.getCurrentViewModel()
+        rows = [ind.row() for ind in view.selectionModel().selectedRows()]
+        if rows:
+            for row in sorted(rows):
+                # move if it's not last row
+                if row != model.rowCount() - 1:
+                    model.moveFile(row, up=False)
+            model.layoutChanged.emit()
     
     
     def onAddGroup(self):
-        pass
+        self.newGroupIndex += 1
+        # new page
+        newpage = QWidget()
+        vlayout = QVBoxLayout(newpage)
+        tableview = QTableView(newpage)
+        vlayout.addWidget(tableview)
+        self.box.addItem(newpage, f"Merge Group {self.newGroupIndex}")
+        # new model
+        model = MergeTableModel()
+        setTableStyle(tableview, model)
     
     
     def onRemoveGroup(self):
-        pass
+        activeIndex = self.box.currentIndex()
+        if activeIndex > 0:
+            msg = QMessageBox.information(None, "", 
+                                    self.tr("Are you sure to remove this group?"), 
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No)
+            if msg == QMessageBox.StandardButton.Yes:
+                activePage = self.box.widget(activeIndex)
+                deleteWidget(activePage)
+        else:
+            QMessageBox.information(None, "", self.tr("Default merge group cannot be removed"))
     
     
     def onConfirm(self):
         paths = []
         allGroupValid = True
         
-        for gid in range(self.mergeUI.toolBox.count()):
-            groupList = self.dataModel.getFilePaths()
+        for gid in range(self.box.count()):
+            _, model = self.getViewModelFromPage(gid)
+            groupList = model.getFilePaths()
             allGroupValid = allGroupValid and (len(groupList) > 0)
             paths.append(groupList)
             
@@ -151,5 +195,16 @@ class MergePanel(QDialog):
         else:
             QMessageBox.information(None, self.tr("Empty group detected"), 
                                     self.tr("Add at lease one STDF file into each group to continue..."))
+    
+    
+    def getViewModelFromPage(self, groupId: int) -> tuple:
+        page = self.box.widget(groupId)
+        tableview = page.layout().itemAt(0).widget()
+        model = tableview.model()
+        
+        return tableview, model
 
 
+    def getCurrentViewModel(self) -> tuple:
+        gid = self.box.currentIndex()
+        return self.getViewModelFromPage(gid)

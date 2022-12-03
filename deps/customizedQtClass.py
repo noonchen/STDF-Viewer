@@ -767,6 +767,17 @@ class MergeTableModel(QtCore.QAbstractTableModel):
         except IndexError:
             pass
         
+    def moveFile(self, srcIndex: int, up: bool):
+        try:
+            desIndex = srcIndex - 1 if up else srcIndex + 1
+            src = self.contents[srcIndex]
+            des = self.contents[desIndex]
+            # switch
+            self.contents[srcIndex] = des
+            self.contents[desIndex] = src
+        except IndexError:
+            pass
+    
     def getFilePaths(self) -> list:
         paths = []
         for row in range(self.rowCount()):
