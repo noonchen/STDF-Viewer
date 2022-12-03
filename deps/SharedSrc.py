@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -17,8 +17,10 @@ import rust_stdf_helper
 import numpy as np
 from enum import IntEnum
 from random import choice
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
+import pyqtgraph as pg
+from pyqtgraph.exporters import ImageExporter
 
 
 
@@ -717,7 +719,21 @@ def get_png_size(image: io.BytesIO):
         raise TypeError("Input is not a PNG image")
 
 
-
+def pyqtGraphPlot2Bytes(chart) -> bytes:
+    if isinstance(chart, pg.GraphicsView):
+        exp = ImageExporter(chart.sceneObj)
+        img: QtGui.QImage = exp.export(toBytes=True)
+        # use bytearray to store data
+        ba = QtCore.QByteArray()
+        buf = QtCore.QBuffer(ba)
+        buf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+        img.save(buf, "PNG")
+        return ba.data()
+            
+    elif isinstance(chart, list) and len(chart) > 0:
+        return pyqtGraphPlot2Bytes(chart[0])
+    
+    return None
 
 
 # # TODO
@@ -1141,7 +1157,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
-           "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
+           "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
            "openFileInOS", "revealFile", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 

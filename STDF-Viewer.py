@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1001,6 +1001,11 @@ class MyWindow(QtWidgets.QMainWindow):
         return None
             
             
+    def getImageBytesForReport(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
+        chart = self.genPlot(testTuple, head, selectSites, tabType)
+        return pyqtGraphPlot2Bytes(chart)
+    
+    
     def clearCurrentTab(self, currentTab: tab):
         layout: QtWidgets.QVBoxLayout = self.tab_dict[currentTab]["layout"]
         # put widgets in a list and delete at once
