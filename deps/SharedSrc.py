@@ -11,7 +11,7 @@
 # <<licensetext>>
 #
 
-import os, sys, logging, datetime
+import io, os, sys, logging, datetime
 import toml, subprocess, platform
 import rust_stdf_helper
 import numpy as np
@@ -702,6 +702,23 @@ def runInQThread(jobFunc, args: tuple, jobName: str, messageSignal):
     return (worker, thread)
     
 
+def get_png_size(image: io.BytesIO):
+    '''http://coreygoldberg.blogspot.com/2013/01/python-verify-png-file-and-get-image.html '''
+    image.seek(0)
+    data = image.read(24)
+    image.seek(0, 2)    # restore position
+    
+    if data[:8] == b'\211PNG\r\n\032\n'and (data[12:16] == b'IHDR'):
+        # is png
+        width = int.from_bytes(data[16:20], byteorder="big")
+        height = int.from_bytes(data[20:24], byteorder="big")
+        return (width, height)
+    else:
+        raise TypeError("Input is not a PNG image")
+
+
+
+
 
 # # TODO
 # def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
@@ -1123,7 +1140,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
-           "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", 
+           "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
            "openFileInOS", "revealFile", "rHEX", "get_file_size",
            

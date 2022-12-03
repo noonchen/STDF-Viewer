@@ -1141,7 +1141,11 @@ class MyWindow(QtWidgets.QMainWindow):
             self.settingUI.removeSymbolBtns()
             self.settingUI.initSymbolBtns(self.data_interface.num_files)
             self.exporter.removeSiteCBs()
-            self.exporter.refreshUI(self.completeTestList)
+            self.exporter.refreshUI(self.completeTestList,
+                                    self.completeWaferList,
+                                    self.availableHeads,
+                                    self.availableSites,
+                                    self.data_interface.num_files)
             self.init_Head_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummaryTable()
