@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Sat Dec 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -43,7 +43,8 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
         self.highlightColor = QtGui.QColor("#0096FF")
 
     def paint(self, painter, option: QtWidgets.QStyleOptionViewItem, index):
-        self.initStyleOption(option, index)
+        # this line causes text color flicking
+        # self.initStyleOption(option, index)
         if (option.state & QtWidgets.QStyle.StateFlag.State_Selected and 
             option.state & QtWidgets.QStyle.StateFlag.State_Active):
             # get foreground color
@@ -308,7 +309,8 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
 class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
     def __init__(self, parent, fontsize: int) -> None:
         super().__init__(parent)
-        self.fontsize = fontsize
+        self.defaultFont = QtGui.QFont()
+        self.defaultFont.setPointSize(fontsize)
         
     def data(self, index: QtCore.QModelIndex, role: int):        
         if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
@@ -321,7 +323,7 @@ class DatalogSqlQueryModel(QtSql.QSqlQueryModel):
         
         if role == QtCore.Qt.ItemDataRole.FontRole:
             # set default font and size
-            return QtGui.QFont("Courier New", self.fontsize)
+            return self.defaultFont
         
         # return original data otherwise
         return super().data(index, role)
@@ -742,11 +744,92 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
             return ""
         
     
+class MergeTableModel(QtCore.QAbstractTableModel):
+    '''
+    For displaying STDF MIR records in merge panel
+    Contents: dict of MIR records
+    '''
+    def __init__(self):
+        super().__init__()
+        self.contents = []
+        
+    def addFiles(self, data):
+        if isinstance(data, dict):
+            self.contents.append(data)
+        elif isinstance(data, list):
+            self.contents.extend(data)
+        else:
+            raise TypeError("expect dict or list")
+        
+    def removeFile(self, index: int):
+        try:
+            self.contents.pop(index)
+        except IndexError:
+            pass
+        
+    def moveFile(self, srcIndex: int, up: bool):
+        try:
+            desIndex = srcIndex - 1 if up else srcIndex + 1
+            src = self.contents[srcIndex]
+            des = self.contents[desIndex]
+            # switch
+            self.contents[srcIndex] = des
+            self.contents[desIndex] = src
+        except IndexError:
+            pass
+    
+    def getFilePaths(self) -> list:
+        paths = []
+        for row in range(self.rowCount()):
+            paths.append(self.data(self.index(row, 0), Qt.ItemDataRole.DisplayRole))
+        return paths
+        
+    def data(self, index: QModelIndex, role: int = ...):
+        if role == Qt.ItemDataRole.DisplayRole:
+            row = index.row()
+            col = index.column()
+            try:
+                fileInfoDict = self.contents[row]
+                if col == 0:
+                    data = fileInfoDict["Path"]
+                else:
+                    data = fileInfoDict.get(mirFieldNames[col], None)
+            except IndexError:
+                data = None
+            return data
+        
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignCenter
+        
+        return None
+
+    def rowCount(self, parent=None) -> int:
+        return len(self.contents)
+    
+    def columnCount(self, parent=None) -> int:
+        return len(mirFieldNames)
+    
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...):
+        if role != Qt.ItemDataRole.DisplayRole or self.rowCount() == 0:
+            return None
+        
+        if orientation == Qt.Orientation.Horizontal:
+            if section == 0:
+                # change first element to file path
+                header = "File Path"
+            else:
+                header = mirDict[mirFieldNames[section]]
+        else:
+            header = section
+            
+        return header
+
+
 
 __all__ = ["StyleDelegateForTable_List", "DutSortFilter", 
            "FlippedProxyModel", "NormalProxyModel", 
            "ColorSqlQueryModel", "DatalogSqlQueryModel", 
            "TestDataTableModel", "TestStatisticTableModel", 
-           "BinWaferTableModel", 
+           "BinWaferTableModel", "MergeTableModel", 
            ]
 

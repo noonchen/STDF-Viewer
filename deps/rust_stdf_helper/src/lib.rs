@@ -1,7 +1,7 @@
 // use numpy::ndarray::{Array1, Array2, Zip};
 // use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
-// use pyo3::types::PyBytes;
+use pyo3::types::PyBytes;
 use pyo3::{
     exceptions::{PyException, PyLookupError, PyOSError},
     intern,
@@ -16,6 +16,7 @@ use std::sync::{mpsc, Arc};
 use std::{thread, time};
 
 mod database_context;
+mod resources;
 mod rust_functions;
 use database_context::DataBaseCtx;
 use rust_functions::{get_file_size, process_incoming_record, process_summary_data, RecordTracker};
@@ -790,6 +791,46 @@ fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
     )))
 }
 
+/// read data from python file object
+#[pyfunction]
+#[pyo3(name = "get_icon_src")]
+fn get_icon_src(py: Python, icon_name: String) -> PyResult<&PyBytes> {
+    use flate2::read::ZlibDecoder;
+    use resources::*;
+    use std::io::Read;
+
+    let icon_name = icon_name.as_str();
+    let raw = match icon_name {
+        "About" => ABOUT,
+        "AddFont" => ADDFONT,
+        "App" => APP,
+        "ColorPalette" => COLORPALETTE,
+        "Convert" => CONVERT,
+        "Export" => EXPORT,
+        "FailMarker" => FAILMARKER,
+        "LoadSession" => LOADSESSION,
+        "Merge" => MERGE,
+        "Open" => OPEN,
+        "SaveSession" => SAVESESSION,
+        "Settings" => SETTINGS,
+        "Tools" => TOOLS,
+        "tab_bin" => TAB_BIN,
+        "tab_correlation" => TAB_CORRELATION,
+        "tab_hist" => TAB_HIST,
+        "tab_info" => TAB_INFO,
+        "tab_ppqq" => TAB_PPQQ,
+        "tab_trend" => TAB_TREND,
+        "tab_wafer" => TAB_WAFER,
+        _ => APP,
+    };
+    let mut z = ZlibDecoder::new(raw);
+    let mut uncompressed_data: Vec<u8> = Vec::with_capacity(2048);
+    if let Err(e) = z.read_to_end(&mut uncompressed_data) {
+        return Err(PyValueError::new_err(e.to_string()));
+    }
+    Ok(PyBytes::new(py, &uncompressed_data))
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -799,6 +840,6 @@ fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
     // m.add_function(wrap_pyfunction!(parse_mpr_from_raw, m)?)?;
     m.add_function(wrap_pyfunction!(generate_database, m)?)?;
     m.add_function(wrap_pyfunction!(read_mir, m)?)?;
-
+    m.add_function(wrap_pyfunction!(get_icon_src, m)?)?;
     Ok(())
 }

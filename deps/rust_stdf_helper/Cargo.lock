@@ -523,6 +523,7 @@ name = "rust_stdf_helper"
 version = "0.2.3"
 dependencies = [
  "chrono",
+ "flate2",
  "hex",
  "lazy_static",
  "pyo3",

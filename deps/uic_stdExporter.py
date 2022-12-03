@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Fri Nov 11 2022
+# Last Modified: Sat Dec 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -25,17 +25,20 @@
 
 
 import re
-import os, io
+import os, io, logging
 from enum import IntEnum
 from xlsxwriter import Workbook
 from xlsxwriter.worksheet import Worksheet
-import subprocess, platform, logging
-# pyqt5
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QAbstractItemView, QFileDialog
-from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
+
 from .ui.stdfViewer_exportUI import Ui_exportUI
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from .SharedSrc import *
+
+# pyqt5
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QMessageBox
+from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
+
 # pyside2
 # from PySide2 import QtCore, QtWidgets
 # from PySide2.QtWidgets import QAbstractItemView, QFileDialog
@@ -53,22 +56,17 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 logger = logging.getLogger("STDF Viewer")
 
     
-class tab(IntEnum):
-    DUT = 0
-    Trend = 1   # Do not change
-    Histo = 2   # Int number
-    Bin = 3     # of these items
-    Wafer = 4   # It should match tab order of the main window
-    Stat = 5
-    FileInfo = 6
+class ReportSelection(IntEnum):
+    FileInfo = 0
+    DUT = 1
+    Trend = 2
+    Histo = 3
+    Bin = 4
+    Wafer = 5
+    Stat = 6
     GDR_DTR = 7
-
-
-class REC(IntEnum):
-    '''Constants of STDF Records: typ<<8 | sub'''
-    PTR = 3850
-    FTR = 3860
-    MPR = 3855
+    PPQQ = 8
+    Correlation = 9
 
 
 class sv:
@@ -121,21 +119,6 @@ def list_operation(main, method, other):
     elif method == "-":
         tmp = set(main) - set(other)
         return sorted(tmp, key=lambda item: int(item.split("\t")[0]))
-
-
-def get_png_size(image: io.BytesIO):
-    '''http://coreygoldberg.blogspot.com/2013/01/python-verify-png-file-and-get-image.html '''
-    image.seek(0)
-    data = image.read(24)
-    image.seek(0, 2)    # restore position
-    
-    if data[:8] == b'\211PNG\r\n\032\n'and (data[12:16] == b'IHDR'):
-        # is png
-        width = int.from_bytes(data[16:20], byteorder="big")
-        height = int.from_bytes(data[20:24], byteorder="big")
-        return (width, height)
-    else:
-        raise TypeError("Input is not a PNG image")
 
 
 def ceil(n):
@@ -572,8 +555,8 @@ class progressDisplayer(QtWidgets.QDialog):
             event.accept()
         else:
             # close by clicking X
-            close = QtWidgets.QMessageBox.question(self, self.tr("QUIT"), self.tr("Report is not finished,\nwanna terminate the process?"), QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
-            if close == QtWidgets.QMessageBox.Yes:
+            close = QMessageBox.question(self, self.tr("QUIT"), self.tr("Report is not finished,\nwanna terminate the process?"), QMessageBox.Yes | QMessageBox.No, defaultButton=QMessageBox.No)
+            if close == QMessageBox.Yes:
                 # if user clicked yes, temrinate thread and close window
                 self.rg.forceQuit = True
                 self.thread.quit()
@@ -588,10 +571,10 @@ class progressDisplayer(QtWidgets.QDialog):
         msgType, msgContent = msg.split("@@@")
         if msgType == "Error":
             self.errorOccured = True
-            QtWidgets.QMessageBox.critical(self, msgType, msgContent)
+            QMessageBox.critical(self, msgType, msgContent)
             logger.critical(msgContent)
         elif msgType == "Warning":
-            QtWidgets.QMessageBox.warning(self, msgType, msgContent)
+            QMessageBox.warning(self, msgType, msgContent)
             logger.warning(msgContent)
         else:
             logger.info(msgContent)
@@ -680,16 +663,17 @@ class stdfExporter(QtWidgets.QDialog):
     
     def __init__(self, parent = None):
         super().__init__(parent)
-        # self.exportUI = uic.loadUi('ui/stdfViewer_exportUI.ui', self)    # uic
         self.exportUI = Ui_exportUI()
         self.exportUI.setupUi(self)
-        self.parent = parent
+        self.mainUI = parent
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        # store head, site cb objects
+        # store file, head, site cb objects
+        self.file_cb_dict = {}
         self.head_cb_dict = {}
         self.site_cb_dict = {}
-        self.AllTestItems = None
+        self.AllTestItems = tuple()
+        self.AllWaferItems = tuple()
         self.remainTestItems = []
         self.exportTestItems = []
         self.initTestListBox()
@@ -714,13 +698,16 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.GDR_DTR_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.PPQQ_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.Correlation_cb.clicked.connect(self.changeBtnStyle)
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         
                 
     def showUI(self):
-        self.closeEventByThread = False    # used to determine the source of close event
+        # used to determine the source of close event
+        self.closeEventByThread = False
         # init UI
         self.exportUI.stackedWidget.setCurrentIndex(0)
         self.exportUI.previousBtn.setDisabled(True)
@@ -807,64 +794,82 @@ class stdfExporter(QtWidgets.QDialog):
     
     
     def removeSiteCBs(self):
-        for layout in [self.exportUI.gridLayout_head,
+        '''
+        Called by main UI after loading database
+        '''
+        for layout in [self.exportUI.gridLayout_file, 
+                       self.exportUI.gridLayout_head,
                        self.exportUI.gridLayout_site]:
-            for i in range(layout.count())[::-1]:   # delete in reverse
+            cBList = []
+            for i in range(layout.count()):
                 cB = layout.itemAt(i).widget()
                 if cB.objectName() in ["All", "checkAll", "cancelAll"]:
                     # do not delete default buttons
                     continue
-                layout.removeWidget(cB)
-                cB.deleteLater()
-                cB.setParent(None)
+                cBList.append(cB)
+            deleteWidget(cBList)
+        self.file_cb_dict = {}
+        self.head_cb_dict = {}
         self.site_cb_dict = {}
     
     
-    def initSiteCBs(self):
-        # add & enable checkboxes for each heads
-        for i, headNum in enumerate(self.parent.availableHeads):
-            headName = "Head %d" % headNum
-            self.head_cb_dict[headNum] = QtWidgets.QCheckBox(self.exportUI.site_selection)
-            self.head_cb_dict[headNum].setObjectName(headName)
-            self.head_cb_dict[headNum].setText(headName)
-            row = i
-            col = 0
-            self.exportUI.gridLayout_head.addWidget(self.head_cb_dict[headNum], row, col)
-                    
-        # add & enable checkboxes for each sites
-        for siteNum in self.parent.availableSites:
-            siteName = "Site %d" % siteNum
-            self.site_cb_dict[siteNum] = QtWidgets.QCheckBox(self.exportUI.site_selection)
-            self.site_cb_dict[siteNum].setObjectName(siteName)
-            self.site_cb_dict[siteNum].setText(siteName)
-            row = 1 + siteNum//8
-            col = siteNum % 8
-            self.exportUI.gridLayout_site.addWidget(self.site_cb_dict[siteNum], row, col)
-        
-        
-    def refreshUI(self, completeTestList):
+    def refreshUI(self, completeTestList: list, completeWaferList: list, heads: list, sites: list, num_files: int):
+        '''
+        Called by main UI after loading database
+        '''
         # get all test items from mainUI
         self.remainTestItems = completeTestList      # mutable
-        #TODO get background color of all test items
         self.exportTestItems = []
-        self.AllTestItems = tuple(self.remainTestItems)     # immutable, prevent parent list from modifying
+        # immutable, prevent parent list from modifying
+        self.AllTestItems = tuple(self.remainTestItems)
+        self.AllWaferItems = tuple(completeWaferList)
         self.updateTestLists(remainList=list(self.AllTestItems), exportList=self.exportTestItems)
-        self.initSiteCBs()
+        
+        # add & enable checkboxes for files, heads and sites
+        for fid in range(num_files):
+            fileCB = QtWidgets.QCheckBox(self.exportUI.file_selection)
+            fileCB.setText(f"File {fid}")
+            # all file checkbox is checked by default
+            fileCB.setChecked(True)
+            self.exportUI.gridLayout_file.addWidget(fileCB, fid, 0)
+            self.file_cb_dict[fid] = fileCB
+        
+        for i, headNum in enumerate(heads):
+            headName = "Head %d" % headNum
+            headCB = QtWidgets.QCheckBox(self.exportUI.site_selection)
+            headCB.setObjectName(headName)
+            headCB.setText(headName)
+            self.exportUI.gridLayout_head.addWidget(headCB, i, 0)
+            self.head_cb_dict[headNum] = headCB
+                    
+        for siteNum in sites:
+            siteName = "Site %d" % siteNum
+            siteCB = QtWidgets.QCheckBox(self.exportUI.site_selection)
+            siteCB.setObjectName(siteName)
+            siteCB.setText(siteName)
+            row = 1 + siteNum//8
+            col = siteNum % 8
+            self.exportUI.gridLayout_site.addWidget(siteCB, row, col)
+            self.site_cb_dict[siteNum] = siteCB
     
     
     def toggleSite(self, on=True):
         self.exportUI.All.setChecked(on)
-        for siteNum, cb in self.site_cb_dict.items():
+        for cb in self.site_cb_dict.values():
             cb.setChecked(on)
        
        
-    def getHeads_Sites(self):
+    def getSelected_FileHeadSite(self) -> tuple:
+        checkedFiles = []
         checkedHeads = []
         checkedSites = []
         
         if self.exportUI.All.isChecked():
             checkedSites.append(-1)
             
+        for fid, cb_f in self.file_cb_dict.items():
+            if cb_f.isChecked():
+                checkedFiles.append(fid)
         for head_num, cb_h in self.head_cb_dict.items():
             if cb_h.isChecked():
                 checkedHeads.append(head_num)        
@@ -873,25 +878,27 @@ class stdfExporter(QtWidgets.QDialog):
                 checkedSites.append(site_num)
         
         checkedSites.sort()
-        return [checkedHeads, checkedSites]
+        return checkedFiles, checkedHeads, checkedSites
     
     
     def getSelectedContents(self):
         selectedContents = []
-        if self.exportUI.Trend_cb.isChecked(): selectedContents.append(tab.Trend)
-        if self.exportUI.Histo_cb.isChecked(): selectedContents.append(tab.Histo)
-        if self.exportUI.Bin_cb.isChecked(): selectedContents.append(tab.Bin)
-        if self.exportUI.Stat_cb.isChecked(): selectedContents.append(tab.Stat)
-        if self.exportUI.DUT_cb.isChecked(): selectedContents.append(tab.DUT)
-        if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(tab.FileInfo)
-        if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(tab.Wafer)
-        if self.exportUI.GDR_DTR_cb.isChecked(): selectedContents.append(tab.GDR_DTR)
+        if self.exportUI.Trend_cb.isChecked(): selectedContents.append(ReportSelection.Trend)
+        if self.exportUI.Histo_cb.isChecked(): selectedContents.append(ReportSelection.Histo)
+        if self.exportUI.Bin_cb.isChecked(): selectedContents.append(ReportSelection.Bin)
+        if self.exportUI.Stat_cb.isChecked(): selectedContents.append(ReportSelection.Stat)
+        if self.exportUI.DUT_cb.isChecked(): selectedContents.append(ReportSelection.DUT)
+        if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(ReportSelection.FileInfo)
+        if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(ReportSelection.Wafer)
+        if self.exportUI.GDR_DTR_cb.isChecked(): selectedContents.append(ReportSelection.GDR_DTR)
+        if self.exportUI.PPQQ_cb.isChecked(): selectedContents.append(ReportSelection.PPQQ)
+        if self.exportUI.Correlation_cb.isChecked(): selectedContents.append(ReportSelection.Correlation)
         
         return selectedContents
     
     
     def getExportTestTuples(self):
-        return [self.parent.getTestTuple(item) for item in self.exportTestItems]
+        return [parseTestString(item) for item in self.exportTestItems]
     
     
     def getOutPath(self):
@@ -906,17 +913,16 @@ class stdfExporter(QtWidgets.QDialog):
     
     
     def changeBtnStyle(self):
-        changeToConfirm = False
         currentPage = self.exportUI.stackedWidget.currentIndex()
         
+        changeToConfirm = False
         if currentPage == 0:
             # change to "Confirm" only if file info & GDR/DTR are selected
-            if set(self.getSelectedContents()) | {tab.FileInfo, tab.GDR_DTR} == {tab.FileInfo, tab.GDR_DTR}:
+            info_dr_set = {ReportSelection.FileInfo, ReportSelection.GDR_DTR}
+            if set(self.getSelectedContents()) | info_dr_set == info_dr_set:
                 changeToConfirm = True
-        
         elif currentPage == 2:
             changeToConfirm = True
-            
             
         if changeToConfirm:
             # in site page, change to Confirm
@@ -930,7 +936,7 @@ class stdfExporter(QtWidgets.QDialog):
             "QPushButton:pressed {\n"
             "background-color: rgb(0, 50, 0); \n"
             "border: 1px solid rgb(0, 50, 0);}")
-            self.exportUI.nextBtn.setText(QtCore.QCoreApplication.translate("exportUI", "Confirm"))
+            self.exportUI.nextBtn.setText(self.tr("Confirm"))
         
         else:
             # restore to Next>
@@ -943,7 +949,7 @@ class stdfExporter(QtWidgets.QDialog):
             "QPushButton:pressed {\n"
             "background-color: rgb(50, 50, 50); \n"
             "border: 1px solid rgb(50, 50, 50);}")
-            self.exportUI.nextBtn.setText(QtCore.QCoreApplication.translate("exportUI", "Next >"))
+            self.exportUI.nextBtn.setText(self.tr("Next >"))
     
     
     def gotoPreviousPage(self):
@@ -962,17 +968,23 @@ class stdfExporter(QtWidgets.QDialog):
         if currentPage == 0:
             # content page
             if self.getOutPath() is None:
-                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("Output directory is invalid, not writable or not existed\n"))
+                QMessageBox.warning(self, self.tr("Warning"), self.tr("Output directory is invalid, not writable or not existed\n"))
                 return
             
             selectedContents = self.getSelectedContents()
-            if len(set(selectedContents) & {tab.Trend, tab.Histo, tab.DUT, tab.Stat}) > 0:
+            if len(set(selectedContents) & {ReportSelection.Trend, 
+                                            ReportSelection.Histo, 
+                                            ReportSelection.DUT, 
+                                            ReportSelection.Stat,
+                                            ReportSelection.PPQQ}) > 0:
                 # go to test page
                 self.previousPageIndex = 0
                 self.exportUI.previousBtn.setEnabled(True)
                 self.exportUI.stackedWidget.setCurrentIndex(1)
                 
-            elif len(set(selectedContents) & {tab.Bin, tab.Wafer}) > 0:
+            elif len(set(selectedContents) & {ReportSelection.Bin, 
+                                              ReportSelection.Wafer,
+                                              ReportSelection.Correlation}) > 0:
                 # go to site page
                 self.previousPageIndex = 0
                 self.exportUI.previousBtn.setEnabled(True)
@@ -986,119 +998,97 @@ class stdfExporter(QtWidgets.QDialog):
         elif currentPage == 1:
             # test page
             testCount = len(self.getExportTestTuples())
-            if testCount > 0 or (testCount == 0 and len(set(self.getSelectedContents()) & {tab.Trend, tab.Histo, tab.Stat}) == 0):
+            if (testCount > 0 or 
+                len(set(self.getSelectedContents()) & {ReportSelection.Trend, 
+                                                       ReportSelection.Histo,
+                                                       ReportSelection.Stat,
+                                                       ReportSelection.PPQQ}) == 0):
                 # go to site page
                 self.previousPageIndex = 1
                 self.exportUI.previousBtn.setEnabled(True)
                 self.exportUI.stackedWidget.setCurrentIndex(2)
                 self.changeBtnStyle()
             else:
-                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("At least one test item should be selected if Trend/Histo/Statistic is checked\n"))
-                return
+                QMessageBox.warning(self, self.tr("Warning"), 
+                                    self.tr("At least one test item should be selected when Trend/Histo/Statistic/NormalValidation is checked\n"))
         
         else:
             # site page
-            headList, siteList = self.getHeads_Sites()
-            if len(headList) == 0 or len(siteList) == 0: 
-                QtWidgets.QMessageBox.warning(self, self.tr("Warning"), self.tr("Head and Site cannot be empty\n"))
+            fileList, headList, siteList = self.getSelected_FileHeadSite()
+            if 0 in [len(fileList), len(headList), len(siteList)]:
+                QMessageBox.warning(self, self.tr("Warning"), 
+                                    self.tr("File, Head and Site cannot be empty\n"))
             else:
                 # start exporting
                 self.start()
     
     
     def start(self):
-        self.numTupL = self.getExportTestTuples()
-        self.testRecTypes = set([self.parent.testRecTypeDict[ (test_num, test_name) ] for test_num, _, test_name in self.numTupL])    # determine the header elements
-        self.headL, self.siteL = self.getHeads_Sites()
-        self.contL = self.getSelectedContents()
-        self.path = self.getOutPath()
-        self.numWafer = sorted([-1 if item.split("\t")[0] == "-" else int(item.split("\t")[0].strip("#")) for item in self.parent.completeWaferList])
-        if len(self.numWafer) < 2:
+        selectedContents = self.getSelectedContents()
+        reportPath = self.getOutPath()
+        selectedFiles, selectedHeads, selectedSites = self.getSelected_FileHeadSite()
+        testTuples = self.getExportTestTuples()
+        waferTuples = [parseTestString(witem, True) for witem in self.AllWaferItems]
+        if len(waferTuples) == 1:
             # only default stacked wafer is in list, no actual wafer data exists
-            self.numWafer = []
+            waferTuples = []
        
-        # report generation code here
+        # determine the max value of progress bar
         self.totalLoopCnt = 0
-        if tab.Trend in self.contL:     self.totalLoopCnt += len(self.numTupL) * len(self.siteL) * len(self.headL)
-        if tab.Histo in self.contL:     self.totalLoopCnt += len(self.numTupL) * len(self.siteL) * len(self.headL)
-        if tab.Stat in self.contL:      self.totalLoopCnt += len(self.numTupL) * len(self.siteL) * len(self.headL)
-        if tab.Bin in self.contL:       self.totalLoopCnt += len(self.siteL) * len(self.headL)
-        if tab.FileInfo in self.contL:  self.totalLoopCnt += 1
-        if tab.DUT in self.contL:       self.totalLoopCnt += (1 + len(self.numTupL))   # dut info part + test part
-        if tab.Wafer in self.contL:     self.totalLoopCnt += len(self.numWafer) * len(self.siteL) * len(self.headL)
-        if tab.GDR_DTR in self.contL:   self.totalLoopCnt += 1
+        if ReportSelection.Trend in selectedContents:
+            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+        if ReportSelection.Histo in selectedContents:
+            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+        if ReportSelection.Stat in selectedContents:
+            self.totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+        if ReportSelection.Bin in selectedContents:
+            self.totalLoopCnt += len(selectedSites) * len(selectedHeads)
+        if ReportSelection.FileInfo in selectedContents:
+            self.totalLoopCnt += 1
+        if ReportSelection.DUT in selectedContents:
+            self.totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
+        if ReportSelection.Wafer in selectedContents:
+            self.totalLoopCnt += len(waferTuples) * len(selectedSites) * len(selectedHeads)
+        if ReportSelection.GDR_DTR in selectedContents:
+            self.totalLoopCnt += 1
                     
-        self.pd = progressDisplayer(parent=self)
-        if self.pd.errorOccured:
-            # error occured
-            title = self.tr("Error occurred")
-            msg = self.tr("Something's wrong when exporting, you can still check the report in:")
-        elif self.pd.closeEventByThread:
-            # end normally
-            title = self.tr("Export completed!")
-            msg = self.tr("Report path:")
-        else:
-            # aborted
-            title = self.tr("Process Aborted!")
-            msg = self.tr("Partial report is saved in:")
+        # self.pd = progressDisplayer(parent=self)
+        # if self.pd.errorOccured:
+        #     # error occured
+        #     title = self.tr("Error occurred")
+        #     msg = self.tr("Something's wrong when exporting, you can still check the report in:")
+        # elif self.pd.closeEventByThread:
+        #     # end normally
+        #     title = self.tr("Export completed!")
+        #     msg = self.tr("Report path:")
+        # else:
+        #     # aborted
+        #     title = self.tr("Process Aborted!")
+        #     msg = self.tr("Partial report is saved in:")
+        title = "???"
+        msg = "xxx"
             
-        msgbox = QtWidgets.QMessageBox(None)
+        msgbox = QMessageBox(None)
         msgbox.setText(title)
-        msgbox.setInformativeText('%s\n\n%s\n'%(msg, self.path))
-        msgbox.setIcon(QtWidgets.QMessageBox.Information)
-        revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-        openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-        okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+        msgbox.setInformativeText('%s\n\n%s\n'%(msg, reportPath))
+        msgbox.setIcon(QMessageBox.Icon.Information)
+        revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+        openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+        okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
         msgbox.setDefaultButton(okBtn)
         msgbox.exec_()
         if msgbox.clickedButton() == revealBtn:
-            self.revealFile(self.path)
+            revealFile(reportPath)
         elif msgbox.clickedButton() == openBtn:
-            self.openFileInOS(self.path)
-                
-                
-    def openFileInOS(self, filepath):
-        # https://stackoverflow.com/a/435669
-        filepath = os.path.normpath(filepath)   # fix slash orientation in different OSs
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', filepath))
-        
-        
-    def revealFile(self, filepath):
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', '-R', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', os.path.dirname(filepath)))
-            
+            openFileInOS(reportPath)
+
                 
     def closeEvent(self, event):
         # close by clicking X
-        # close = QtWidgets.QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, defaultButton=QtWidgets.QMessageBox.No)
-        # if close == QtWidgets.QMessageBox.Yes:
+        # close = QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QMessageBox.Yes | QMessageBox.No, defaultButton=QMessageBox.No)
+        # if close == QMessageBox.Yes:
         #     # if user clicked yes, temrinate thread and close window
         event.accept()
         # else:
         #     event.ignore()
 
-                 
-        
-        
-        
-if __name__ == "__main__":
-    import sys
-    app = QtWidgets.QApplication([])
-    path1 = "Test path"
-    test = stdfExporter()
-    # progressDisplayer()
-    sys.exit(app.exec_())
-    
-    

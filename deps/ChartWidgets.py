@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Fri Dec 02 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -33,6 +33,12 @@ from pyqtgraph.graphicsItems.ScatterPlotItem import drawSymbol
 import deps.SharedSrc as ss
 
 pg.setConfigOptions(foreground='k', background='w', antialias=False)
+
+
+def addFileLabel(parent, fid: int, yoffset = -50):
+    file_text = pg.LabelItem(f"File {fid}", size="15pt", color="#000000", anchor=(1, 0))
+    file_text.setParentItem(parent)
+    file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
 
 
 class TrendChart(pg.GraphicsView):
@@ -125,12 +131,12 @@ class TrendChart(pg.GraphicsView):
             # if mean and median is enabled, draw them as well
             sitesData = testData[fid]
             infoDict = testInfo[fid]
-            # if len(sitesData) == 0 or len(infoDict) == 0:
-            #     # skip this file if: 
-            #     #  - test is not in this file (empty sitesData)
-            #     #  - no data found in selected sites (test value is empty array)
-            #     # to ensure the following operation is on valid data
-            #     continue
+            if len(sitesData) == 0 or len(infoDict) == 0:
+                # skip this file if: 
+                #  - test is not in this file (empty sitesData)
+                #  - no data found in selected sites (test value is empty array)
+                # to ensure the following operation is on valid data
+                continue
             x_min_list = []
             x_max_list = []
             for site, data_per_site in sitesData.items():
@@ -142,8 +148,7 @@ class TrendChart(pg.GraphicsView):
                     continue
                 x_min_list.append(np.nanmin(x))
                 x_max_list.append(np.nanmax(x))
-                #TODO get file symbol
-                fsymbol = "o"
+                fsymbol = settings.fileSymbol[fid]
                 siteColor = settings.siteColor[site]
                 # test value
                 pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
@@ -185,8 +190,7 @@ class TrendChart(pg.GraphicsView):
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
             if len(testInfo) > 1:
                 # only add if there are multiple files
-                file_text = pg.TextItem(f"File {fid}", color="#000000", anchor=(1, 0))
-                pitem.addItem(file_text)
+                addFileLabel(pitem, fid)
             pitem.setClipToView(True)
             # set range and limits
             x_min = min(x_min_list)
@@ -260,7 +264,6 @@ class HistoChart(pg.GraphicsView):
             y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
-                # TODO dynamic limits
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
                 # at least one site data should be valid
@@ -297,6 +300,12 @@ class HistoChart(pg.GraphicsView):
             # if mean and median is enabled, draw them as well
             sitesData = testData[fid]
             infoDict = testInfo[fid]
+            if len(sitesData) == 0 or len(infoDict) == 0:
+                # skip this file if: 
+                #  - test is not in this file (empty sitesData)
+                #  - no data found in selected sites (test value is empty array)
+                # to ensure the following operation is on valid data
+                continue
             bar_base = 0
             # xaxis tick labels
             ticks = []
@@ -355,11 +364,10 @@ class HistoChart(pg.GraphicsView):
             
             if len(testInfo) > 1:
                 # only add if there are multiple files
-                file_text = pg.TextItem(f"File {fid}", color="#000000", anchor=(1, 0))
-                pitem.addItem(file_text)
+                addFileLabel(pitem, fid)
             view.setRange(xRange=(0, bar_base), 
                           yRange=(y_min, y_max))
-            view.setLimits(xMin=0, xMax=bar_base,
+            view.setLimits(xMin=0, xMax=bar_base+0.5,
                            yMin=y_min, yMax=y_max,
                            minXRange=2)
             # add to layout

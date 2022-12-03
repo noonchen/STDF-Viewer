@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Sat Dec 03 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,16 +26,16 @@
 
 import os, sys, gc, traceback, atexit
 import json, logging, urllib.request as rq
+import shutil
 import numpy as np
 from itertools import product
-from base64 import b64decode
 from deps.SharedSrc import *
-from deps.ui.ImgSrc_svg import ImgDict
 from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
 from deps.ChartWidgets import *
 from deps.uic_stdLoader import stdfLoader
+from deps.uic_stdMerge import MergePanel
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings
@@ -87,9 +87,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         sys.excepthook = self.onException
-        # load config file
+        # load fonts and config file
+        loadFonts()
         loadConfigFile()
-        self.defaultFontNames = loadFonts()
         # data_interface for processing requests by GUI 
         # and reading data from database
         self.data_interface = None
@@ -104,13 +104,13 @@ class MyWindow(QtWidgets.QMainWindow):
         self.head_cb_dict = {}
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
-        self.imageFont = self.defaultFontNames.English
         # init and connect signals
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
         self.signals.statusSignal.connect(self.updateStatus)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
+        self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
         self.settingUI = stdfSettings(self)
@@ -125,23 +125,44 @@ class MyWindow(QtWidgets.QMainWindow):
         self.enableDragDrop()
         # init actions
         self.ui.actionOpen.triggered.connect(self.openNewFile)
+        self.ui.actionMerge.triggered.connect(self.onMerge)
+        self.ui.actionLoad_Session.triggered.connect(self.onLoadSession)
+        self.ui.actionSave_Session.triggered.connect(self.onSaveSession)
         self.ui.actionFailMarker.triggered.connect(self.onFailMarker)
         self.ui.actionExport.triggered.connect(self.onExportReport)
         self.ui.actionSettings.triggered.connect(self.onSettings)
         self.ui.actionAbout.triggered.connect(self.onAbout)
         self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
         self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
+        self.ui.actionAddFont.triggered.connect(self.onAddFont)
+        self.ui.actionToXLSX.triggered.connect(self.onToXLSX)
         # init search-related UI
         self.ui.SearchBox.textChanged.connect(self.proxyModel_list.setFilterWildcard)
         self.ui.ClearButton.clicked.connect(self.clearSearchBox)
         # manage tab layout
         self.tab_dict = {tab.Trend: {"scroll": self.ui.scrollArea_trend, "layout": self.ui.verticalLayout_trend},
                          tab.Histo: {"scroll": self.ui.scrollArea_histo, "layout": self.ui.verticalLayout_histo},
+                         tab.PPQQ: {"scroll": self.ui.scrollArea_ppqq, "layout": self.ui.verticalLayout_ppqq},
                          tab.Bin: {"scroll": self.ui.scrollArea_bin, "layout": self.ui.verticalLayout_bin},
-                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer}}
+                         tab.Wafer: {"scroll": self.ui.scrollArea_wafer, "layout": self.ui.verticalLayout_wafer},
+                         tab.Correlate: {"scroll": self.ui.scrollArea_correlation, "layout": self.ui.verticalLayout_correlation}}
         # init callback for UI component
         self.ui.tabControl.currentChanged.connect(self.onSelect)
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
+        # set drop down menu for session action
+        self.utilityMenu = QtWidgets.QMenu()
+        self.utilityMenu.addActions([self.ui.actionLoad_Session, 
+                                     self.ui.actionSave_Session,
+                                     self.ui.actionAddFont,
+                                     self.ui.actionToXLSX])
+        self.utilityBtn = QtWidgets.QToolButton()
+        self.utilityBtn.setText(self.tr("Utility"))
+        self.utilityBtn.setMenu(self.utilityMenu)
+        self.utilityBtn.setIcon(getIcon("Tools"))
+        self.utilityBtn.setStyleSheet("QToolButton::menu-indicator{image:none}")
+        self.utilityBtn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.utilityBtn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.ui.toolBar.addWidget(self.utilityBtn)
         # add a toolbar action at the right side
         self.spaceWidgetTB = QtWidgets.QWidget()
         self.spaceWidgetTB.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
@@ -149,12 +170,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.toolBar.addWidget(self.spaceWidgetTB)
         self.ui.toolBar.addAction(self.ui.actionAbout)
         # disable wafer tab in default
-        self.ui.tabControl.setTabEnabled(4, False)
+        self.ui.tabControl.setTabEnabled(tab.Wafer, False)
         # clean up before exiting
         atexit.register(self.onExit)
         # set language after initing subwindow & reading config
         self.changeLanguage()
         self.restorePreviousSession()
+        # hide unfinished feature
+        self.ui.file_selection.hide()
+        self.ui.tabControl.setTabVisible(tab.PPQQ, False)
+        self.ui.tabControl.setTabVisible(tab.Correlate, False)
         
         
     def checkNewVersion(self):
@@ -199,9 +224,10 @@ class MyWindow(QtWidgets.QMainWindow):
     def changeLanguage(self):
         _app = QApplication.instance()
         # load language files based on the setting
-        curLang = getSetting().language
+        settings = getSetting()
+        curLang = settings.language
+        font = settings.font
         if curLang == "English":
-            self.imageFont = self.defaultFontNames.English
             self.translatorUI.loadFromData(transDict["English"])
             self.translatorCode.loadFromData(transDict["English"])
             self.loader.translator.loadFromData(transDict["English"])
@@ -214,7 +240,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.debugPanel.translator_code.loadFromData(transDict["English"])
             
         elif curLang == "简体中文":
-            self.imageFont = self.defaultFontNames.Chinese
             self.translatorUI.loadFromData(transDict["MainUI_zh_CN"])
             self.translatorCode.loadFromData(transDict["MainCode_zh_CN"])
             self.loader.translator.loadFromData(transDict["loadingUI_zh_CN"])
@@ -226,7 +251,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.debugPanel.translator.loadFromData(transDict["debugUI_zh_CN"])
             self.debugPanel.translator_code.loadFromData(transDict["debugCode_zh_CN"])
             
-        newfont = QtGui.QFont(self.imageFont)
+        newfont = QtGui.QFont(font)
         _app.setFont(newfont)
         [w.setFont(newfont) if not isinstance(w, QtWidgets.QListView) else None for w in QApplication.allWidgets()]
         # actions is not listed in qapp all widgets, iterate separately
@@ -266,7 +291,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def openNewFile(self, files: list[str]):
         if not files:
-            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select a STD File To Open"), 
+            files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select STDF Files To Open"), 
                                                     directory=getSetting().recentFolder, 
                                                     filter=self.tr(FILE_FILTER),)
         else:
@@ -278,6 +303,46 @@ class MyWindow(QtWidgets.QMainWindow):
             # self.callFileLoader([files])
             self.callFileLoader([[f] for f in files])
               
+    
+    def onMerge(self):
+        self.mergePanel.showUI()
+    
+    
+    def onLoadSession(self):
+        p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a STDF-Viewer session"), 
+                                           directory=getSetting().recentFolder, 
+                                           filter=self.tr("Database (*.db)"))
+        if p:
+            #TODO validation
+            self.loadDatabase(p)
+    
+    
+    def onSaveSession(self):
+        if self.data_interface is not None:
+            dbPath = self.data_interface.dbPath
+            dbSize = os.stat(dbPath).st_size / 2**20
+            # show confirm message if size is > 50M
+            if dbSize >= 50:
+                msg = QMessageBox.information(None, self.tr("Notice"), 
+                                              self.tr("Current session size is {}, proceed?").format("%.2f MB"%dbSize),
+                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                              QMessageBox.StandardButton.No)
+                if msg == QMessageBox.StandardButton.No:
+                    return
+            outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Session As"), 
+                                                     filter=self.tr("Database (*.db)"))
+            if outPath:
+                def saveSessionTask(pIn: str, pOut: str):
+                    shutil.copy(pIn, pOut)
+                # tmp is only used for preventing thread being deleted before finished
+                self.tmp = runInQThread(saveSessionTask, 
+                                        (dbPath, outPath), 
+                                        self.tr("Saving session"), 
+                                        self.signals.statusSignal)
+        else:
+            # no data is found, show a warning dialog
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("No file is loaded."))
+    
     
     def onFailMarker(self):
         if self.data_interface is not None:
@@ -313,9 +378,9 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox.setInformativeText("{0}:\
             <br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a>\
             <br>\
-            <br><span style='font-size:8px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
+            <br><span style='font-size:10px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
                                                                self.tr("Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.")))
-        appIcon = QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))
+        appIcon = getIcon("App").pixmap(250, 250)
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
         dbgBtn = msgBox.addButton(self.tr("Debug"), QMessageBox.ButtonRole.ResetRole)   # leftmost
@@ -330,6 +395,14 @@ class MyWindow(QtWidgets.QMainWindow):
             msgBox.close()
         
         
+    def onAddFont(self):
+        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+    
+    
+    def onToXLSX(self):
+        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+    
+    
     def onExit(self):
         '''
         Clean up before closing app
@@ -359,8 +432,9 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def showDutDataTable(self, selectedDutIndexes: list):
         # always update style in case user changed them in the setting
-        self.dutDataDisplayer.setTextFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.dutDataDisplayer.setFloatFormat(getSetting().getFloatFormat())
+        settings = getSetting()
+        self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.dutDataDisplayer.setFloatFormat(settings.getFloatFormat())
         self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
         self.dutDataDisplayer.showUI()
         
@@ -410,18 +484,25 @@ class MyWindow(QtWidgets.QMainWindow):
 
     
     def updateIcons(self):
-        self.ui.actionOpen.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Open"], format = 'PNG'))))
-        self.ui.actionFailMarker.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["FailMarker"], format = 'SVG'))))
-        self.ui.actionExport.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Export"], format = 'SVG'))))
-        self.ui.actionSettings.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Settings"], format = 'SVG'))))
-        self.ui.actionAbout.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["About"], format = 'SVG'))))
+        self.ui.actionOpen.setIcon(getIcon("Open"))
+        self.ui.actionMerge.setIcon(getIcon("Merge"))
+        self.ui.actionFailMarker.setIcon(getIcon("FailMarker"))
+        self.ui.actionExport.setIcon(getIcon("Export"))
+        self.ui.actionSettings.setIcon(getIcon("Settings"))
+        self.ui.actionLoad_Session.setIcon(getIcon("LoadSession"))
+        self.ui.actionSave_Session.setIcon(getIcon("SaveSession"))
+        self.ui.actionAbout.setIcon(getIcon("About"))
+        self.ui.actionAddFont.setIcon(getIcon("AddFont"))
+        self.ui.actionToXLSX.setIcon(getIcon("Convert"))
         self.ui.toolBar.setIconSize(QtCore.QSize(20, 20))
         
-        self.ui.tabControl.setTabIcon(tab.Info, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_info"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Trend, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_trend"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Histo, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_histo"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Bin, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["tab_bin"], format = 'SVG'))))
-        self.ui.tabControl.setTabIcon(tab.Wafer, QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(b64decode(ImgDict["tab_wafer"]), format = 'PNG'))))
+        self.ui.tabControl.setTabIcon(tab.Info, getIcon("tab_info"))
+        self.ui.tabControl.setTabIcon(tab.Trend, getIcon("tab_trend"))
+        self.ui.tabControl.setTabIcon(tab.Histo, getIcon("tab_hist"))
+        self.ui.tabControl.setTabIcon(tab.PPQQ, getIcon("tab_ppqq"))
+        self.ui.tabControl.setTabIcon(tab.Bin, getIcon("tab_bin"))
+        self.ui.tabControl.setTabIcon(tab.Wafer, getIcon("tab_wafer"))
+        self.ui.tabControl.setTabIcon(tab.Correlate, getIcon("tab_correlation"))
     
     
     def init_TestList(self):
@@ -532,7 +613,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
                 if getSetting().language != "English":
                     # fix weird font when switch to chinese-s
-                    qfont = QtGui.QFont(self.imageFont)
+                    qfont = QtGui.QFont(getSetting().font)
                     [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
@@ -658,7 +739,7 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             self.ui.Selection_stackedWidget.setCurrentIndex(0)
         
-        if currentTab == tab.Bin:
+        if currentTab in [tab.Bin, tab.Correlate]:
             self.ui.TestList.setDisabled(True)
             self.ui.SearchBox.setDisabled(True)
             self.ui.ClearButton.setDisabled(True)
@@ -759,6 +840,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # do nothing if test data table is not selected
             return
 
+        settings = getSetting()
         d = self.data_interface.getTestDataTableContent(self.getSelectedTests(), 
                                                         self.getCheckedHeads(), 
                                                         self.getCheckedSites())
@@ -770,8 +852,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
-        self.tmodel_data.setFont(QtGui.QFont(self.imageFont, 13 if isMac else 10))
-        self.tmodel_data.setFloatFormat(getSetting().getFloatFormat())
+        self.tmodel_data.setFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.tmodel_data.setFloatFormat(settings.getFloatFormat())
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
@@ -795,8 +877,8 @@ class MyWindow(QtWidgets.QMainWindow):
             return
         
         # get selected tests
-        if tabType == tab.Bin:
-            # BinChart is irrelevent to tests, 
+        if tabType in [tab.Bin, tab.Correlate]:
+            # BinChart & correlation are irrelevent to tests, 
             # fake a list with only one element
             selTests = [""]
         else:
@@ -824,7 +906,7 @@ class MyWindow(QtWidgets.QMainWindow):
         verticalHeader = self.ui.dataTable.verticalHeader()
         settings = getSetting()
         
-        if tabType == tab.Info or tabType == tab.Trend or tabType == tab.Histo:
+        if tabType in [tab.Info, tab.Trend, tab.Histo, tab.PPQQ]:
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
@@ -850,6 +932,10 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dataTable.setModel(self.tmodel)
             self.tmodel.layoutChanged.emit()
                 
+        elif tabType == tab.Correlate:
+            #TODO
+            pass
+        
         else:
             if tabType == tab.Bin:
                 d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
@@ -922,16 +1008,15 @@ class MyWindow(QtWidgets.QMainWindow):
         wl = []
         for i in range(layout.count()):
             wl.append(layout.itemAt(i).widget())
-        # delete from list
-        for w in wl:
-            deleteWidget(w)
+        deleteWidget(wl)
         del wl
         gc.collect()
     
     
     def clearAllContents(self):
         # clear tabs' images
-        for t in [tab.Trend, tab.Histo, tab.Bin, tab.Wafer]:
+        for t in [tab.Trend, tab.Histo, tab.PPQQ, 
+                  tab.Bin, tab.Wafer, tab.Correlate]:
             self.clearCurrentTab(t)
         self.selectionTracker = {}
         gc.collect()
@@ -981,7 +1066,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
             # disable/enable wafer tab
-            self.ui.tabControl.setTabEnabled(4, self.data_interface.containsWafer)
+            self.ui.tabControl.setTabEnabled(tab.Wafer, self.data_interface.containsWafer)
     
             # update listView
             self.completeTestList = self.data_interface.completeTestList
@@ -1047,13 +1132,20 @@ class MyWindow(QtWidgets.QMainWindow):
             setSettingDefaultColor(self.availableSites, 
                                    self.data_interface.SBIN_dict, 
                                    self.data_interface.HBIN_dict)
+            setSettingDefaultSymbol(self.data_interface.num_files)
             # remove existing color btns
             self.settingUI.removeColorBtns()
             self.settingUI.initColorBtns(self.availableSites, 
                                          self.data_interface.SBIN_dict, 
                                          self.data_interface.HBIN_dict)
+            self.settingUI.removeSymbolBtns()
+            self.settingUI.initSymbolBtns(self.data_interface.num_files)
             self.exporter.removeSiteCBs()
-            self.exporter.refreshUI(self.completeTestList)
+            self.exporter.refreshUI(self.completeTestList,
+                                    self.completeWaferList,
+                                    self.availableHeads,
+                                    self.availableSites,
+                                    self.data_interface.num_files)
             self.init_Head_SiteCheckbox()
             self.updateFileHeader()
             self.updateDutSummaryTable()
@@ -1108,7 +1200,8 @@ def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication([])
     app.setStyle('Fusion')
-    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(QtGui.QImage.fromData(ImgDict["Icon"], format = 'SVG'))))    
+    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+    app.setWindowIcon(getIcon("App"))
     pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
     window.show()
