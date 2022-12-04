@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Wed Mar 09 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -44,18 +44,19 @@ class FailMarker(QtWidgets.QWidget):
         super().__init__()
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
-        self.parent = parent
+        self._parent = parent
         self.translator = QtCore.QTranslator(self)
                 
         self.setWindowTitle(self.tr("Searching Failed Items"))
-        self.UI.progressBar.setFormat("%p%")
     
     def start(self):
+        self.UI.progressBar.setFormat("%p%")
+        self.UI.progressBar.setValue(0)
         self.stopFlag = False   # init at start
         self.show()
         start_time = time.time()
         
-        self.sim = self.parent.sim_list
+        self.sim = self._parent.sim_list
         self.total = self.sim.rowCount()
         failCount = 0
         cpkFailCount = 0
@@ -63,21 +64,19 @@ class FailMarker(QtWidgets.QWidget):
         for i in range(self.total):
             if self.stopFlag: 
                 end_time = time.time()
-                self.parent.signals.statusSignal.emit(self.tr("Fail Marker aborted, time elapsed %.2f sec.") % (end_time - start_time), False, False, False)
+                self._parent.signals.statusSignal.emit(self.tr("Fail Marker aborted, time elapsed %.2f sec.") % (end_time - start_time), False, False, False)
                 return
             
             self.updateProgressBar(int(100 * (i+1) / self.total))
             QApplication.processEvents()    # force refresh UI to update progress bar
             
             qitem = self.sim.item(i)
-            testTuple = self.parent.getTestTuple(qitem.text())
-            
-            status = self.parent.isTestFail(testTuple)
-            if status == "testFailed":
+            status = self._parent.isTestFail(qitem.text())
+            if status == "Fail":
                 failCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-            elif status == "cpkFailed":
+            elif status == "cpkFail":
                 cpkFailCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
@@ -91,7 +90,7 @@ class FailMarker(QtWidgets.QWidget):
                 msg += self.tr("%d failed test items found, ") % failCount
             if cpkFailCount != 0:
                 msg += self.tr("%d passed test items found with low Cpk, ") % cpkFailCount
-        self.parent.signals.statusSignal.emit(self.tr("%stime elapsed %.2f sec.") % (msg, end_time - start_time), False, False, False)
+        self._parent.signals.statusSignal.emit(self.tr("%stime elapsed %.2f sec.") % (msg, end_time - start_time), False, False, False)
         self.close()
         
     def closeEvent(self, event):

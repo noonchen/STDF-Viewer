@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Wed Mar 09 2022
+# Last Modified: Thu Dec 01 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,13 +24,14 @@
 
 
 
-import subprocess, os, platform
-from .customizedQtClass import StyleDelegateForTable_List, FlippedProxyModel, NormalProxyModel
+from xlsxwriter import Workbook
+from xlsxwriter.worksheet import Worksheet
+from .customizedQtClass import *
+from .SharedSrc import *
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QAbstractItemView, QApplication, QFileDialog, QPushButton
-from PyQt5.QtCore import pyqtSignal as Signal, QTranslator, Qt
-from .ui.stdfViewer_loadingUI import Ui_loadingUI
+from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton, QMessageBox
+from PyQt5.QtCore import QTranslator, Qt
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
@@ -46,90 +47,24 @@ from .ui.stdfViewer_dutDataUI import Ui_dutData
 # from .ui.stdfViewer_dutDataUI_side6 import Ui_dutData
 
 
-
-class signal(QtCore.QObject):
-    hideSignal = Signal()
-    
-    
-
-class DutDataReader(QtWidgets.QWidget):
+        
+class DutDataDisplayer(QtWidgets.QDialog):
     def __init__(self, parent):
-        super().__init__()
-        self.UI = Ui_loadingUI()
-        self.UI.setupUi(self)
-        self.parent = parent
-        self.translator = QTranslator(self)
-        self.selectedDutIndex = []
-                
-        self.stopFlag = False
-        self.signal = signal()
-        self.signal.hideSignal.connect(self.hide)
-        self.tableUI = dutDataDisplayer(self, self.signal.hideSignal)
-        
-    
-    def setDutIndexes(self, selectedDutIndex:list):
-        self.selectedDutIndex = selectedDutIndex      # selected indexes of dut info table
-    
-    
-    def start(self):
-        # init every start
-        self.setWindowTitle(self.tr("Reading DUT data"))
-        self.UI.progressBar.setFormat("%p%")
-        self.stopFlag = False
-        self.show()
-        
-        self.test_number_tuple_List = [self.parent.getTestTuple(ele) for ele in self.parent.completeTestList]
-        self.total = len(self.test_number_tuple_List)
-        dutInfo = [self.parent.getDutSummaryOfIndex(i) for i in self.selectedDutIndex]
-        # get dut flag info for showing tips
-        dutFlagAsString = [dutSumList[-1].split("-")[-1] for dutSumList in dutInfo]
-        dutFlagInfo = [self.parent.dut_flag_parser(ele) for ele in dutFlagAsString]
-        # test data section
-        dutData = []
-        dutStat = []
-        testFlagInfo = []
-        for i, testTuple in enumerate(self.test_number_tuple_List):
-            if self.stopFlag: return
-
-            dutData_perTest, stat_perTest, flagInfo_perTest = self.parent.getTestValueOfDUTs(self.selectedDutIndex, testTuple)
-            dutData.append(dutData_perTest)
-            dutStat.append(stat_perTest)
-            testFlagInfo.append(flagInfo_perTest)
-            
-            self.updateProgressBar(int(100 * (i+1) / self.total))
-            QApplication.processEvents()    # force refresh UI to update progress bar
-        self.UI.progressBar.setFormat(self.tr("Filling table with data..."))
-        QApplication.processEvents()
-        self.tableUI.setContent((dutInfo, dutFlagInfo, dutData, dutStat, testFlagInfo))
-        self.tableUI.showUI()
-        self.close()
-            
-        
-    def closeEvent(self, event):
-        # close by clicking X
-        self.stopFlag = True
-        event.accept()
-             
-                    
-    def updateProgressBar(self, num):
-        self.UI.progressBar.setValue(num)
-      
-        
-        
-class dutDataDisplayer(QtWidgets.QDialog):
-    def __init__(self, parent, hideSignal: Signal):
-        super().__init__()
+        super().__init__(parent)
         self.UI = Ui_dutData()
         self.UI.setupUi(self)
-        self.parent = parent
         self.translator = QTranslator(self)
-        self.sd = StyleDelegateForTable_List()
-        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = ([], [], [], [], [])
-        self.hideSignal = hideSignal
+        self.textFont = QtGui.QFont()
+        self.floatFormat = "%f"
+        
+        self.sd = StyleDelegateForTable_List(self.UI.tableView_dutData)
+        self.UI.tableView_dutData.setItemDelegate(self.sd)
         
         self.transposeBtn = QPushButton("T")
         self.transposeBtn.setFixedSize(QtCore.QSize(25, 25))
         self.transposeBtn.setShortcut("t")
+        self.transposeBtn.setStyleSheet("QPushButton { background-color: #FE7B00; }")
+        self.transposeBtn.setToolTip(self.tr("Transpose table"))
         self.UI.horizontalLayout.insertWidget(0, self.transposeBtn)
         self.transposeBtn.clicked.connect(self.onTransposeTable)
         
@@ -139,18 +74,41 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.init_Table()
         
         
-    def setContent(self, content):
-        self.dutInfo, self.dutFlagInfo, self.dutData, self.dutStat, self.testFlagInfo = content
+    def setTextFont(self, font: QtGui.QFont):
+        self.textFont = font
+        
+        
+    def setFloatFormat(self, floatFormat: str):
+        self.floatFormat = floatFormat
+        
+        
+    def setContent(self, content: dict):
+        '''
+        see StdfFile.py -> DataInterface -> getDutSummaryWithTestDataCore
+        for details of `content`
+        '''
+        self.tmodel.setTestData(content["Data"])
+        self.tmodel.setTestInfo(content["TestInfo"])
+        self.tmodel.setDutIndexMap(content["dut2ind"])
+        self.tmodel.setDutInfoMap(content["dutInfo"])
+        self.tmodel.setTestLists(content["TestLists"])
+        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Test Head - Site"), 
+                                    self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), 
+                                    self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
+        self.tmodel.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
+        self.tmodel.setVHeaderExt(content["VHeader"])
+        self.tmodel.setFont(self.textFont)
+        self.tmodel.setFloatFormat(self.floatFormat)
+        # emit signal to show data
+        self.tmodel.layoutChanged.emit()
         
     
     def showUI(self):
-        self.refresh_Table()
-        self.hideSignal.emit()
         self.exec_()
         
         
     def init_Table(self):
-        self.tmodel = QtGui.QStandardItemModel()
+        self.tmodel = TestDataTableModel()
         # proxy model for normal display & transpose
         self.flipModel = FlippedProxyModel()
         self.normalModel = NormalProxyModel()
@@ -158,83 +116,13 @@ class dutDataDisplayer(QtWidgets.QDialog):
         self.normalModel.setSourceModel(self.tmodel)
         # use normal model as default
         self.activeModel = self.normalModel
-        self.UI.tableView_dutData.setModel(self.activeModel)
-        self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)    
-        self.sd.setParent(self.UI.tableView_dutData)
-        self.UI.tableView_dutData.setItemDelegate(self.sd)    
+        self.UI.tableView_dutData.setModel(self.tmodel)
+        self.UI.tableView_dutData.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.UI.tableView_dutData.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
-
-    def refresh_Table(self):
-        self.activeModel.layoutAboutToBeChanged.emit()
-        # clear
-        self.tmodel.removeColumns(0, self.tmodel.columnCount())
-        self.tmodel.removeRows(0, self.tmodel.rowCount())
-        # header
-        hh = [self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"),
-              self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"),
-              self.tr("DUT Flag")] + [tmp[0] for tmp in self.dutData]
-        vh_base = [self.tr("Test Number"), self.tr("HiLimit"), self.tr("LoLimit"), self.tr("Unit")]
-        vh = vh_base + ["#%d"%(i+1) for i in range(len(self.dutInfo))]
-        vh_len = len(vh_base)
-
-        # append value
-        # get dut pass/fail list
-        statIndex = hh.index(self.tr("DUT Flag"))
-        self.dutFlagInfo = [""] * vh_len + self.dutFlagInfo     # prepend empty tips for non-data cell
-        dutStatus = ["P"] * vh_len + [dutInfo_perDUT[statIndex][:1] for dutInfo_perDUT in self.dutInfo]        # get first letter
-        for col_tuple in zip(*self.dutInfo):
-            tmpCol = [""] * vh_len + list(col_tuple)
-            qitemCol = []
-            for i, (item, flagCap, dutTip) in enumerate(zip(tmpCol, dutStatus, self.dutFlagInfo)):
-                qitem = QtGui.QStandardItem(item)
-                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                if i < vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)   # add bgcolor for non-data cell
-                # use first letter to check dut status
-                if flagCap == "P":
-                    pass
-                elif flagCap == "F": 
-                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                else:
-                    qitem.setData(QtGui.QColor("#000000"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-                if dutTip != "":
-                    qitem.setToolTip(dutTip)
-                qitemCol.append(qitem)
-            self.tmodel.appendColumn(qitemCol)
-        
-        for dataCol, statCol, flagInfoCol in zip(self.dutData, self.dutStat, self.testFlagInfo):
-            qitemCol = []
-            for i, (item, stat, flagInfo) in enumerate(zip(dataCol, statCol, flagInfoCol)):    # remove 1st element: test name
-                if i == 0: continue     # skip test name
-                qitem = QtGui.QStandardItem(item)
-                qitem.setTextAlignment(QtCore.Qt.AlignCenter)
-                qitem.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                if stat == False:
-                    qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
-                    qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
-                if flagInfo != "":
-                    qitem.setToolTip(flagInfo)
-                if i <= vh_len: qitem.setData(QtGui.QColor("#0F80FF7F"), QtCore.Qt.BackgroundRole)
-                qitemCol.append(qitem)                        
-            self.tmodel.appendColumn(qitemCol)
-        
-        self.tmodel.setHorizontalHeaderLabels(hh)
-        self.tmodel.setVerticalHeaderLabels(vh)
-        self.UI.tableView_dutData.horizontalHeader().setVisible(True)
-        self.UI.tableView_dutData.verticalHeader().setVisible(True)        
-        # resize cells
-        header = self.UI.tableView_dutData.horizontalHeader()
-        for column in range(header.model().columnCount()):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
-        # emit signal to show data
-        self.activeModel.layoutChanged.emit()
-        
         
     def onTransposeTable(self):
-        if self.activeModel == self.normalModel:
+        if self.activeModel is self.normalModel:
             self.activeModel = self.flipModel
         else:
             self.activeModel = self.normalModel
@@ -244,109 +132,132 @@ class dutDataDisplayer(QtWidgets.QDialog):
     
     
     def onSave_csv(self):
+        def checkComma(text: str) -> str:
+            # if comma is in the string, needs to close with ""
+            if isinstance(text, str):
+                if "," in text:
+                    return f'"{text}"'
+                else:
+                    return text
+            else:
+                if text is None:
+                    return ""
+                else:
+                    return f"{text}"
+        
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("CSV file (*.csv)"))
-        checkComma = lambda text: '"' + text + '"' if "," in text else text
         if outPath:
             rowTotal = self.activeModel.rowCount()
             columnTotal = self.activeModel.columnCount()
-            # if comma is in the string, needs to close with ""
-            hh = [checkComma(self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole)) for i in range(columnTotal)]
-            vh = [checkComma(self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole)) for i in range(rowTotal)]
+            hh = [checkComma(self.activeModel.headerData(i, 
+                                                         Qt.Orientation.Horizontal, 
+                                                         Qt.ItemDataRole.DisplayRole)) 
+                  for i in range(columnTotal)]
+            vh = [checkComma(self.activeModel.headerData(i, 
+                                                         Qt.Orientation.Vertical, 
+                                                         Qt.ItemDataRole.DisplayRole)) 
+                  for i in range(rowTotal)]
+            
             with open(outPath, "w") as f:
                 f.write(",".join([""] + hh)+"\n")
                 for row in range(rowTotal):
-                    rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), Qt.DisplayRole)) for col in range(columnTotal)]
+                    rowDataList = [checkComma(self.activeModel.data(self.activeModel.index(row, col), 
+                                                                    Qt.ItemDataRole.DisplayRole)) for col in range(columnTotal)]
                     f.write(",".join([vh[row]] + rowDataList)+"\n")
-            msgbox = QtWidgets.QMessageBox(None)
+            
+            msgbox = QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
-                self.revealFile(outPath)
+                revealFile(outPath)
             elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(outPath)
+                openFileInOS(outPath)
             
     
     def onSave_xlsx(self):
         outPath, _ = QFileDialog.getSaveFileName(None, caption=self.tr("Save Report As"), filter=self.tr("Excel file (*.xlsx)"))
         
         if outPath:
-            def write_row(sheet, row, scol, dataL, styleList):
+            def write_row(sheet: Worksheet, row: int, scol: int, dataL: list, styleList: list):
                 # write as number in default, otherwise as string
-                for i in range(len(dataL)):
+                for i, (data, style) in enumerate(zip(dataL, styleList)):
                     try:
-                        sheet.write_number(row, scol+i, float(dataL[i]), styleList[i])
+                        sheet.write_number(row, scol+i, float(data), style)
                     except (TypeError, ValueError):
-                        sheet.write_string(row, scol+i, dataL[i], styleList[i])
+                        sheet.write_string(row, scol+i, data, style)
             
-            import xlsxwriter as xw
-            with xw.Workbook(outPath) as wb:
+            with Workbook(outPath) as wb:
                 noStyle = wb.add_format({"align": "center"})
-                failStyle = wb.add_format({"bg_color": "#CC0000", "bold": True, "align": "center"})
+                boldStyle = wb.add_format({"bold": True, "align": "center"})
+                failStyle = wb.add_format({"font_color": "FFFFFF", "bg_color": "#CC0000", "bold": True, "align": "center"})
+                supersedeStyle = wb.add_format({"bg_color": "#D0D0D0", "bold": True, "align": "center"})
+                unknownStyle = wb.add_format({"bg_color": "#FE7B00", "bold": True, "align": "center"})
                 sheetOBJ = wb.add_worksheet(self.tr("DUT Data"))
                 
                 rowTotal = self.activeModel.rowCount()
                 columnTotal = self.activeModel.columnCount()
-                colHeader = [""] + [self.activeModel.headerData(i, Qt.Horizontal, Qt.DisplayRole) for i in range(columnTotal)]
-                vh = [self.activeModel.headerData(i, Qt.Vertical, Qt.DisplayRole) for i in range(rowTotal)]
-                
-                write_row(sheetOBJ, 0, 0, colHeader, [noStyle] * (columnTotal + 1))
+                colHeader = [""] + [self.activeModel.headerData(i, 
+                                                                Qt.Orientation.Horizontal, 
+                                                                Qt.ItemDataRole.DisplayRole) 
+                                    for i in range(columnTotal)]
+                vh = [self.activeModel.headerData(i, 
+                                                  Qt.Orientation.Vertical, 
+                                                  Qt.ItemDataRole.DisplayRole) 
+                      for i in range(rowTotal)]
+                write_row(sheetOBJ, 0, 0, colHeader, [boldStyle] * (columnTotal + 1))
                 col_width = [len(s) for s in colHeader]     # get max string len to adjust cell width
                 
                 for row in range(rowTotal):
-                    rowDataList = [vh[row]]     # row header
-                    rowStyleList = [noStyle]    # no style for row header
-                    if len(vh[row]) > col_width[0]: col_width[0] = len(vh[row])
+                    # row header
+                    rowDataList = [vh[row]]
+                    rowStyleList = [boldStyle]
+                    col_width[0] = max(len(vh[row]), col_width[0])
                     
                     for col in range(columnTotal):
-                        qitem = self.activeModel.item(row, col)
-                        data = qitem.text()
-                        color = qitem.background().color().name().lower()
+                        modelIndex = self.activeModel.index(row, col)
+                        data = self.activeModel.data(modelIndex, 
+                                                     Qt.ItemDataRole.DisplayRole)
+                        bgcolor = self.activeModel.data(modelIndex, 
+                                                        Qt.ItemDataRole.BackgroundRole)
+                        # replace None with empty string
+                        data = data if data is not None else ""
+                        # choose cell style by background color
+                        if isinstance(bgcolor, QtGui.QColor):
+                            hexcolor = bgcolor.name().lower()
+                            if hexcolor.startswith("#cc0000"):
+                                cellStyle = failStyle
+                            elif hexcolor.startswith("#d0d0d0"):
+                                cellStyle = supersedeStyle
+                            elif hexcolor.startswith("#fe7b00"):
+                                cellStyle = unknownStyle
+                            else:
+                                cellStyle = noStyle
+                        else:
+                            cellStyle = noStyle
+                        
                         rowDataList.append(data)
-                        rowStyleList.append(failStyle if color=="#cc0000" else noStyle)
-                        if len(data) > col_width[col+1]: col_width[col+1] = len(data)
+                        rowStyleList.append(cellStyle)
+                        col_width[col + 1] = max(len(str(data)), col_width[col + 1])
                     write_row(sheetOBJ, row + 1, 0, rowDataList, rowStyleList)
+                
+                # resize columns
                 [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
                 
-            msgbox = QtWidgets.QMessageBox(None)
+            msgbox = QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
-                self.revealFile(outPath)
+                revealFile(outPath)
             elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(outPath)
-            
-    
-    def openFileInOS(self, filepath):
-        # https://stackoverflow.com/a/435669
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', filepath))        
-            
+                openFileInOS(outPath)
 
-    def revealFile(self, filepath):
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', '-R', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', os.path.dirname(filepath)))
-
-    
-    

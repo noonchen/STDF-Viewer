@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Tue Mar 08 2022
+# Last Modified: Fri Nov 25 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -24,12 +24,14 @@
 
 
 
+import sys, os
 from .ui.stdfViewer_debugUI import Ui_debugPanel
-from .cystdf import stdfRecordAnalyzer
-import sys, os, subprocess, platform
+from deps.SharedSrc import *
+import rust_stdf_helper
+
 # pyqt5
 from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PyQt5.QtCore import QTranslator, pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 
 
@@ -80,14 +82,13 @@ class stdDebugPanel(QtWidgets.QDialog):
                 
     
     def onRecordAnalyzer(self):
-        f, _typ = QFileDialog.getOpenFileName(self,
-                                              caption=self.tr("Select a STD File To Analyze"),
-                                              directory=self.parent.settingParams.recentFolder,
-                                              filter=self.tr("All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;STDF (*.std *.stdf);;Compressed STDF (*.std*.gz *.std*.bz2 *.std*.zip);;All Files (*.*)"),)
+        f, _typ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a STD File To Analyze"),
+                                              directory=getSetting().recentFolder,
+                                              filter=self.tr(FILE_FILTER),)
             
         if os.path.isfile(f):
             # store folder path
-            self.parent.updateRecentFolder(f)
+            updateRecentFolder(f)
             self.updateResult(self.tr("{0}Selected STD File Path: {1}").format(prefixBlue, suffix))
             self.updateResult("{0}{1}{2}".format(prefixGreen, f, suffix))
             self.updateResult(self.tr("{0}Reading...{1}").format(prefixBlue, suffix))
@@ -146,47 +147,26 @@ class stdDebugPanel(QtWidgets.QDialog):
             with open(outPath, "w") as f:
                 f.write(self.dbgUI.textBrowser.toPlainText())
                 
-            msgbox = QtWidgets.QMessageBox(None)
+            msgbox = QMessageBox(None)
             msgbox.setText(self.tr("Completed"))
             msgbox.setInformativeText(self.tr("Text file is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QtWidgets.QMessageBox.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QtWidgets.QMessageBox.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QtWidgets.QMessageBox.YesRole)
+            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
+            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
             msgbox.setDefaultButton(okBtn)
             msgbox.exec_()
             if msgbox.clickedButton() == revealBtn:
-                self.revealFile(outPath)
+                revealFile(outPath)
             elif msgbox.clickedButton() == openBtn:
-                self.openFileInOS(outPath)
-                
-                
-    def openFileInOS(self, filepath):
-        # https://stackoverflow.com/a/435669
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', filepath))        
-            
+                openFileInOS(outPath)
 
-    def revealFile(self, filepath):
-        filepath = os.path.normpath(filepath)
-        if platform.system() == 'Darwin':       # macOS
-            subprocess.call(('open', '-R', filepath))
-        elif platform.system() == 'Windows':    # Windows
-            subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        else:                                   # linux variants
-            subprocess.call(('xdg-open', os.path.dirname(filepath)))
-            
             
     def closeEvent(self, event):
         if self.readingInProgress:
-            close = QtWidgets.QMessageBox.question(self, self.tr("QUIT"), self.tr("You need to stop analyzing before closing, stop now?"), QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            if close == QtWidgets.QMessageBox.Yes:
+            close = QMessageBox.question(self, self.tr("QUIT"), 
+                                         self.tr("You need to stop analyzing before closing, stop now?"), 
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if close == QMessageBox.StandardButton.Yes:
                 # if user clicked yes, change thread flag and close window
                 self.analyzer.flag.stop = True
             
@@ -218,7 +198,7 @@ class RecordAnalyzerWrapper(QtCore.QObject):
     @Slot()
     def analyzeBegin(self):
         try:
-            stdfRecordAnalyzer(self.stdPath, self.resultSignal, self.progressSignal, self.flag)
+            rust_stdf_helper.analyzeSTDF(self.stdPath, self.resultSignal, self.progressSignal, self.flag)
             if self.flag.stop:
                 # user terminated
                 if self.resultSignal: self.resultSignal.emit(self.tr("### User terminated ###\n"))

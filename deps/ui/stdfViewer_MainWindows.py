@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/nochenon/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents/My Projects/STDF Viewer/deps/ui/stdfViewer_MainWindows.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.4
 #
@@ -16,7 +15,6 @@ class Ui_MainWindow(object):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(1440, 847)
         font = QtGui.QFont()
-        font.setFamily("Tahoma")
         font.setPointSize(11)
         MainWindow.setFont(font)
         MainWindow.setStyleSheet("QScrollArea { background: transparent; }\n"
@@ -26,12 +24,12 @@ class Ui_MainWindow(object):
 "QScrollBar:vertical {\n"
 "border: 0px;\n"
 "background:transparent;\n"
-"width:5px;\n"
+"width:10px;\n"
 "margin: 0px 0px 0px 0px;\n"
 "}\n"
 " QScrollBar::handle:vertical {\n"
 "background: rgb(128, 128, 128);\n"
-"min-height: 10px;\n"
+"min-height: 50px;\n"
 "}\n"
 "\n"
 "QScrollBar::add-line:vertical {\n"
@@ -49,12 +47,12 @@ class Ui_MainWindow(object):
 "QScrollBar:horizontal {\n"
 "border: 0px;\n"
 "background:transparent;\n"
-"height:5px;\n"
+"height:10px;\n"
 "margin: 0px 0px 0px 0px;\n"
 "}\n"
 " QScrollBar::handle:horizontal {\n"
 "background: rgb(128, 128, 128);\n"
-"min-width: 10px;\n"
+"min-width: 50px;\n"
 "}\n"
 "\n"
 "QScrollBar::add-line:horizontal {\n"
@@ -117,11 +115,7 @@ class Ui_MainWindow(object):
         self.TestList.setSizePolicy(sizePolicy)
         self.TestList.setMinimumSize(QtCore.QSize(0, 0))
         font = QtGui.QFont()
-        font.setFamily("Courier")
         font.setPointSize(12)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
         self.TestList.setFont(font)
         self.TestList.setObjectName("TestList")
         self.verticalLayout_5.addWidget(self.TestList)
@@ -169,16 +163,17 @@ class Ui_MainWindow(object):
         self.WaferList.setSizePolicy(sizePolicy)
         self.WaferList.setMinimumSize(QtCore.QSize(0, 0))
         font = QtGui.QFont()
-        font.setFamily("Courier")
         font.setPointSize(12)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
         self.WaferList.setFont(font)
         self.WaferList.setObjectName("WaferList")
         self.verticalLayout_14.addWidget(self.WaferList)
         self.verticalLayout_15.addWidget(self.wafer_selection)
         self.Selection_stackedWidget.addWidget(self.CP_page)
+        self.file_selection = QtWidgets.QGroupBox(self.Selection_splitter)
+        self.file_selection.setMaximumSize(QtCore.QSize(16777215, 81))
+        self.file_selection.setObjectName("file_selection")
+        self.verticalLayout_19 = QtWidgets.QVBoxLayout(self.file_selection)
+        self.verticalLayout_19.setObjectName("verticalLayout_19")
         self.site_head_selection = QtWidgets.QTabWidget(self.Selection_splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
@@ -332,13 +327,11 @@ class Ui_MainWindow(object):
         self.verticalLayout_11.setContentsMargins(20, 10, 20, -1)
         self.verticalLayout_11.setObjectName("verticalLayout_11")
         self.fileInfoTable = QtWidgets.QTableView(self.fileInfoPage)
+        font = QtGui.QFont()
+        self.fileInfoTable.setFont(font)
         self.fileInfoTable.setStyleSheet("QTableView {\n"
-"background: transparent;\n"
-"font: 13pt \"Courier\";}\n"
-"\n"
-"")
+"background: transparent;}")
         self.fileInfoTable.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.fileInfoTable.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.fileInfoTable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.fileInfoTable.setProperty("showDropIndicator", False)
         self.fileInfoTable.setDragDropOverwriteMode(False)
@@ -349,7 +342,7 @@ class Ui_MainWindow(object):
         self.fileInfoTable.setCornerButtonEnabled(False)
         self.fileInfoTable.setObjectName("fileInfoTable")
         self.fileInfoTable.horizontalHeader().setVisible(False)
-        self.fileInfoTable.verticalHeader().setVisible(False)
+        self.fileInfoTable.verticalHeader().setVisible(True)
         self.verticalLayout_11.addWidget(self.fileInfoTable)
         self.infoBox.addItem(self.fileInfoPage, "")
         self.dutInfoPage = QtWidgets.QWidget()
@@ -441,6 +434,31 @@ class Ui_MainWindow(object):
         self.horizontalLayout_histo.addWidget(self.scrollArea_histo)
         self.verticalLayout_3.addLayout(self.horizontalLayout_histo)
         self.tabControl.addTab(self.histo_tab, "")
+        self.ppqq_tab = QtWidgets.QWidget()
+        self.ppqq_tab.setObjectName("ppqq_tab")
+        self.verticalLayout_20 = QtWidgets.QVBoxLayout(self.ppqq_tab)
+        self.verticalLayout_20.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_20.setObjectName("verticalLayout_20")
+        self.horizontalLayout_ppqq = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_ppqq.setObjectName("horizontalLayout_ppqq")
+        self.scrollArea_ppqq = QtWidgets.QScrollArea(self.ppqq_tab)
+        self.scrollArea_ppqq.setStyleSheet("background-color: white")
+        self.scrollArea_ppqq.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.scrollArea_ppqq.setWidgetResizable(True)
+        self.scrollArea_ppqq.setObjectName("scrollArea_ppqq")
+        self.scrollAreaWidgetContents_3 = QtWidgets.QWidget()
+        self.scrollAreaWidgetContents_3.setGeometry(QtCore.QRect(0, 0, 1083, 581))
+        self.scrollAreaWidgetContents_3.setObjectName("scrollAreaWidgetContents_3")
+        self.verticalLayout_21 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_3)
+        self.verticalLayout_21.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_21.setObjectName("verticalLayout_21")
+        self.verticalLayout_ppqq = QtWidgets.QVBoxLayout()
+        self.verticalLayout_ppqq.setObjectName("verticalLayout_ppqq")
+        self.verticalLayout_21.addLayout(self.verticalLayout_ppqq)
+        self.scrollArea_ppqq.setWidget(self.scrollAreaWidgetContents_3)
+        self.horizontalLayout_ppqq.addWidget(self.scrollArea_ppqq)
+        self.verticalLayout_20.addLayout(self.horizontalLayout_ppqq)
+        self.tabControl.addTab(self.ppqq_tab, "")
         self.bin_tab = QtWidgets.QWidget()
         self.bin_tab.setObjectName("bin_tab")
         self.verticalLayout_10 = QtWidgets.QVBoxLayout(self.bin_tab)
@@ -491,6 +509,31 @@ class Ui_MainWindow(object):
         self.horizontalLayout_wafer.addWidget(self.scrollArea_wafer)
         self.verticalLayout_17.addLayout(self.horizontalLayout_wafer)
         self.tabControl.addTab(self.wafer_tab, "")
+        self.correlation_tab = QtWidgets.QWidget()
+        self.correlation_tab.setObjectName("correlation_tab")
+        self.verticalLayout_23 = QtWidgets.QVBoxLayout(self.correlation_tab)
+        self.verticalLayout_23.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_23.setObjectName("verticalLayout_23")
+        self.horizontalLayout_correlation = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_correlation.setObjectName("horizontalLayout_correlation")
+        self.scrollArea_correlation = QtWidgets.QScrollArea(self.correlation_tab)
+        self.scrollArea_correlation.setStyleSheet("background-color: white")
+        self.scrollArea_correlation.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.scrollArea_correlation.setWidgetResizable(True)
+        self.scrollArea_correlation.setObjectName("scrollArea_correlation")
+        self.scrollAreaWidgetContents_6 = QtWidgets.QWidget()
+        self.scrollAreaWidgetContents_6.setGeometry(QtCore.QRect(0, 0, 1083, 581))
+        self.scrollAreaWidgetContents_6.setObjectName("scrollAreaWidgetContents_6")
+        self.verticalLayout_22 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents_6)
+        self.verticalLayout_22.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_22.setObjectName("verticalLayout_22")
+        self.verticalLayout_correlation = QtWidgets.QVBoxLayout()
+        self.verticalLayout_correlation.setObjectName("verticalLayout_correlation")
+        self.verticalLayout_22.addLayout(self.verticalLayout_correlation)
+        self.scrollArea_correlation.setWidget(self.scrollAreaWidgetContents_6)
+        self.horizontalLayout_correlation.addWidget(self.scrollArea_correlation)
+        self.verticalLayout_23.addLayout(self.horizontalLayout_correlation)
+        self.tabControl.addTab(self.correlation_tab, "")
         self.groupBox_stats = QtWidgets.QGroupBox(self.Tab_Table_splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
@@ -501,7 +544,6 @@ class Ui_MainWindow(object):
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.groupBox_stats)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.dataTable = QtWidgets.QTableView(self.groupBox_stats)
-        self.dataTable.setStyleSheet("font: 9pt;")
         self.dataTable.setObjectName("dataTable")
         self.dataTable.verticalHeader().setVisible(True)
         self.verticalLayout_2.addWidget(self.dataTable)
@@ -522,7 +564,6 @@ class Ui_MainWindow(object):
         self.toolBar.setSizePolicy(sizePolicy)
         self.toolBar.setMinimumSize(QtCore.QSize(0, 0))
         font = QtGui.QFont()
-        font.setFamily("Tahoma")
         font.setPointSize(16)
         self.toolBar.setFont(font)
         self.toolBar.setAutoFillBackground(False)
@@ -549,14 +590,14 @@ class Ui_MainWindow(object):
         font.setWeight(50)
         self.actionExport.setFont(font)
         self.actionExport.setObjectName("actionExport")
-        self.actionCompare = QtWidgets.QAction(MainWindow)
+        self.actionMerge = QtWidgets.QAction(MainWindow)
         font = QtGui.QFont()
         font.setFamily("Tahoma")
         font.setPointSize(14)
         font.setBold(False)
         font.setWeight(50)
-        self.actionCompare.setFont(font)
-        self.actionCompare.setObjectName("actionCompare")
+        self.actionMerge.setFont(font)
+        self.actionMerge.setObjectName("actionMerge")
         self.actionAbout = QtWidgets.QAction(MainWindow)
         font = QtGui.QFont()
         font.setFamily("Tahoma")
@@ -583,7 +624,16 @@ class Ui_MainWindow(object):
         self.actionReadDutData_DS.setObjectName("actionReadDutData_DS")
         self.actionReadDutData_TS = QtWidgets.QAction(MainWindow)
         self.actionReadDutData_TS.setObjectName("actionReadDutData_TS")
+        self.actionLoad_Session = QtWidgets.QAction(MainWindow)
+        self.actionLoad_Session.setObjectName("actionLoad_Session")
+        self.actionSave_Session = QtWidgets.QAction(MainWindow)
+        self.actionSave_Session.setObjectName("actionSave_Session")
+        self.actionAddFont = QtWidgets.QAction(MainWindow)
+        self.actionAddFont.setObjectName("actionAddFont")
+        self.actionToXLSX = QtWidgets.QAction(MainWindow)
+        self.actionToXLSX.setObjectName("actionToXLSX")
         self.toolBar.addAction(self.actionOpen)
+        self.toolBar.addAction(self.actionMerge)
         self.toolBar.addAction(self.actionFailMarker)
         self.toolBar.addAction(self.actionExport)
         self.toolBar.addAction(self.actionSettings)
@@ -602,6 +652,7 @@ class Ui_MainWindow(object):
         self.Search.setText(_translate("MainWindow", "Search: "))
         self.ClearButton.setText(_translate("MainWindow", "Clear"))
         self.wafer_selection.setTitle(_translate("MainWindow", "Wafer Selection"))
+        self.file_selection.setTitle(_translate("MainWindow", "File Selection"))
         self.All.setText(_translate("MainWindow", "All Sites"))
         self.checkAll.setText(_translate("MainWindow", "✓ All"))
         self.cancelAll.setText(_translate("MainWindow", "✕ All"))
@@ -610,12 +661,14 @@ class Ui_MainWindow(object):
         self.infoBox.setItemText(self.infoBox.indexOf(self.fileInfoPage), _translate("MainWindow", "File Info"))
         self.infoBox.setItemText(self.infoBox.indexOf(self.dutInfoPage), _translate("MainWindow", "DUT Summary"))
         self.infoBox.setItemText(self.infoBox.indexOf(self.rawDataPage), _translate("MainWindow", "Test Summary"))
-        self.infoBox.setItemText(self.infoBox.indexOf(self.datalogPage), _translate("MainWindow", "GDR && DTR Summary"))
+        self.infoBox.setItemText(self.infoBox.indexOf(self.datalogPage), _translate("MainWindow", "GDR DTR Summary"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.info_tab), _translate("MainWindow", "Detailed Info"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.trend_tab), _translate("MainWindow", "Trend Chart"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.histo_tab), _translate("MainWindow", "Histogram"))
+        self.tabControl.setTabText(self.tabControl.indexOf(self.ppqq_tab), _translate("MainWindow", "Normal Validation"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.bin_tab), _translate("MainWindow", "Bin Summary"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.wafer_tab), _translate("MainWindow", "Wafer Map"))
+        self.tabControl.setTabText(self.tabControl.indexOf(self.correlation_tab), _translate("MainWindow", "Correlation"))
         self.groupBox_stats.setTitle(_translate("MainWindow", "Test Statistics"))
         self.toolBar.setWindowTitle(_translate("MainWindow", "toolBar"))
         self.actionOpen.setText(_translate("MainWindow", "Open"))
@@ -624,8 +677,8 @@ class Ui_MainWindow(object):
         self.actionExport.setText(_translate("MainWindow", "Export"))
         self.actionExport.setToolTip(_translate("MainWindow", "Customize a STDF report"))
         self.actionExport.setShortcut(_translate("MainWindow", "Ctrl+E"))
-        self.actionCompare.setText(_translate("MainWindow", "Compare"))
-        self.actionCompare.setToolTip(_translate("MainWindow", "Compare another STDF file"))
+        self.actionMerge.setText(_translate("MainWindow", "Merge"))
+        self.actionMerge.setToolTip(_translate("MainWindow", "Merge multiple STDF files"))
         self.actionAbout.setText(_translate("MainWindow", "About"))
         self.actionSettings.setText(_translate("MainWindow", "Settings"))
         self.actionSettings.setToolTip(_translate("MainWindow", "Configure the plot & table"))
@@ -633,3 +686,11 @@ class Ui_MainWindow(object):
         self.actionFailMarker.setToolTip(_translate("MainWindow", "Mark failed test items in Test Selection"))
         self.actionReadDutData_DS.setText(_translate("MainWindow", "Read selected DUT data"))
         self.actionReadDutData_TS.setText(_translate("MainWindow", "Read selected DUT data"))
+        self.actionLoad_Session.setText(_translate("MainWindow", "Load Session"))
+        self.actionLoad_Session.setToolTip(_translate("MainWindow", "Load a session to quick restore parsed data"))
+        self.actionSave_Session.setText(_translate("MainWindow", "Save Session"))
+        self.actionSave_Session.setToolTip(_translate("MainWindow", "Save current session to avoid loading files"))
+        self.actionAddFont.setText(_translate("MainWindow", "Add Font"))
+        self.actionAddFont.setToolTip(_translate("MainWindow", "Add a TTF font to the font library"))
+        self.actionToXLSX.setText(_translate("MainWindow", "Convert STDF to XLSX"))
+        self.actionToXLSX.setToolTip(_translate("MainWindow", "Write STDF records to Excel sheets"))
