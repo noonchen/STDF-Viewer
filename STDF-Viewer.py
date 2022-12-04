@@ -1057,12 +1057,21 @@ class MyWindow(QtWidgets.QMainWindow):
                 yield datalogRow
     
     
-    def getImageBytesForReport(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
+    def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
         '''
         For report generator
+        #TODO fids current not used
         '''
-        chart = self.genPlot(testTuple, head, selectSites, tabType)
+        chart = self.genPlot(testTuple, head, sites, tabType)
         return pyqtGraphPlot2Bytes(chart)
+    
+    
+    def getTestStatisticForReport(self, head: int, sites: list[int], fids: list[int], tabType: tab, kargs: dict):
+        '''
+        For report generator, kargs contains (testTuple or isHBIN)
+        #TODO fids current not used
+        '''        
+        return []
     
     
     def clearCurrentTab(self, currentTab: tab):

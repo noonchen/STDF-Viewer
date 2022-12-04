@@ -171,11 +171,11 @@ class signals(QtCore.QObject):
     closeSignal = Signal(bool)
     # signals from report generation thread for requesting data
     
-    # testTuple, head, sites, chartType
-    retrieveImageSignal = Signal(tuple, int, list, tab)
+    # testTuple, head, sites, fids, chartType
+    retrieveImageSignal = Signal(tuple, int, list, list, tab)
     
-    #TODO chartType, {site, testTuple} / {site, bin}
-    retrieveDataListSignal = Signal(int, dict)
+    # head, sites, fids, chartType, {testTuple} or {isHBIN}
+    retrieveDataListSignal = Signal(int, list, list, tab, dict)
     
     # True, FileInfo table; False: DTR table
     retrieveTableDataSignal = Signal(bool)
@@ -214,20 +214,20 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
         
     
-    def waitForImage(self, testTuple: tuple, head: int, sites: list[int], chartType: tab) -> io.BytesIO:
+    def waitForImage(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], chartType: tab) -> io.BytesIO:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveImageSignal.emit(testTuple, head, sites, chartType)
+        self.retrieveImageSignal.emit(testTuple, head, sites, fids, chartType)
         self.condWait.wait(self.mutex)      # self.mutex is unlocked here
         self.mutex.unlock()
         # by the time the thread is waked, the data is already published in imageChannel in mainthread
         return self.channel.imageChannel
             
             
-    def waitForDataList(self, chartType, kargs) -> list:
+    def waitForDataList(self, head: int, sites: list[int], fids: list[int], chartType: tab, kargs: dict) -> list:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveDataListSignal.emit(chartType, kargs)
+        self.retrieveDataListSignal.emit(head, sites, fids, chartType, kargs)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         # same as waitForImage
@@ -365,6 +365,7 @@ class reportGenerator(QtCore.QObject):
         if DutSheet is None:
             return
 
+        return
         #TODO append test raw data to the last column
         max_width = 0
         test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, 
@@ -392,21 +393,21 @@ class reportGenerator(QtCore.QObject):
         for head, site in product(self.selectedHeads, self.selectedSites):
             if self.forceQuit: return
             # get bin image from GUI thread and insert to the sheet
-            image_io = self.waitForImage(testTuple=(0, 0, ""), head=head, sites=[site], chartType=tab.Bin)
+            image_io = self.waitForImage(testTuple=(0, 0, ""), head=head, sites=[site], fids=self.selectedFiles, chartType=tab.Bin)
             image_width, image_height = get_png_size(image_io)
             
             # rescale the width of the image to 12 inches
-            bin_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+            bin_scale = 12 / (image_width / 72)  # inches = pixel / dpi
             BinSheet.insert_image(sv.binRow, 0, "", {'x_scale': bin_scale, 'y_scale': bin_scale, 'image_data': image_io})
-            sv.binRow += ceil((image_height / 200) * bin_scale / 0.21)
+            sv.binRow += ceil((image_height / 72) * bin_scale / 0.21)
             
             # get hard bin list
-            dataList_HB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "HBIN"}))
+            dataList_HB = extractData(self.waitForDataList(head, [site], self.selectedFiles, tab.Bin, {"isHBIN": True}))
             BinSheet.write_row(sv.binRow, 0, dataList_HB, self.txWrapStyle)
             # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
             sv.binRow += 1
             # get soft bin list
-            dataList_SB = extractData(self.waitForDataList(tab.Bin, {"head": head, "site": site, "bin": "SBIN"}))
+            dataList_SB = extractData(self.waitForDataList(head, [site], self.selectedFiles, tab.Bin, {"isHBIN": False}))
             BinSheet.write_row(sv.binRow, 0, dataList_SB, self.txWrapStyle)
             # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
             sv.binRow += 3
@@ -424,12 +425,15 @@ class reportGenerator(QtCore.QObject):
         for wafer in self.waferTuples:
             if self.forceQuit: return
             # wafer map is already associated with head
-            image_io = self.waitForImage(wafer, 0, self.selectedSites, tab.Wafer)
+            image_io = self.waitForImage(wafer, 0, self.selectedSites, self.selectedFiles, tab.Wafer)
             image_width, image_height = get_png_size(image_io)
             # rescale the width of the image to 12 inches
-            wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+            wafer_scale = 12 / (image_width / 72)  # inches = pixel / dpi
             WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': wafer_scale, 'y_scale': wafer_scale, 'image_data': image_io})
-            sv.waferRow += ceil((image_height / 200) * wafer_scale / 0.21) + 2
+            sv.waferRow += ceil((image_height / 72) * wafer_scale / 0.21) + 2
+            # add wafer info
+            dataList = self.waitForDataList(0, self.selectedSites, self.selectedFiles, tab.Wafer, {"testTuple": wafer})
+            WaferSheet.write_row(sv.waferRow, 0, dataList, self.txWrapStyle)
             # gap between images
             sv.waferRow += 3
             self.loopCount += 1
@@ -442,18 +446,18 @@ class reportGenerator(QtCore.QObject):
             return
         
         # get image and stat from main thread
-        image_io = self.waitForImage(testTuple, head, [site], tab.Trend)
+        image_io = self.waitForImage(testTuple, head, [site], self.selectedFiles, tab.Trend)
         image_width, image_height = get_png_size(image_io)
         # rescale the width of the image to 12 inches
-        trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
-        dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple})
+        trend_scale = 12 / (image_width / 72)  # inches = pixel / dpi
+        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Trend, {"testTuple": testTuple})
         # insert into the work sheet
         TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
-        sv.trendRow += ceil((image_height / 200) * trend_scale / 0.21)
-        # TrendSheet.write_row(sv.trendRow, 0, header_stat, self.centerStyle)
+        sv.trendRow += ceil((image_height / 72) * trend_scale / 0.21)
+        #TODO TrendSheet.write_row(sv.trendRow, 0, header_stat, self.centerStyle)
         sv.trendRow += 1
         write_row_col(TrendSheet, sv.trendRow, 0, dataList, self.centerStyle, writeRow=True)
-        trend_col_width = [trend_col_width[col] if trend_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        # trend_col_width = [trend_col_width[col] if trend_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
         sv.trendRow += 2
         
         self.loopCount += 1
@@ -465,18 +469,18 @@ class reportGenerator(QtCore.QObject):
         if HistoSheet is None:
             return
         
-        image_io = self.waitForImage(testTuple, head, [site], tab.Histo)
-        dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "testTuple": testTuple})
-        #
+        image_io = self.waitForImage(testTuple, head, [site], self.selectedFiles, tab.Histo)
+        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Histo, {"testTuple": testTuple})
+        
         image_width, image_height = get_png_size(image_io)
         # rescale the width of the image to 12 inches
-        histo_scale = 12 / (image_width / 200)  # inches = pixel / dpi
+        histo_scale = 12 / (image_width / 72)  # inches = pixel / dpi
         HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': histo_scale, 'y_scale': histo_scale, 'image_data': image_io})
-        sv.histoRow += ceil((image_height / 200) * histo_scale / 0.21)
+        sv.histoRow += ceil((image_height / 72) * histo_scale / 0.21)
         # HistoSheet.write_row(sv.histoRow, 0, header_stat, self.centerStyle)
         sv.histoRow += 1
         write_row_col(HistoSheet, sv.histoRow, 0, dataList, self.centerStyle, writeRow=True)
-        histo_col_width = [histo_col_width[col] if histo_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        # histo_col_width = [histo_col_width[col] if histo_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
         sv.histoRow += 2
 
         self.loopCount += 1
@@ -489,21 +493,20 @@ class reportGenerator(QtCore.QObject):
         if StatSheet is None:
             return
         
-        if not hasStatHeader:
+        if not self.hasStatHeader:
             # StatSheet.write_row(sv.statRow, 0, header_stat, self.centerStyle)
             sv.statRow += 1
-            hasStatHeader = True    # avoid duplicated header
+            self.hasStatHeader = True    # avoid duplicated header
             
-        dataList = self.waitForDataList(tab.Trend, {"head": head, "site": site, "testTuple": testTuple})
+        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Trend, {"testTuple": testTuple})
         write_row_col(StatSheet, sv.statRow, 0, dataList, self.centerStyle, writeRow=True)
-        stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        # stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
         sv.statRow += 1
         
         self.loopCount += 1
         self.sendProgress()
         
         
-    
     @Slot()
     def generate_report(self):
         try:
@@ -574,10 +577,10 @@ class reportGenerator(QtCore.QObject):
             trend_col_width = []#[len(s) for s in header_stat]
             histo_col_width = []#[len(s) for s in header_stat]
             stat_col_width = []#[len(s) for s in header_stat]
-            hasStatHeader = False
+            self.hasStatHeader = False
             
             for testTuple in self.testTuples:
-                self.writeDUT_Testdata()
+                self.writeDUT_Testdata(testTuple)
                 
                 for head, site in product(self.selectedHeads, self.selectedSites):
                     if self.forceQuit: return
@@ -688,8 +691,8 @@ class progressDisplayer(QtWidgets.QDialog):
             self.close()
 
 
-    @Slot(tuple, int, list, tab)
-    def getImageFromParentMethod(self, testTuple: tuple, head: int, sites: list, chartType: tab):
+    @Slot(tuple, int, list, list, tab)
+    def getImageFromParentMethod(self, testTuple: tuple, head: int, sites: list, fids: list, chartType: tab):
         '''
         Lessons:
         1. Never access GUI objects from another thread, it will raise a segfault which is nearly not debuggable.
@@ -697,16 +700,15 @@ class progressDisplayer(QtWidgets.QDialog):
         the data immediately, because the executaion of slot is not determinable. Use a shared class instead.
         3. the mutex.lock() is used for preventing wakeAll() is called before wait().
         '''
-        self.channel.imageChannel = self.mainUI.getImageBytesForReport(testTuple, head, sites, chartType)
+        self.channel.imageChannel = self.mainUI.getImageBytesForReport(testTuple, head, sites, fids, chartType)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
     
     
-    @Slot(int, dict)
-    #TODO
-    def getDataListFromParentMethod(self, chartType, kargs):
-        self.channel.dataListChannel = self.mainUI.prepareStatTableContent(chartType, **kargs)
+    @Slot(int, list, list, tab, dict)
+    def getDataListFromParentMethod(self, head: int, sites: list, fids: list, chartType: tab, kargs: dict):
+        self.channel.dataListChannel = self.mainUI.getTestStatisticForReport(head, sites, fids, chartType, kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
