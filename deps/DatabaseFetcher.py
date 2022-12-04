@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -901,4 +901,30 @@ class DatabaseFetcher:
                 info[dutIndex] = full_tup
         
         return info
+
+
+    def getFullDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileIds: list[int]) -> list:
+        '''
+        return a list of `full dut info`
+        '''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+        
+        info = []
+        if len(heads) == 0 or len(sites) == 0:
+            return info
+
+        file_condition = f" Dut_Info.Fid in ({','.join(map(str, fileIds))})"
+        head_condition = f" AND HEAD_NUM in ({','.join(map(str, heads))})"
+        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({','.join(map(str, sites))})"
+        
+        sql = f'''{DUT_SUMMARY_QUERY} 
+                    WHERE {file_condition}{head_condition}{site_condition}
+                    ORDER By Dut_Info.Fid, DUTIndex'''
+        
+        for _, *full_tup in self.cursor.execute(sql):
+            info.append(full_tup)
+            
+        return info
+
+
 

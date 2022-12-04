@@ -653,6 +653,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dutInfoTable.hideColumn(1)
         else:
             self.ui.dutInfoTable.showColumn(1)
+        # # show all rows
+        # while self.tmodel_dut.canFetchMore():
+        #     self.tmodel_dut.fetchMore()
         
         
     def updateGDR_DTR_Table(self):
@@ -670,6 +673,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.datalogTable.hideColumn(0)
         else:
             self.ui.datalogTable.showColumn(0)
+        # # show all rows
+        # while self.tmodel_datalog.canFetchMore():
+        #     self.tmodel_datalog.fetchMore()
         
         
     def clearSearchBox(self):
@@ -1001,7 +1007,60 @@ class MyWindow(QtWidgets.QMainWindow):
         return None
             
             
+    def getFileInfoForReport(self):
+        # this table uses standarded model
+        model = self.tmodel_info
+        info = []
+        for row in range(model.rowCount()):
+            infoRow = []
+            for col in range(model.columnCount()):
+                d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+                infoRow.append(d if isinstance(d, str) else str(d))
+            info.append(infoRow)
+        return info
+    
+    
+    def getDUTSummaryForReport(self, heads: list[int], sites: list[int], fids: list[int] = []):
+        # TODO get dut summary from all files for now
+        fids = list(range(self.data_interface.num_files))
+        return self.data_interface.DatabaseFetcher.getFullDUTInfoOnCondition(heads, sites, fids)
+    
+    
+    def getDatalogForReport(self):
+        # this table uses sql query model
+        model = self.tmodel_datalog
+        
+        # # method 1: store complete data in a list
+        # while model.canFetchMore():
+        #     model.fetchMore()
+
+        # datalog = []
+        # for row in range(model.rowCount()):
+        #     datalogRow = []
+        #     for col in range(model.columnCount()):
+        #         d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+        #         datalogRow.append(d if isinstance(d, str) else "")
+        #     datalog.append(datalogRow)
+        # return datalog
+        
+        # method 2: use generator
+        row = 0
+        while model.canFetchMore():
+            model.fetchMore()
+            
+            while row < model.rowCount():
+                datalogRow = []
+                for col in range(model.columnCount()):
+                    d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+                    datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
+                row += 1
+                yield datalogRow
+    
+    
     def getImageBytesForReport(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
+        '''
+        For report generator
+        '''
         chart = self.genPlot(testTuple, head, selectSites, tabType)
         return pyqtGraphPlot2Bytes(chart)
     

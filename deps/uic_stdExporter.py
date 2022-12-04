@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -134,7 +134,7 @@ def write_row_col(sheet:Worksheet, row:int, col:int, dataL:list, cellFormat, wri
         if len(dataL) != len(cellFormat):
             raise ValueError("The length of data and formats should be the same")
             
-    for i in range(len(dataL)):
+    for i, data in enumerate(dataL):
         if writeRow:
             # row not changed, col increases with i
             tmpRow = row
@@ -146,9 +146,9 @@ def write_row_col(sheet:Worksheet, row:int, col:int, dataL:list, cellFormat, wri
             
         # write as number in default, otherwise as string
         try:
-            sheet.write_number(tmpRow, tmpCol, float(dataL[i]), cellFormat if broadcast else cellFormat[i])
+            sheet.write_number(tmpRow, tmpCol, float(data), cellFormat if broadcast else cellFormat[i])
         except (TypeError, ValueError):
-            sheet.write_string(tmpRow, tmpCol, dataL[i], cellFormat if broadcast else cellFormat[i])
+            sheet.write_string(tmpRow, tmpCol, data, cellFormat if broadcast else cellFormat[i])
 
 
 def getMaxLength(lenList: list[int], dataList: list[str]) -> list[int]:
@@ -170,10 +170,18 @@ class signals(QtCore.QObject):
     # get close signal
     closeSignal = Signal(bool)
     # signals from report generation thread for requesting data
-    retrieveImageSignal = Signal(int, int, tuple, int)     # head, site, testTuple, chartType
-    retrieveDataListSignal = Signal(int, dict)      # chartType, {site, testTuple} / {site, bin}
-    retrieveTableDataSignal = Signal(int)           # FileInfo table
-    retrieveDutSummarySignal = Signal(list, list, dict)   # selected heads, selected sites, {testTuple}, get dut info or dut test data
+    
+    # testTuple, head, sites, chartType
+    retrieveImageSignal = Signal(tuple, int, list, tab)
+    
+    #TODO chartType, {site, testTuple} / {site, bin}
+    retrieveDataListSignal = Signal(int, dict)
+    
+    # True, FileInfo table; False: DTR table
+    retrieveTableDataSignal = Signal(bool)
+    
+    # selected heads, selected sites, selected files, {testTuple}, get dut info or dut test data
+    retrieveDutSummarySignal = Signal(list, list, list, dict)
     
     
     
@@ -184,6 +192,7 @@ class reportGenerator(QtCore.QObject):
         self.mutex = mutex
         self.condWait = conditionWait
         self.loopCount = 0
+        self.sheetDict = {}
         (self.selectedContents, 
          self.testTuples, 
          self.selectedFiles, 
@@ -205,10 +214,10 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
         
     
-    def waitForImage(self, head, site, testTuple, chartType) -> io.BytesIO:
+    def waitForImage(self, testTuple: tuple, head: int, sites: list[int], chartType: tab) -> io.BytesIO:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveImageSignal.emit(head, site, testTuple, chartType)
+        self.retrieveImageSignal.emit(testTuple, head, sites, chartType)
         self.condWait.wait(self.mutex)      # self.mutex is unlocked here
         self.mutex.unlock()
         # by the time the thread is waked, the data is already published in imageChannel in mainthread
@@ -225,17 +234,17 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel
     
     
-    def waitForTableData(self, conType) -> list[str]:
+    def waitForTableData(self, isFileInfo: bool) -> list[str]:
         self.mutex.lock()
-        self.retrieveTableDataSignal.emit(conType)
+        self.retrieveTableDataSignal.emit(isFileInfo)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
     
     
-    def waitForDutSummary(self, selectedHeads, selectedSites, kargs):
+    def waitForDutSummary(self, selectedHeads: list[int], selectedSites: list[int], selectedFiles: list[int], kargs: dict):
         self.mutex.lock()
-        self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, kargs)
+        self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, selectedFiles, kargs)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
@@ -255,8 +264,8 @@ class reportGenerator(QtCore.QObject):
         
         InfoSheet.write_row(sv.finfoRow, sv.finfoCol, headerLabels, self.centerStyle)
         sv.finfoRow += 1
-        #TODO get file info table
-        dataTable = self.waitForTableData(tab.FileInfo)
+        # get file info table
+        dataTable = self.waitForTableData(isFileInfo=True)
                                 
         for dataRow in dataTable:
             if self.forceQuit: return
@@ -282,8 +291,7 @@ class reportGenerator(QtCore.QObject):
         
         GDR_DTR_Sheet.write_row(sv.drRow, sv.drCol, headerLabels, self.centerStyle)
         sv.drRow += 1
-        #TODO
-        dataTable = self.waitForTableData(tab.GDR_DTR)
+        dataTable = self.waitForTableData(isFileInfo=False)
                                 
         for dataRow in dataTable:
             if self.forceQuit: return
@@ -306,7 +314,10 @@ class reportGenerator(QtCore.QObject):
         if DutSheet is None:
             return
         
-        headerLabelList = [["", self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), self.tr("Software Bin"), self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
+        headerLabelList = [["", self.tr("File ID"), self.tr("Part ID"), 
+                            self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
+                            self.tr("Hardware Bin"), self.tr("Software Bin"), 
+                            self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
                             [self.tr("Test Number")],
                             [self.tr("Upper Limit")],
                             [self.tr("Lower Limit")],
@@ -320,11 +331,14 @@ class reportGenerator(QtCore.QObject):
             sv.dutRow += 1
         # write DUT info
         # 2d, row: dut info of a dut, col: [id, site, ...]
-        summaryTable = self.waitForDutSummary(self.selectedHeads, self.selectedSites, {})
+        summaryTable = self.waitForDutSummary(self.selectedHeads, 
+                                              self.selectedSites, 
+                                              self.selectedFiles, {})
         for ind, dataRow in enumerate(summaryTable):
             if self.forceQuit: return
             
-            dataRow = ["#%d" % (ind+1)] + dataRow
+            # convert all elements to str
+            dataRow = ["#%d" % (ind+1)] + [d if isinstance(d, str) else str(d) for d in dataRow]
             # choose style by dut flag
             dutFlag: str = dataRow[-1]
             if dutFlag.startswith("P"):
@@ -351,9 +365,12 @@ class reportGenerator(QtCore.QObject):
         if DutSheet is None:
             return
 
-        #append test raw data to the last column
+        #TODO append test raw data to the last column
         max_width = 0
-        test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, self.selectedSites, {"testTuple": testTuple})
+        test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, 
+                                                                self.selectedSites, 
+                                                                self.selectedFiles, 
+                                                                {"testTuple": testTuple})
         data_style_list = [self.centerStyle if stat else self.failedStyle for stat in test_stat_list]
         write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
         max_width = max([len(s) for s in test_data_list])
@@ -364,7 +381,7 @@ class reportGenerator(QtCore.QObject):
         self.sendProgress()
 
 
-    def writeBinChart(self, BinSheet: Worksheet):
+    def writeBinChart(self):
         BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
         if BinSheet is None:
             return
@@ -375,7 +392,7 @@ class reportGenerator(QtCore.QObject):
         for head, site in product(self.selectedHeads, self.selectedSites):
             if self.forceQuit: return
             # get bin image from GUI thread and insert to the sheet
-            image_io = self.waitForImage(head=head, site=site, testTuple=(0, 0, ""), chartType=tab.Bin)
+            image_io = self.waitForImage(testTuple=(0, 0, ""), head=head, sites=[site], chartType=tab.Bin)
             image_width, image_height = get_png_size(image_io)
             
             # rescale the width of the image to 12 inches
@@ -406,7 +423,8 @@ class reportGenerator(QtCore.QObject):
         
         for wafer in self.waferTuples:
             if self.forceQuit: return
-            image_io = self.waitForImage(chartType=tab.Wafer)
+            # wafer map is already associated with head
+            image_io = self.waitForImage(wafer, 0, self.selectedSites, tab.Wafer)
             image_width, image_height = get_png_size(image_io)
             # rescale the width of the image to 12 inches
             wafer_scale = 12 / (image_width / 200)  # inches = pixel / dpi
@@ -424,7 +442,7 @@ class reportGenerator(QtCore.QObject):
             return
         
         # get image and stat from main thread
-        image_io = self.waitForImage(head, site, testTuple, tab.Trend)
+        image_io = self.waitForImage(testTuple, head, [site], tab.Trend)
         image_width, image_height = get_png_size(image_io)
         # rescale the width of the image to 12 inches
         trend_scale = 12 / (image_width / 200)  # inches = pixel / dpi
@@ -447,7 +465,7 @@ class reportGenerator(QtCore.QObject):
         if HistoSheet is None:
             return
         
-        image_io = self.waitForImage(head, site, testTuple, tab.Histo)
+        image_io = self.waitForImage(testTuple, head, [site], tab.Histo)
         dataList = self.waitForDataList(tab.Histo, {"head": head, "site": site, "testTuple": testTuple})
         #
         image_width, image_height = get_png_size(image_io)
@@ -488,32 +506,23 @@ class reportGenerator(QtCore.QObject):
     
     @Slot()
     def generate_report(self):
-        import time
-        time.sleep(5)
-        print("done")
-        print(self.selectedContents, 
-         self.testTuples, 
-         self.selectedFiles, 
-         self.selectedHeads, 
-         self.selectedSites, 
-         self.reportPath, 
-         self.waferTuples, 
-         self.totalLoopCnt)
-        self.closeSignal.emit(True)
-        return
-        # test if the filepath is writable
         try:
             test_f = open(self.reportPath, "ab+")
             test_f.close()
+            
+            self.report_core()
         except Exception as e:
             self.msgSignal.emit("Error@@@" + repr(e))
             self.closeSignal.emit(True)
             return
             
+        
+    def report_core(self):
         with Workbook(self.reportPath) as wb:
             self.centerStyle = wb.add_format({"align": "center", "valign": "vjustify"})
-            self.failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#CC0000", "bold": True})
-            self.unknownStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": "#FE7B00", "bold": True})
+            self.failedStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": FAIL_DUT_COLOR, "bold": True})
+            self.overrideStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": OVRD_DUT_COLOR, "bold": True})
+            self.unknownStyle = wb.add_format({"align": "center", "valign": "vjustify", "bg_color": UNKN_DUT_COLOR, "bold": True})
             # style with newline
             self.txWrapStyle = wb.add_format({"align": "center", "valign": "vjustify"})
             self.txWrapStyle.set_text_wrap()
@@ -523,7 +532,7 @@ class reportGenerator(QtCore.QObject):
             # 3. loop thru test numbers, write dut summary (test data part).
             # 4. loop thru site & head to get images
             self.sheetDict = {}
-            loopCnt = 0
+            self.loopCount = 0
             sv.init_variables()
                         
             for cont in [ReportSelection.FileInfo, ReportSelection.DUT, 
@@ -545,7 +554,7 @@ class reportGenerator(QtCore.QObject):
                 if cont in self.selectedContents:       self.sheetDict[cont] = wb.add_worksheet(sheetName)
             
             # ** write contents independent of test numbers
-            # file info                
+            # file info
             self.writeFileInfo()
             if self.forceQuit: return
             # GDR & DTR Summary
@@ -567,7 +576,7 @@ class reportGenerator(QtCore.QObject):
             stat_col_width = []#[len(s) for s in header_stat]
             hasStatHeader = False
             
-            for testTuple in self.testTuples:                
+            for testTuple in self.testTuples:
                 self.writeDUT_Testdata()
                 
                 for head, site in product(self.selectedHeads, self.selectedSites):
@@ -595,6 +604,8 @@ class progressDisplayer(QtWidgets.QDialog):
         super().__init__(parent)
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
+        # ref to top UI
+        self.mainUI = parent.mainUI
         self.closeEventByThread = False
         self.errorOccured = False
         # thread sync
@@ -645,8 +656,8 @@ class progressDisplayer(QtWidgets.QDialog):
                 event.accept()
             else:
                 event.ignore()
-             
-                    
+
+
     @Slot(str)
     def showMsg(self, msg:str):
         msgType, msgContent = msg.split("@@@")
@@ -677,8 +688,8 @@ class progressDisplayer(QtWidgets.QDialog):
             self.close()
 
 
-    @Slot(int, int, tuple, int)
-    def getImageFromParentMethod(self, head, site, testTuple, chartType):
+    @Slot(tuple, int, list, tab)
+    def getImageFromParentMethod(self, testTuple: tuple, head: int, sites: list, chartType: tab):
         '''
         Lessons:
         1. Never access GUI objects from another thread, it will raise a segfault which is nearly not debuggable.
@@ -686,53 +697,44 @@ class progressDisplayer(QtWidgets.QDialog):
         the data immediately, because the executaion of slot is not determinable. Use a shared class instead.
         3. the mutex.lock() is used for preventing wakeAll() is called before wait().
         '''
-        self.channel.imageChannel = self.parent().parent.genPlot(head, site, testTuple, chartType, exportImg=True)
+        self.channel.imageChannel = self.mainUI.getImageBytesForReport(testTuple, head, sites, chartType)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
     
     
     @Slot(int, dict)
+    #TODO
     def getDataListFromParentMethod(self, chartType, kargs):
-        self.channel.dataListChannel = self.parent().parent.prepareStatTableContent(chartType, **kargs)
+        self.channel.dataListChannel = self.mainUI.prepareStatTableContent(chartType, **kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
           
           
-    @Slot(int)
-    def getTableDataFromParent(self, conType):
-        model = None
-        data = []
-        if conType == tab.DUT:
-            # source model, contains all dut regardless of head/site selection
-            model = self.parent().parent.tmodel_dut
-        elif conType == tab.FileInfo:
-            model = self.parent().parent.tmodel_info
-        elif conType == tab.GDR_DTR:
-            model = self.parent().parent.tmodel_datalog
-            
-        if model:
-            for row in range(model.rowCount()):
-                data.append([])
-                for column in range(model.columnCount()):
-                    index = model.index(row, column)
-                    data[row].append(str(model.data(index)))
-                    
-        self.channel.dataListChannel = data
+    @Slot(bool)
+    def getTableDataFromParent(self, isFileInfo: bool):
+        if isFileInfo:                    
+            self.channel.dataListChannel = self.mainUI.getFileInfoForReport()
+        else:
+            self.channel.dataListChannel = self.mainUI.getDatalogForReport()
         self.mutex.lock()
         self.condWait.wakeAll()
         self.mutex.unlock()
         
         
-    @Slot(list, list, dict)
-    def getDutSummaryFromParent(self, selectedHeads, seletedSites, kargs):
-        self.channel.dataListChannel = self.parent().parent.prepareDUTSummaryForExporter(selectedHeads, seletedSites, **kargs)
+    @Slot(list, list, list, dict)
+    def getDutSummaryFromParent(self, selectedHeads: list, seletedSites: list, selectedFiles: list, kargs: dict):
+        if len(kargs) == 0:
+            self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles)
+        else:
+            #TODO
+            self.channel.dataListChannel = self.mainUI.prepareDUTSummaryForExporter(selectedHeads, seletedSites, **kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
         
-                
+
 
 class stdfExporter(QtWidgets.QDialog):
     
@@ -754,7 +756,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.initTestListBox()
         # init search-related UI
         self.exportUI.SearchBox.textChanged.connect(self.searchInBox)
-        self.exportUI.Clear.clicked.connect(lambda: self.exportUI.SearchBox.clear())
+        self.exportUI.Clear.clicked.connect(self.exportUI.SearchBox.clear)
         # bind func to buttons
         self.exportUI.Addbutton.clicked.connect(self.onAdd)
         self.exportUI.AddAllbutton.clicked.connect(self.onAddAll)
@@ -1133,6 +1135,8 @@ class stdfExporter(QtWidgets.QDialog):
                  selectedSites, reportPath, 
                  waferTuples, totalLoopCnt)
         self.pd.setReportInfo(rinfo)
+        # self.pd.getDutSummaryFromParent([1], [-1], [0, 1], {})
+        # print(self.pd.channel.dataListChannel)
         self.pd.start()
         if self.pd.errorOccured:
             # error occured
@@ -1161,7 +1165,7 @@ class stdfExporter(QtWidgets.QDialog):
         elif msgbox.clickedButton() == openBtn:
             openFileInOS(reportPath)
 
-                
+
     def closeEvent(self, event):
         # close by clicking X
         # close = QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QMessageBox.Yes | QMessageBox.No, defaultButton=QMessageBox.No)
