@@ -916,8 +916,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
-                                                      self.getCheckedSites(), 
-                                                      floatFormat=settings.getFloatFormat())
+                                                      self.getCheckedSites())
             HHeader = d["HHeader"]
             indexOfFail = HHeader.index("Fail Num")
             indexOfCpk = HHeader.index("Cpk")
@@ -1066,12 +1065,35 @@ class MyWindow(QtWidgets.QMainWindow):
         return pyqtGraphPlot2Bytes(chart)
     
     
-    def getTestStatisticForReport(self, head: int, sites: list[int], fids: list[int], tabType: tab, kargs: dict):
+    def getTestStatisticForReport(self, heads: list[int], sites: list[int], fids: list[int], tabType: tab, kargs: dict):
         '''
         For report generator, kargs contains (testTuple or isHBIN)
         #TODO fids current not used
-        '''        
-        return []
+        '''
+        data = []
+        if tabType in [tab.Trend, tab.Histo, tab.PPQQ]:
+            testTuples = kargs["testTuples"]
+            d = self.data_interface.getTestStatistics(testTuples, heads, sites)
+            # add translated hheader, put an empty string for matching
+            data.append([""] + [self.tr(h) for h in d["HHeader"]])
+            # vheader + statistics
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                data.append([vh] + dataRow)            
+            
+        elif tabType == tab.Bin:
+            isHBIN = kargs["isHBIN"]
+            d = self.data_interface.getBinStatistics(heads, sites)
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                if isHBIN == dataRow[0][-1]:
+                    data.append([vh] + [ele[0] for ele in dataRow])
+        
+        elif tabType == tab.Wafer:
+            waferTuples = kargs["testTuples"]
+            d = self.data_interface.getWaferStatistics(waferTuples, sites)
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                data.append([vh] + [ele[0] for ele in dataRow])
+
+        return data
     
     
     def clearCurrentTab(self, currentTab: tab):

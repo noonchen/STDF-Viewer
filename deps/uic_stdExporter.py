@@ -174,8 +174,8 @@ class signals(QtCore.QObject):
     # testTuple, head, sites, fids, chartType
     retrieveImageSignal = Signal(tuple, int, list, list, tab)
     
-    # head, sites, fids, chartType, {testTuple} or {isHBIN}
-    retrieveDataListSignal = Signal(int, list, list, tab, dict)
+    # heads, sites, fids, chartType, {testTupleS} or {isHBIN}
+    retrieveDataListSignal = Signal(list, list, list, tab, dict)
     
     # True, FileInfo table; False: DTR table
     retrieveTableDataSignal = Signal(bool)
@@ -224,10 +224,10 @@ class reportGenerator(QtCore.QObject):
         return self.channel.imageChannel
             
             
-    def waitForDataList(self, head: int, sites: list[int], fids: list[int], chartType: tab, kargs: dict) -> list:
+    def waitForDataList(self, heads: list[int], sites: list[int], fids: list[int], chartType: tab, kargs: dict) -> list:
         # pause thread until the data is received from gui thread
         self.mutex.lock()
-        self.retrieveDataListSignal.emit(head, sites, fids, chartType, kargs)
+        self.retrieveDataListSignal.emit(heads, sites, fids, chartType, kargs)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         # same as waitForImage
@@ -387,9 +387,8 @@ class reportGenerator(QtCore.QObject):
         if BinSheet is None:
             return
         
-        # discard bin number (ele[1])
-        extractData = lambda L: [ele if ind == 0 else ele[0] for ind, ele in enumerate(L)]
         maxColWidth = []
+        getMaxSeg = lambda s: max([len(seg) for seg in s.split("\n")])
         for head, site in product(self.selectedHeads, self.selectedSites):
             if self.forceQuit: return
             # get bin image from GUI thread and insert to the sheet
@@ -402,19 +401,23 @@ class reportGenerator(QtCore.QObject):
             sv.binRow += ceil((image_height / 72) * bin_scale / 0.21)
             
             # get hard bin list
-            dataList_HB = extractData(self.waitForDataList(head, [site], self.selectedFiles, tab.Bin, {"isHBIN": True}))
-            BinSheet.write_row(sv.binRow, 0, dataList_HB, self.txWrapStyle)
-            # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_HB)]
-            sv.binRow += 1
+            dataTable_HB = self.waitForDataList([head], [site], self.selectedFiles, tab.Bin, {"isHBIN": True})
+            for dataList_HB in dataTable_HB:
+                BinSheet.write_row(sv.binRow, 0, dataList_HB, self.txWrapStyle)
+                sv.binRow += 1
             # get soft bin list
-            dataList_SB = extractData(self.waitForDataList(head, [site], self.selectedFiles, tab.Bin, {"isHBIN": False}))
-            BinSheet.write_row(sv.binRow, 0, dataList_SB, self.txWrapStyle)
-            # col_width = [max([len(s) for s in s.split("\n")]) if col_width[col:col+1] == [] or max([len(s) for s in s.split("\n")]) > col_width[col] else col_width[col] for col, s in enumerate(dataList_SB)]
+            dataTable_SB = self.waitForDataList([head], [site], self.selectedFiles, tab.Bin, {"isHBIN": False})
+            for dataList_SB in dataTable_SB:
+                BinSheet.write_row(sv.binRow, 0, dataList_SB, self.txWrapStyle)
+                sv.binRow += 1
             sv.binRow += 3
+            
+            for l in (dataTable_HB + dataTable_SB):
+                maxColWidth = [getMaxSeg(s) if maxColWidth[col:col+1] == [] or getMaxSeg(s) > maxColWidth[col] else maxColWidth[col] for col, s in enumerate(l)]
             
         self.loopCount += 1
         self.sendProgress()
-        # _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(col_width)]
+        _ = [BinSheet.set_column(col, col, width*1.1) for col, width in enumerate(maxColWidth)]
 
 
     def writeWaferMap(self):
@@ -432,15 +435,17 @@ class reportGenerator(QtCore.QObject):
             WaferSheet.insert_image(sv.waferRow, 0, "", {'x_scale': wafer_scale, 'y_scale': wafer_scale, 'image_data': image_io})
             sv.waferRow += ceil((image_height / 72) * wafer_scale / 0.21) + 2
             # add wafer info
-            dataList = self.waitForDataList(0, self.selectedSites, self.selectedFiles, tab.Wafer, {"testTuple": wafer})
-            WaferSheet.write_row(sv.waferRow, 0, dataList, self.txWrapStyle)
+            dataTable = self.waitForDataList([], self.selectedSites, self.selectedFiles, tab.Wafer, {"testTuples": [wafer]})
+            for dataList in dataTable:
+                WaferSheet.write_row(sv.waferRow, 0, dataList, self.txWrapStyle)
+                sv.waferRow += 1
             # gap between images
             sv.waferRow += 3
             self.loopCount += 1
             self.sendProgress()
 
 
-    def writeTrendPlot(self, testTuple, head, site):
+    def writeTrendPlot(self, testTuple: tuple, head: int, site: int):
         TrendSheet:Worksheet = self.sheetDict.get(ReportSelection.Trend, None)
         if TrendSheet is None:
             return
@@ -450,61 +455,57 @@ class reportGenerator(QtCore.QObject):
         image_width, image_height = get_png_size(image_io)
         # rescale the width of the image to 12 inches
         trend_scale = 12 / (image_width / 72)  # inches = pixel / dpi
-        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Trend, {"testTuple": testTuple})
+        dataTable = self.waitForDataList([head], [site], self.selectedFiles, tab.Trend, {"testTuples": [testTuple]})
         # insert into the work sheet
         TrendSheet.insert_image(sv.trendRow, 0, "", {'x_scale': trend_scale, 'y_scale': trend_scale, 'image_data': image_io})
         sv.trendRow += ceil((image_height / 72) * trend_scale / 0.21)
-        #TODO TrendSheet.write_row(sv.trendRow, 0, header_stat, self.centerStyle)
-        sv.trendRow += 1
-        write_row_col(TrendSheet, sv.trendRow, 0, dataList, self.centerStyle, writeRow=True)
-        # trend_col_width = [trend_col_width[col] if trend_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        
+        for dataList in dataTable:
+            write_row_col(TrendSheet, sv.trendRow, 0, dataList, self.centerStyle, writeRow=True)
+            sv.trendRow += 1
         sv.trendRow += 2
         
         self.loopCount += 1
         self.sendProgress()
 
 
-    def writeHistogram(self, testTuple, head, site):
+    def writeHistogram(self, testTuple: tuple, head: int, site: int):
         HistoSheet:Worksheet = self.sheetDict.get(ReportSelection.Histo, None)
         if HistoSheet is None:
             return
         
         image_io = self.waitForImage(testTuple, head, [site], self.selectedFiles, tab.Histo)
-        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Histo, {"testTuple": testTuple})
+        dataTable = self.waitForDataList([head], [site], self.selectedFiles, tab.Histo, {"testTuples": [testTuple]})
         
         image_width, image_height = get_png_size(image_io)
         # rescale the width of the image to 12 inches
         histo_scale = 12 / (image_width / 72)  # inches = pixel / dpi
         HistoSheet.insert_image(sv.histoRow, 0, "", {'x_scale': histo_scale, 'y_scale': histo_scale, 'image_data': image_io})
         sv.histoRow += ceil((image_height / 72) * histo_scale / 0.21)
-        # HistoSheet.write_row(sv.histoRow, 0, header_stat, self.centerStyle)
-        sv.histoRow += 1
-        write_row_col(HistoSheet, sv.histoRow, 0, dataList, self.centerStyle, writeRow=True)
-        # histo_col_width = [histo_col_width[col] if histo_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
+        
+        for dataList in dataTable:
+            write_row_col(HistoSheet, sv.histoRow, 0, dataList, self.centerStyle, writeRow=True)
+            sv.histoRow += 1
         sv.histoRow += 2
 
         self.loopCount += 1
         self.sendProgress()
         
     
-    def writeStatistic(self, testTuple, head, site):
+    def writeStatistic(self, testTuples: list, heads: list[int], sites: list[int]):
         # Sheet for statistics of test items, e.g. cpk, mean, etc.
         StatSheet:Worksheet = self.sheetDict.get(ReportSelection.Stat, None)
         if StatSheet is None:
             return
-        
-        if not self.hasStatHeader:
-            # StatSheet.write_row(sv.statRow, 0, header_stat, self.centerStyle)
-            sv.statRow += 1
-            self.hasStatHeader = True    # avoid duplicated header
             
-        dataList = self.waitForDataList(head, [site], self.selectedFiles, tab.Trend, {"testTuple": testTuple})
-        write_row_col(StatSheet, sv.statRow, 0, dataList, self.centerStyle, writeRow=True)
-        # stat_col_width = [stat_col_width[col] if stat_col_width[col]>len(s) else len(s) for col, s in enumerate(dataList)]
-        sv.statRow += 1
-        
-        self.loopCount += 1
-        self.sendProgress()
+        dataTable = self.waitForDataList(heads, sites, self.selectedFiles, tab.Trend, {"testTuples": testTuples})
+        for dataRow in dataTable:
+            if self.forceQuit: return
+            
+            write_row_col(StatSheet, sv.statRow, 0, dataRow, self.centerStyle, writeRow=True)
+            sv.statRow += 1
+            self.loopCount += 1
+            self.sendProgress()
         
         
     @Slot()
@@ -574,11 +575,8 @@ class reportGenerator(QtCore.QObject):
             if self.forceQuit: return
             
             # ** write contents related to test numbers
-            trend_col_width = []#[len(s) for s in header_stat]
-            histo_col_width = []#[len(s) for s in header_stat]
-            stat_col_width = []#[len(s) for s in header_stat]
-            self.hasStatHeader = False
-            
+            self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
+
             for testTuple in self.testTuples:
                 self.writeDUT_Testdata(testTuple)
                 
@@ -587,16 +585,13 @@ class reportGenerator(QtCore.QObject):
 
                     self.writeTrendPlot(testTuple, head, site)
                     self.writeHistogram(testTuple, head, site)
-                    self.writeStatistic(testTuple, head, site)
                 
                 # we can safely modify these constants without if statement checking
                 sv.trendRow += 2     # add gap between different test items
                 sv.histoRow += 2     # add gap between different test items
-                sv.statRow += 1     # add gap between different test items
             
             # if tab.Trend in self.contL: [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(trend_col_width)]
             # if tab.Histo in self.contL: [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(histo_col_width)]
-            # if tab.Stat in self.contL: [StatSheet.set_column(col, col, width*1.1) for col, width in enumerate(stat_col_width)]
         self.closeSignal.emit(True)
         
           
@@ -706,9 +701,9 @@ class progressDisplayer(QtWidgets.QDialog):
         self.mutex.unlock()
     
     
-    @Slot(int, list, list, tab, dict)
-    def getDataListFromParentMethod(self, head: int, sites: list, fids: list, chartType: tab, kargs: dict):
-        self.channel.dataListChannel = self.mainUI.getTestStatisticForReport(head, sites, fids, chartType, kargs)
+    @Slot(list, list, list, tab, dict)
+    def getDataListFromParentMethod(self, heads: list, sites: list, fids: list, chartType: tab, kargs: dict):
+        self.channel.dataListChannel = self.mainUI.getTestStatisticForReport(heads, sites, fids, chartType, kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
@@ -1070,6 +1065,10 @@ class stdfExporter(QtWidgets.QDialog):
                 self.exportUI.stackedWidget.setCurrentIndex(2)
                 self.changeBtnStyle()
                 
+            elif len(selectedContents) == 0:
+                QMessageBox.warning(self, self.tr("Warning"), self.tr("Select at least one report content\n"))
+                return
+            
             else:
                 # only file info & GDR/DTR are selected
                 self.start()
