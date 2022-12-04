@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -653,6 +653,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dutInfoTable.hideColumn(1)
         else:
             self.ui.dutInfoTable.showColumn(1)
+        # # show all rows
+        # while self.tmodel_dut.canFetchMore():
+        #     self.tmodel_dut.fetchMore()
         
         
     def updateGDR_DTR_Table(self):
@@ -670,6 +673,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.datalogTable.hideColumn(0)
         else:
             self.ui.datalogTable.showColumn(0)
+        # # show all rows
+        # while self.tmodel_datalog.canFetchMore():
+        #     self.tmodel_datalog.fetchMore()
         
         
     def clearSearchBox(self):
@@ -910,8 +916,7 @@ class MyWindow(QtWidgets.QMainWindow):
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
-                                                      self.getCheckedSites(), 
-                                                      floatFormat=settings.getFloatFormat())
+                                                      self.getCheckedSites())
             HHeader = d["HHeader"]
             indexOfFail = HHeader.index("Fail Num")
             indexOfCpk = HHeader.index("Cpk")
@@ -1001,6 +1006,103 @@ class MyWindow(QtWidgets.QMainWindow):
         return None
             
             
+    def getFileInfoForReport(self):
+        # this table uses standarded model
+        model = self.tmodel_info
+        info = []
+        for row in range(model.rowCount()):
+            infoRow = []
+            for col in range(model.columnCount()):
+                d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+                infoRow.append(d if isinstance(d, str) else str(d))
+            info.append(infoRow)
+        return info
+    
+    
+    def getDUTSummaryForReport(self, heads: list[int], sites: list[int], fids: list[int], kargs: dict):
+        # TODO get dut summary from all files for now
+        fids = list(range(self.data_interface.num_files))
+        
+        if "testTuples" in kargs:
+            testTuples = kargs["testTuples"]
+            #TODO a little complex... do it later..
+            tdata = self.data_interface.getTestDataTableContent(testTuples, heads, sites)
+            return tdata
+        else:
+            return self.data_interface.DatabaseFetcher.getFullDUTInfoOnCondition(heads, sites, fids)
+    
+    
+    def getDatalogForReport(self):
+        # this table uses sql query model
+        model = self.tmodel_datalog
+        
+        # # method 1: store complete data in a list
+        # while model.canFetchMore():
+        #     model.fetchMore()
+
+        # datalog = []
+        # for row in range(model.rowCount()):
+        #     datalogRow = []
+        #     for col in range(model.columnCount()):
+        #         d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+        #         datalogRow.append(d if isinstance(d, str) else "")
+        #     datalog.append(datalogRow)
+        # return datalog
+        
+        # method 2: use generator
+        row = 0
+        while model.canFetchMore():
+            model.fetchMore()
+            
+            while row < model.rowCount():
+                datalogRow = []
+                for col in range(model.columnCount()):
+                    d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
+                    datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
+                row += 1
+                yield datalogRow
+    
+    
+    def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
+        '''
+        For report generator
+        #TODO fids current not used
+        '''
+        chart = self.genPlot(testTuple, head, sites, tabType)
+        return pyqtGraphPlot2Bytes(chart)
+    
+    
+    def getTestStatisticForReport(self, heads: list[int], sites: list[int], fids: list[int], tabType: tab, kargs: dict):
+        '''
+        For report generator, kargs contains (testTuple or isHBIN)
+        #TODO fids current not used
+        '''
+        data = []
+        if tabType in [tab.Trend, tab.Histo, tab.PPQQ]:
+            testTuples = kargs["testTuples"]
+            d = self.data_interface.getTestStatistics(testTuples, heads, sites)
+            # add translated hheader, put an empty string for matching
+            data.append([""] + [self.tr(h) for h in d["HHeader"]])
+            # vheader + statistics
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                data.append([vh] + dataRow)            
+            
+        elif tabType == tab.Bin:
+            isHBIN = kargs["isHBIN"]
+            d = self.data_interface.getBinStatistics(heads, sites)
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                if isHBIN == dataRow[0][-1]:
+                    data.append([vh] + [ele[0] for ele in dataRow])
+        
+        elif tabType == tab.Wafer:
+            waferTuples = kargs["testTuples"]
+            d = self.data_interface.getWaferStatistics(waferTuples, sites)
+            for vh, dataRow in zip(d["VHeader"], d["Rows"]):
+                data.append([vh] + [ele[0] for ele in dataRow])
+
+        return data
+    
+    
     def clearCurrentTab(self, currentTab: tab):
         layout: QtWidgets.QVBoxLayout = self.tab_dict[currentTab]["layout"]
         # put widgets in a list and delete at once

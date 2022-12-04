@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -124,8 +124,8 @@ class DutSortFilter(QSortFilterProxyModel):
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
         if left.column() == right.column():
             # get text in the cell
-            textLeft = self.sourceModel().data(left, QtCore.Qt.DisplayRole)
-            textRight = self.sourceModel().data(right, QtCore.Qt.DisplayRole)
+            textLeft = self.sourceModel().data(left, Qt.ItemDataRole.DisplayRole)
+            textRight = self.sourceModel().data(right, Qt.ItemDataRole.DisplayRole)
             try:
                 if (left.column() == self.fidColInd or 
                     left.column() == self.pidColInd):
@@ -182,7 +182,7 @@ class DutSortFilter(QSortFilterProxyModel):
     def filterAcceptsRow(self, source_row: int, source_parent: QtCore.QModelIndex) -> bool:
         hsIndex = self.sourceModel().index(source_row, self.hsColInd, source_parent)
         
-        hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex, QtCore.Qt.DisplayRole)).hasMatch()
+        hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex, Qt.ItemDataRole.DisplayRole)).hasMatch()
         
         return hsMatched
     
@@ -281,15 +281,15 @@ class ColorSqlQueryModel(QtSql.QSqlQueryModel):
                 if role == QtCore.Qt.ItemDataRole.ForegroundRole:
                     if dutFlag.startswith("Fail") or dutFlag.startswith("Supersede"):
                         # set to font color to white
-                        return QtGui.QColor("#FFFFFF")
+                        return QtGui.QColor(WHITE_COLOR)
                 
                 elif role == QtCore.Qt.ItemDataRole.BackgroundColorRole:
                     # mark fail row as red
-                    if dutFlag.startswith("Fail"): return QtGui.QColor("#CC0000")
+                    if dutFlag.startswith("Fail"): return QtGui.QColor(FAIL_DUT_COLOR)
                     # mark superseded row as gray
-                    elif dutFlag.startswith("Supersede"): return QtGui.QColor("#D0D0D0")
+                    elif dutFlag.startswith("Supersede"): return QtGui.QColor(OVRD_DUT_COLOR)
                     # mark unknown as orange
-                    elif dutFlag.startswith("Unknown"): return QtGui.QColor("#FE7B00")
+                    elif dutFlag.startswith("Unknown"): return QtGui.QColor(UNKN_DUT_COLOR)
                 
                 elif role == QtCore.Qt.ItemDataRole.ToolTipRole:
                     if not dutFlag.startswith("Pass"): 
@@ -432,15 +432,15 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                 if role == Qt.ItemDataRole.ForegroundRole:
                     if flagStr.startswith("Fail") or flagStr.startswith("Supersede"):
                         # set to font color to white
-                        return QtGui.QColor("#FFFFFF")
+                        return QtGui.QColor(WHITE_COLOR)
 
                 if role == Qt.ItemDataRole.BackgroundRole:
                     # mark fail row as red
-                    if flagStr.startswith("Fail"): return QtGui.QColor("#CC0000")
+                    if flagStr.startswith("Fail"): return QtGui.QColor(FAIL_DUT_COLOR)
                     # mark superseded row as gray
-                    elif flagStr.startswith("Supersede"): return QtGui.QColor("#D0D0D0")
+                    elif flagStr.startswith("Supersede"): return QtGui.QColor(OVRD_DUT_COLOR)
                     # mark unknown as orange
-                    elif flagStr.startswith("Unknown"): return QtGui.QColor("#FE7B00")
+                    elif flagStr.startswith("Unknown"): return QtGui.QColor(UNKN_DUT_COLOR)
                 
                 if role == Qt.ItemDataRole.FontRole:
                     return self.font
@@ -493,14 +493,14 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                     if (data_ind != -1 and 
                         len(data_test_file) != 0 and 
                         not isPass(data_test_file["flagList"][data_ind])):
-                        return QtGui.QColor("#FFFFFF")
+                        return QtGui.QColor(WHITE_COLOR)
                 
                 if role == Qt.ItemDataRole.BackgroundRole:
                     # only if failed
                     if (data_ind != -1 and 
                         len(data_test_file) != 0 and 
                         not isPass(data_test_file["flagList"][data_ind])):
-                        return QtGui.QColor("#CC0000")
+                        return QtGui.QColor(FAIL_DUT_COLOR)
                 
                 if role == Qt.ItemDataRole.TextAlignmentRole:
                     return Qt.AlignmentFlag.AlignCenter
@@ -616,15 +616,15 @@ class TestStatisticTableModel(QtCore.QAbstractTableModel):
         
         if role == Qt.ItemDataRole.BackgroundRole:
             if index.column() == self.indexOfFail and dataString != "0": 
-                return QtGui.QColor("#CC0000")
+                return QtGui.QColor(FAIL_DUT_COLOR)
             if index.column() == self.indexOfCpk and (dataString not in ["N/A", "∞"]) and float(dataString) < self.cpkThreshold:
-                return QtGui.QColor("#FE7B00")
+                return QtGui.QColor(UNKN_DUT_COLOR)
         
         if role == Qt.ItemDataRole.ForegroundRole:
             if index.column() == self.indexOfFail and dataString != "0": 
-                return QtGui.QColor("#FFFFFF")
+                return QtGui.QColor(WHITE_COLOR)
             if index.column() == self.indexOfCpk and (dataString not in ["N/A", "∞"]) and float(dataString) < self.cpkThreshold:
-                return QtGui.QColor("#FFFFFF")
+                return QtGui.QColor(WHITE_COLOR)
         
         return None
     

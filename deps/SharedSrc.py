@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -17,8 +17,10 @@ import rust_stdf_helper
 import numpy as np
 from enum import IntEnum
 from random import choice
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
+import pyqtgraph as pg
+from pyqtgraph.exporters import ImageExporter
 
 
 
@@ -269,6 +271,12 @@ def getIcon(name: str) -> QtGui.QIcon:
     if name not in iconDict:
         iconDict[name] = convert2QIcon(rust_stdf_helper.get_icon_src(name))
     return iconDict[name]
+
+
+WHITE_COLOR = "#FFFFFF"
+FAIL_DUT_COLOR = "#CC0000"
+OVRD_DUT_COLOR = "#D0D0D0"
+UNKN_DUT_COLOR = "#FE7B00"
 
 
 FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
@@ -717,419 +725,22 @@ def get_png_size(image: io.BytesIO):
         raise TypeError("Input is not a PNG image")
 
 
-
-
-
-# # TODO
-# def genTrendPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
-#     test_num, _, test_name = testTuple
-#     selData = self.getData(testTuple, [head], [site])
-#     ax = fig.add_subplot(111)
-#     trendLines = []
-#     ax.set_title("%d %s - %s - %s"%(test_num, test_name, "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
-#     y_raw = selData["dataList"]
-#     dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
-#     dataInvalid = np.all(np.isnan(y_raw))
-#     testInvalid = np.all(selData["flagList"] < 0)
-
-#     if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or (selData["recHeader"] != REC.MPR and (dataInvalid or testInvalid)):
-#         # show a warning text in figure
-#         # For PTR and FTR, any invalid would trigger this case
-#         # For MPR, dataInvalid and testInvalid both meet can it enter this case
-#         ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (test_name, head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-#     else:
-#         if selData["recHeader"] == REC.MPR and dataInvalid:
-#             # MPR contains only test flag but no data, replace y_raw with test flags
-#             y_raw = selData["flagList"].astype(float)
-#             # replace -1 (invalid test flag) with nan
-#             y_raw[y_raw < 0] = np.nan
-        
-#         # default drawing code for PTR, FTR and "MPR without data"
-#         # select not nan value
-#         x_arr = dutListFromSiteHead[~np.isnan(y_raw)]
-#         y_arr = y_raw[~np.isnan(y_raw)]
-#         # for dynamic limits
-#         hasDynamicLow = False
-#         hasDynamicHigh = False
-#         dyLLimits = np.array([])
-#         dyHLimits = np.array([])
-#         # default limits
-#         HL = selData["HL"]
-#         LL = selData["LL"]
-#         HSpec = selData["HSpec"]
-#         LSpec = selData["LSpec"]
-#         med = selData["Median"]
-#         avg = selData["Mean"]
-#         # plot            
-#         trendLine, = ax.plot(x_arr, y_arr, "-o", markersize=6, markeredgewidth=0.2, markeredgecolor="black", linewidth=0.5, picker=True, color=self.settingParams.siteColor.setdefault(site, rHEX()), zorder = 0, label="Data")
-#         trendLines.append(trendLine)
-#         # axes label
-#         ax.ticklabel_format(useOffset=False)    # prevent + sign
-#         ax.xaxis.get_major_locator().set_params(integer=True)   # force integer on x axis
-#         ax.set_xlabel("%s"%(self.tr("DUT Index")), fontsize=12, fontname=self.imageFont)
-#         if selData["recHeader"] == REC.FTR or (selData["recHeader"] == REC.MPR and dataInvalid):
-#             ax.set_ylabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
-#         else:
-#             ax.set_ylabel("%s%s"%(self.tr("Test Value"), " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname=self.imageFont)
-#         # limits
-#         if len(x_arr) == 1:
-#             ax.set_xlim((x_arr[0]-1, x_arr[0]+1))    # only one point
-#         else:
-#             headroomX = (x_arr[-1]-x_arr[0]) * 0.05
-#             ax.set_xlim(left = x_arr[0] - headroomX, right = x_arr[-1] + headroomX)
-        
-#         if self.settingParams.showHL_trend or self.settingParams.showMean_trend: 
-#             # try to get dynamic limits only if one of limits is enabled
-#             hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits = self.DatabaseFetcher.getDynamicLimits(test_num, test_name, x_arr, LL, HL, selData["Scale"])
-#         # when hasDynamic is true, the limit is definitely not np.nan
-#         limit_max = max(HL, np.max(dyHLimits)) if hasDynamicHigh else HL
-#         limit_min = min(LL, np.min(dyLLimits)) if hasDynamicLow else LL
-#         data_max = np.nanmax([selData["Max"], limit_max])
-#         data_min = np.nanmin([selData["Min"], limit_min])
-#         dataDelta = data_max - data_min
-        
-#         headroomY = 5 if dataDelta == 0 else dataDelta * 0.15
-#         ax.set_ylim((data_min-headroomY, data_max+headroomY))
-
-#         # blended transformation
-#         transXaYd = matplotlib.transforms.blended_transform_factory(ax.transAxes, ax.transData)
-#         # HL/LL lines
-#         if self.settingParams.showHL_trend and ~np.isnan(HL): 
-#             ax.text(x=0, y=HL, s=" HLimit = %.3f\n"%HL, color='r', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-#             if hasDynamicHigh: 
-#                 ax.plot(x_arr, dyHLimits, "-", linewidth=3, color='r', zorder = -10, label="Upper Limit")
-#             else:
-#                 ax.axhline(y = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-        
-#         if self.settingParams.showLL_trend and ~np.isnan(LL):
-#             ax.text(x=0, y=LL, s="\n LLimit = %.3f"%LL, color='b', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left", va="center", transform=transXaYd)
-#             if hasDynamicLow: 
-#                 ax.plot(x_arr, dyLLimits, "-", linewidth=3, color='b', zorder = -10, label="Lower Limit")
-#             else:
-#                 ax.axhline(y = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
-#         # Spec lines
-#         if self.settingParams.showHSpec_trend and ~np.isnan(HSpec): 
-#             ax.text(x=1, y=HSpec, s="HiSpec = %.3f \n"%HSpec, color='darkred', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-#             ax.axhline(y = HSpec, linewidth=3, color='darkred', zorder = -10, label="High Spec")
-#         if self.settingParams.showLSpec_trend and ~np.isnan(LSpec): 
-#             ax.text(x=1, y=LSpec, s="\nLoSpec = %.3f "%LSpec, color='navy', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-#             ax.axhline(y = LSpec, linewidth=3, color='navy', zorder = -10, label="Low Spec")
-#         # add med and avg text at the right edge of the plot
-#         m_obj = None
-#         m_valid = False
-#         a_obj = None
-#         a_valid = False
-#         if self.settingParams.showMed_trend and ~np.isnan(med):
-#             m_valid = True
-#             med_text = ("$x̃ = %.3f $\n" if med > avg else "\n$x̃ = %.3f $") % med
-#             m_obj = ax.text(x=0.99, y=med, s=med_text, color='k', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-#             ax.axhline(y = med, linewidth=1, color='k', zorder = 1, label="Median")
-#         if self.settingParams.showMean_trend and ~np.isnan(avg):
-#             a_valid = True
-#             avg_text = ("\n$x̅ = %.3f $" if med > avg else "$x̅ = %.3f $\n") % avg
-#             a_obj = ax.text(x=0.99, y=avg, s=avg_text, color='orange', fontsize=10, weight="bold", linespacing=2, ha="right", va="center", transform=transXaYd)
-#             ax.axhline(y = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
+def pyqtGraphPlot2Bytes(chart) -> io.BytesIO:
+    if isinstance(chart, pg.GraphicsView):
+        exp = ImageExporter(chart.sceneObj)
+        img: QtGui.QImage = exp.export(toBytes=True)
+        # use bytearray to store data
+        ba = QtCore.QByteArray()
+        buf = QtCore.QBuffer(ba)
+        buf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+        img.save(buf, "PNG")
+        return io.BytesIO(ba.data())
             
-#         if m_valid or a_valid:
-#             if len(x_arr) != 1:
-#                 # get the length of median text in axes coords
-#                 text_object = m_obj if m_valid else a_obj     # get the non-None text object
-#                 if self.textRender is None:
-#                     self.textRender = RendererAgg(*fig.get_size_inches(), fig.dpi)
-#                 bb_pixel = text_object.get_window_extent(renderer=self.textRender)
-#                 text_leftEdge_Axes = ax.transAxes.inverted().transform(bb_pixel)[0][0]
-#                 # extend x limit to avoid data point overlapped with the text
-#                 rightLimit = (x_arr[-1] + 2) * 1 / text_leftEdge_Axes
-#                 ax.set_xlim(right = rightLimit)
-                
-#     # for cursor binding
-#     return ax, trendLines
-
-
-# # TODO
-# def genHistoPlot(self, fig:plt.Figure, head:int, site:int, testTuple:tuple):
-#     test_num, _, test_name = testTuple
-#     selData = self.getData(testTuple, [head], [site])
-#     ax = fig.add_subplot(111)
-#     recGroups = []
-#     ax.set_title("%d %s - %s - %s"%(test_num, test_name, "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
-#     y_raw = selData["dataList"]
-#     dutListFromSiteHead = self.dutArray[self.getMaskFromHeadsSites([head], [site])]
-#     dataInvalid = np.all(np.isnan(selData["dataList"]))
-#     testInvalid = np.all(selData["flagList"] < 0)
-
-#     if (selData["recHeader"] == REC.MPR and dataInvalid and testInvalid) or (selData["recHeader"] != REC.MPR and (dataInvalid or testInvalid)):
-#         # show a warning text in figure
-#         ax.text(x=0.5, y=0.5, s=self.tr('No test data of "%s" \nis found in Head %d - %s') % (test_name, head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-#     else:
-#         if selData["recHeader"] == REC.MPR and dataInvalid:
-#             # MPR contains only test flag but no data, replace y_raw with test flags
-#             y_raw = selData["flagList"].astype(float)
-#             # replace -1 (invalid test flag) with nan
-#             y_raw[y_raw < 0] = np.nan
-        
-#         dataList = y_raw[~np.isnan(y_raw)]
-#         dutListNoNAN = dutListFromSiteHead[~np.isnan(y_raw)]
-#         HL = selData["HL"]
-#         LL = selData["LL"]
-#         HSpec = selData["HSpec"]
-#         LSpec = selData["LSpec"]
-#         med = selData["Median"]
-#         avg = selData["Mean"]
-#         sd = selData["SDev"]
-#         bin_num = self.settingParams.binCount
-#         # note: len(bin_edges) = len(hist) + 1
-#         # we use a filter to remove the data that's beyond 9 sigma
-#         # otherwise we cannot to see the detailed distribution of the main data set
-#         #TODO filter data beyond 9σ
-#         if np.isnan(avg) or np.isnan(sd):
-#             # no filter
-#             dataFilter = np.full(shape=dataList.shape, fill_value=True, dtype=bool)
-#         else:
-#             dataFilter = np.logical_and(dataList>=(avg-9*sd), dataList<=(avg+9*sd))
-#         filteredDataList = dataList[dataFilter]
-#         filteredDutList = dutListNoNAN[dataFilter]
-        
-#         hist, bin_edges = np.histogram(filteredDataList, bins = bin_num)
-#         bin_width = bin_edges[1]-bin_edges[0]
-#         # get histo bin index (start from 1) of each dut
-#         # np.histogram is left-close-right-open, except the last bin
-#         # np.digitize should be right=False, but must remove the last bin edge to force close the rightmost bin
-#         bin_ind = np.digitize(filteredDataList, bin_edges[:-1], right=False)
-#         bin_dut_dict = {}
-#         for ind, dut in zip(bin_ind, filteredDutList):
-#             if ind in bin_dut_dict:
-#                 bin_dut_dict[ind].append(dut)
-#             else:
-#                 bin_dut_dict[ind] = [dut]
-#         # use bar to draw histogram, only for its "align" option 
-#         recGroup = ax.bar(bin_edges[:len(hist)], hist, width=bin_width, align='edge', color=self.settingParams.siteColor.setdefault(site, rHEX()), edgecolor="black", zorder = 100, label="Histo Chart", picker=True)
-#         # save to histo group for interaction
-#         setattr(recGroup, "bin_dut_dict", bin_dut_dict)
-#         recGroups.append(recGroup)
-#         # draw boxplot
-#         if self.settingParams.showBoxp_histo:
-#             ax.boxplot(dataList, showfliers=False, vert=False, notch=True, widths=0.2*max(hist), patch_artist=True, zorder=200, positions=[max(hist)/2], manage_ticks=False,
-#                         boxprops=dict(color='b', facecolor=(1, 1, 1, 0)),
-#                         capprops=dict(color='b'),
-#                         whiskerprops=dict(color='b'))
-        
-#         if self.settingParams.showHL_histo and ~np.isnan(HL): 
-#             ax.axvline(x = HL, linewidth=3, color='r', zorder = -10, label="Upper Limit")
-#         if self.settingParams.showLL_histo and ~np.isnan(LL): 
-#             ax.axvline(x = LL, linewidth=3, color='b', zorder = -10, label="Lower Limit")
-        
-#         if self.settingParams.showHSpec_histo and ~np.isnan(HSpec): 
-#             ax.axvline(x = HSpec, linewidth=3, color='darkred', zorder = -10, label="Hi Spec")
-#         if self.settingParams.showLSpec_histo and ~np.isnan(LSpec): 
-#             ax.axvline(x = LSpec, linewidth=3, color='navy', zorder = -10, label="Lo Spec")
-
-#         # set xlimit and draw fitting curve only when standard deviation is not 0
-#         if sd != 0 and ~np.isnan(avg) and ~np.isnan(sd):
-#             if self.settingParams.showGaus_histo:
-#                 # gauss fitting
-#                 g_x = np.linspace(avg - sd * 10, avg + sd * 10, 1000)
-#                 g_y = max(hist) * np.exp( -0.5 * (g_x - avg)**2 / sd**2 )
-#                 ax.plot(g_x, g_y, "r--", label="Normalized Gauss Curve")
-#             # set x limit
-#             if bin_edges[0] > avg - sd * 10:
-#                 ax.set_xlim(left=avg - sd * 10)
-#             if bin_edges[-1] < avg + sd * 10:
-#                 ax.set_xlim(right=avg + sd * 10)
-#         ax.set_ylim(top=max(hist)*1.1)
-            
-#         # blended transformation
-#         transXdYa = matplotlib.transforms.blended_transform_factory(ax.transData, ax.transAxes)
-#         # vertical lines for n * σ, disable if avg and sd is invalid
-#         sigmaList = [] if self.settingParams.showSigma == "" or np.isnan(avg) or np.isnan(sd) else [int(i) for i in self.settingParams.showSigma.split(",")]
-#         for n in sigmaList:
-#             position_pos = avg + sd * n
-#             position_neg = avg - sd * n
-#             ax.axvline(x = position_pos, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="%dσ"%n)
-#             ax.axvline(x = position_neg, ymax = 0.95, linewidth=1, ls='-.', color='gray', zorder = 2, label="-%dσ"%n)
-#             ax.text(x = position_pos, y = 0.99, s="%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
-#             ax.text(x = position_neg, y = 0.99, s="-%dσ"%n, c="gray", ha="center", va="top", fontname="Courier New", fontsize=10, transform=transXdYa)
-#         # med avg text labels / lines
-#         med_text = ("\n $x̃ = %.3f $") % med
-#         avg_text = ("\n $x̅ = %.3f $") % avg
-#         if self.settingParams.showMed_histo and ~np.isnan(med):
-#             ax.text(x=med, y=1, s=med_text, color='k', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="left" if med>avg else "right", va="center", transform=transXdYa)
-#             ax.axvline(x = med, linewidth=1, color='black', zorder = 1, label="Median")
-#         if self.settingParams.showMean_histo and ~np.isnan(avg):
-#             ax.text(x=avg, y=1, s=avg_text, color='orange', fontname="Courier New", fontsize=10, weight="bold", linespacing=2, ha="right" if med>avg else "left", va="center", transform=transXdYa)
-#             ax.axvline(x = avg, linewidth=1, color='orange', zorder = 2, label="Mean")
-#         # ax.ticklabel_format(useOffset=False)    # prevent + sign
-#         if selData["recHeader"] == REC.FTR or (selData["recHeader"] == REC.MPR and dataInvalid):
-#             ax.set_xlabel(self.tr("Test Flag"), fontsize=12, fontname=self.imageFont)
-#         else:
-#             ax.set_xlabel("%s%s"%(self.tr("Test Value"), " (%s)"%selData["Unit"] if selData["Unit"] else ""), fontsize=12, fontname="Tahoma")
-#         ax.set_ylabel("%s"%(self.tr("DUT Counts")), fontsize=12, fontname=self.imageFont)
-        
-#     return ax, recGroups
-
-
-# # TODO
-# def genBinPlot(self, fig:plt.Figure, head:int, site:int):
-#     fig.suptitle("%s - %s - %s"%(self.tr("Bin Summary"), "Head%d"%head, self.tr("All Sites") if site == -1 else "Site%d"%site), fontsize=15, fontname=self.imageFont)
-#     ax_l = fig.add_subplot(121)
-#     ax_r = fig.add_subplot(122)
-#     recGroup_l = []
-#     recGroup_r = []
-#     bin_width = 0.8
-#     Tsize = lambda barNum: 10 if barNum <= 6 else round(5 + 5 * 2 ** (0.4*(6-barNum)))  # adjust fontsize based on bar count
-#     # HBIN plot
-#     binStats = self.DatabaseFetcher.getBinStats(head, site, "HBIN")
-#     HList = [BIN for BIN in sorted(binStats.keys())]
-#     HCnt = [binStats[BIN] for BIN in HList]
-#     HLable = []
-#     HColor = []
-#     self.tr("MissingName")  # explicitly translation bin name, since it's always stored in the value
-#     for ind, i in enumerate(HList):
-#         HLable.append(self.tr(self.HBIN_dict[i]["BIN_NAME"]))
-#         HColor.append(self.settingParams.hbinColor[i])
-#         ax_l.text(x=ind + bin_width/2, y=HCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*HCnt[ind]/sum(HCnt)), ha="center", va="bottom", fontsize=Tsize(len(HCnt)))
-        
-#     if len(HList) > 0:
-#         recGroup_l = ax_l.bar(np.arange(len(HCnt)), HCnt, align='edge', width=bin_width, color=HColor, edgecolor="black", zorder = 0, label="HardwareBin Summary", picker=True)
-#         setattr(recGroup_l, "head", head)
-#         setattr(recGroup_l, "site", site)
-#         setattr(recGroup_l, "binType", "HBIN")
-#         setattr(recGroup_l, "binList", HList)
-#         setattr(recGroup_l, "binNames", HLable)
-#         ax_l.set_xticks(np.arange(len(HCnt)) + bin_width/2)
-#         ax_l.set_xticklabels(labels=HLable, rotation=30, ha='right', fontsize=1+Tsize(len(HCnt)), fontname=self.imageFont)    # Warning: This method should only be used after fixing the tick positions using Axes.set_xticks. Otherwise, the labels may end up in unexpected positions.
-#         ax_l.set_xlim(-.1, max(3, len(HCnt))-.9+bin_width)
-#         ax_l.set_ylim(top=max(HCnt)*1.2)
-#     else:
-#         ax_l.text(x=0.5, y=0.5, s=self.tr('No HBIN data is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=15, weight="bold", linespacing=2, ha="center", va="center", transform=ax_l.transAxes)
-#     ax_l.set_xlabel(self.tr("Hardware Bin"), fontsize=12, fontname=self.imageFont)
-#     ax_l.set_ylabel(self.tr("Hardware Bin Counts"), fontsize=12, fontname=self.imageFont)
-
-#     # SBIN plot
-#     binStats = self.DatabaseFetcher.getBinStats(head, site, "SBIN")
-#     SList = [BIN for BIN in sorted(binStats.keys())]
-#     SCnt = [binStats[BIN] for BIN in SList]
-#     SLable = []
-#     SColor = []
-#     for ind, i in enumerate(SList):
-#         SLable.append(self.tr(self.SBIN_dict[i]["BIN_NAME"]))
-#         SColor.append(self.settingParams.sbinColor[i])
-#         ax_r.text(x=ind + bin_width/2, y=SCnt[ind], s="Bin%d\n%.1f%%"%(i, 100*SCnt[ind]/sum(SCnt)), ha="center", va="bottom", fontsize=Tsize(len(SCnt)))
-        
-#     if len(SList) > 0:
-#         recGroup_r = ax_r.bar(np.arange(len(SCnt)), SCnt, align='edge', width=bin_width, color=SColor, edgecolor="black", zorder = 0, label="SoftwareBin Summary", picker=True)
-#         setattr(recGroup_r, "head", head)
-#         setattr(recGroup_r, "site", site)
-#         setattr(recGroup_r, "binType", "SBIN")
-#         setattr(recGroup_r, "binList", SList)
-#         setattr(recGroup_r, "binNames", SLable)
-#         ax_r.set_xticks(np.arange(len(SCnt)) + bin_width/2)
-#         ax_r.set_xticklabels(labels=SLable, rotation=30, ha='right', fontsize=1+Tsize(len(SCnt)), fontname=self.imageFont)
-#         ax_r.set_xlim(-.1, max(3, len(SCnt))-.9+bin_width)
-#         ax_r.set_ylim(top=max(SCnt)*1.2)
-#     else:
-#         ax_r.text(x=0.5, y=0.5, s=self.tr('No SBIN data is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=15, weight="bold", linespacing=2, ha="center", va="center", transform=ax_r.transAxes)
-#     ax_r.set_xlabel(self.tr("Software Bin"), fontsize=12, fontname=self.imageFont)
-#     ax_r.set_ylabel(self.tr("Software Bin Counts"), fontsize=12, fontname=self.imageFont)
+    elif isinstance(chart, list) and len(chart) > 0:
+        return pyqtGraphPlot2Bytes(chart[0])
     
-#     return [ax_l, ax_r], [recGroup_l, recGroup_r]
+    return None
 
-
-# # TODO
-# def genWaferPlot(self, fig:plt.Figure, head:int, site:int, wafer_num:int):
-#     fig.set_size_inches(7.5, 8)
-#     fig.set_tight_layout(False)
-#     ax = fig.add_subplot(111, aspect=1)
-#     # set limits
-#     waferBounds = self.DatabaseFetcher.getWaferBounds()
-#     xmin = waferBounds["xmin"]
-#     ymin = waferBounds["ymin"]
-#     xmax = waferBounds["xmax"]
-#     ymax = waferBounds["ymax"]            
-#     ax.set_xlim(xmin-1, xmax+1)
-#     ax.set_ylim(ymin-1, ymax+1)
-#     # scaling xy coords to be a square
-#     ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')            
-#     # dynamic label size
-#     Tsize = lambda barNum: 12 if barNum <= 15 else round(7 + 5 * 2 ** (0.4*(15-barNum)))  # adjust fontsize based on bar count
-#     labelsize = Tsize(max(xmax-xmin, ymax-ymin))
-                
-#     if wafer_num == -1:
-#         # -1 indicates stacked wafer map
-#         ax.set_title(self.tr("Stacked Wafer Map - %s - %s") % ("Head%d" % head, self.tr("All DUTs") if site == -1 else self.tr("DUT in Site%d") % site), fontsize=15, fontname=self.imageFont)
-#         failDieDistribution = self.DatabaseFetcher.getStackedWaferData(head, site)
-#         x_mesh = np.arange(xmin-0.5, xmax+1, 1)     # xmin-0.5, xmin+0.5, ..., xmax+0.5
-#         y_mesh = np.arange(ymin-0.5, ymax+1, 1)
-#         # initialize a full -1 2darray
-#         failCount_meash = np.full((len(x_mesh)-1, len(y_mesh)-1), -1)
-#         # fill the count into 2darray
-#         for (xcoord, ycoord), count in failDieDistribution.items():
-#             failCount_meash[xcoord-xmin, ycoord-ymin] = count
-#         # x is row and y is col, whereas in xycoords, x should be col and y should be row
-#         failCount_meash = failCount_meash.transpose()
-#         # get a colormap segment
-#         cmap_seg = matplotlib.colors.LinearSegmentedColormap.from_list("seg", plt.get_cmap("nipy_spectral")(np.linspace(0.55, 0.9, 128)))
-#         # draw color mesh, replace all -1 to NaN to hide rec with no value
-#         pcmesh = ax.pcolormesh(x_mesh, y_mesh, np.where(failCount_meash == -1, np.nan, failCount_meash), cmap=cmap_seg, picker=100)     # set picker large enough for QuadMask to fire pick event
-#         setattr(pcmesh, "wafer_num", wafer_num)
-#         # create a new axis for colorbar
-#         ax_colorbar = fig.add_axes([ax.get_position().x0, ax.get_position().y0-0.04, ax.get_position().width, 0.02])
-#         cbar = fig.colorbar(pcmesh, cax=ax_colorbar, orientation="horizontal")
-#         cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
-#         cbar.set_label(self.tr("Total failed dies"), fontname=self.imageFont)
-#         # ax_colorbar = fig.add_axes([ax.get_position().x1+0.03, ax.get_position().y0, 0.02, ax.get_position().height])
-#         # cbar = fig.colorbar(pcmesh, cax=ax_colorbar)
-#         # cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
-#         # cbar.set_label("Total failed dies", rotation=270, va="bottom")
-        
-#     else:
-#         waferDict = self.waferInfoDict[wafer_num]
-#         ax.set_title(self.tr("Wafer ID: %s - %s - %s") % (waferDict["WAFER_ID"], "Head%d"%head, self.tr("All DUTs") if site == -1 else self.tr("DUT in Site%d") % site), fontsize=15, fontname=self.imageFont)
-#         # group coords by soft bin
-#         coordsDict = self.DatabaseFetcher.getWaferCoordsDict(wafer_num, head, site)
-#         dutCnt = sum([len(coordList) for coordList in coordsDict.values()])
-#         legendHandles = []
-#         # draw recs for each SBIN
-#         for sbin in sorted(coordsDict.keys()):
-#             sbinName = self.SBIN_dict[sbin]["BIN_NAME"]
-#             sbinCnt = len(coordsDict[sbin])
-#             percent = 100 * sbinCnt / dutCnt
-#             label = "SBIN %d - %s\n[%d - %.1f%%]"%(sbin, self.tr(sbinName), sbinCnt, percent)
-#             rects = []
-#             # skip dut with invalid coords
-#             for (x, y) in coordsDict[sbin]:
-#                 rects.append(matplotlib.patches.Rectangle((x-0.5, y-0.5),1,1))
-#             pc = PatchCollection(patches=rects, match_original=False, facecolors=self.settingParams.sbinColor[sbin], label=label, zorder=-100, picker=True)
-#             # for interactive plot
-#             setattr(pc, "SBIN", sbin)
-#             setattr(pc, "BIN_NAME", self.tr(sbinName))
-#             setattr(pc, "wafer_num", wafer_num)
-#             ax.add_collection(pc)
-#             proxyArtist = matplotlib.patches.Patch(color=self.settingParams.sbinColor[sbin], label=label)
-#             legendHandles.append(proxyArtist)
-#         # if coordsDict contains nothing, show warning text
-#         if len(ax.collections) == 0:
-#             ax.text(x=0.5, y=0.5, s=self.tr('No DUT with valid (X,Y) is\nfound in Head %d - %s') % (head, self.tr("All Sites") if site == -1 else "Site %d"%site), color='red', fontname=self.imageFont, fontsize=18, weight="bold", linespacing=2, ha="center", va="center", transform=ax.transAxes)
-#         # legend
-#         ax.legend(handles=legendHandles, loc="upper left", bbox_to_anchor=(0., -0.02, 1, -0.02), ncol=4, borderaxespad=0, mode="expand", prop={'family':self.imageFont, 'size':labelsize})
-    
-#     # set ticks & draw coord lines
-#     ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
-#     ax.yaxis.set_major_locator(ticker.MultipleLocator(5))            
-#     ax.tick_params(axis='both', which='both', labeltop=True, labelright=True, length=0, labelsize=labelsize)
-#     # Turn spines off and create white grid.
-#     for edge, spine in ax.spines.items():
-#         spine.set_visible(False)
-#     ax.set_xticks(np.arange(xmin, xmax+2, 1)-0.5, minor=True)
-#     ax.set_yticks(np.arange(ymin, ymax+2, 1)-0.5, minor=True)
-#     ax.grid(which="minor", color="gray", linestyle='-', linewidth=1, zorder=0)
-#     # switch x, y positive direction if WCR specified the orientation.
-#     if self.waferOrientation[0] == self.tr("Left"):   # x towards left
-#         ax.invert_xaxis()
-#     if self.waferOrientation[1] == self.tr("Down"):   # y towards down
-#         ax.invert_yaxis()
-        
-#     return ax
 
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
@@ -1137,11 +748,12 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "getSetting", "updateSetting", "updateRecentFolder", 
            "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
+           "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 
            "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
-           "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", 
+           "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
            "openFileInOS", "revealFile", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 

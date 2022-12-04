@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Sun Dec 04 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -471,7 +471,7 @@ class DataInterface:
         return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
     
     
-    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = [], floatFormat: str = ""):
+    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []):
         '''
         Generate data of `Test Statistic` table when `Trend`/`Histo`/`Info` tab is activated
         
@@ -479,7 +479,6 @@ class DataInterface:
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
         `_selectFiles`: default read all files, currently not in use
-        `floatFormat`: format string for float, e.g. "%.3f"
         
         return a dictionary contains:
         `VHeader`: list, vertial header
@@ -503,6 +502,7 @@ class DataInterface:
         
         # TODO Configurable order of rows?
         default_order = [testTuples, selectHeads, selectSites, range(self.num_files)]
+        floatFormat = getSetting().getFloatFormat()
         for testTup, head, site, fid in itertools.product(*default_order):
             testDataDict = self.getTestDataFromHeadSite(testTup, [head], [site], fid)
             # if current file doesn't have testID, 
@@ -579,10 +579,10 @@ class DataInterface:
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(head, site, -1, fid)
-            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, False))
-            row.append((f"Total: {sum(counts)}", -1, False))
+            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, isHbin))
+            row.append((f"Total: {sum(counts)}", -1, isHbin))
             for (n, c) in zip(["Pass", "Failed", "Unknown", "Superseded"], counts):
-                row.append((f"{n}: {c}", -1, False))
+                row.append((f"{n}: {c}", -1, isHbin))
             # iter thru binSummary, calculate percentage of each bin
             for bin_num in sorted(binSummary.keys()):
                 bin_cnt = binSummary[bin_num][fid]
@@ -646,7 +646,7 @@ class DataInterface:
                     row.append((f"{k}: {v}", -1, False))
             # soft bin only
             for sbin_num in sorted(coordsDict.keys()):
-                sbin_cnt = len(coordsDict[sbin_num])
+                sbin_cnt = len(coordsDict[sbin_num]["x"])
                 if sbin_cnt == 0: 
                     continue
                 sbin_name = self.SBIN_dict.get(sbin_num, {}).get("BIN_NAME", "NO NAME")
