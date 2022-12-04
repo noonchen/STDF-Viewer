@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Dec 04 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -176,6 +176,7 @@ def loadConfigFile():
                                     oldSymbolDict[num] = symbol
                             continue
                         if type(param) == type(getattr(GlobalSetting, attr)):
+                            
                             setattr(GlobalSetting, attr, param)
     except (FileNotFoundError, TypeError, toml.TomlDecodeError):
         # any error occurs in config file reading, simply ignore
@@ -385,14 +386,30 @@ unit_prefix = {15: "f",
               -12: "T"}
 
 # MIR field name to Description Dict
-mirFieldNames = ["BYTE_ORD", "SETUP_T", "START_T", "FINISH_T", "STAT_NUM", "MODE_COD", "RTST_COD", "PROT_COD", "BURN_TIM", "CMOD_COD", "LOT_ID", "PART_TYP", "NODE_NAM", "TSTR_TYP",
-                 "JOB_NAM", "JOB_REV", "SBLOT_ID", "OPER_NAM", "EXEC_TYP", "EXEC_VER", "TEST_COD", "TST_TEMP", "USER_TXT", "AUX_FILE", "PKG_TYP", "FAMLY_ID",
-                 "DATE_COD", "FACIL_ID", "FLOOR_ID", "PROC_ID", "OPER_FRQ", "SPEC_NAM", "SPEC_VER", "FLOW_ID", "SETUP_ID", "DSGN_REV", "ENG_ID", "ROM_COD", "SERL_NUM", "SUPR_NAM", "DISP_COD", "USR_DESC", "EXC_DESC"]
+mirFieldNames = ["BYTE_ORD", "SETUP_T", "START_T", "FINISH_T", "STAT_NUM", 
+                 "MODE_COD", "RTST_COD", "PROT_COD", "BURN_TIM", "CMOD_COD", 
+                 "LOT_ID", "PART_TYP", "NODE_NAM", "TSTR_TYP", "JOB_NAM", 
+                 "JOB_REV", "SBLOT_ID", "OPER_NAM", "EXEC_TYP", "EXEC_VER", 
+                 "TEST_COD", "TST_TEMP", "USER_TXT", "AUX_FILE", "PKG_TYP", 
+                 "FAMLY_ID", "DATE_COD", "FACIL_ID", "FLOOR_ID", "PROC_ID", 
+                 "OPER_FRQ", "SPEC_NAM", "SPEC_VER", "FLOW_ID", "SETUP_ID", 
+                 "DSGN_REV", "ENG_ID", "ROM_COD", "SERL_NUM", "SUPR_NAM", 
+                 "DISP_COD", "USR_DESC", "EXC_DESC"]
 
-mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time", "Station Number", "Test Mode Code", "Retest Code", "Protection Code", "Burn-in Time", "Command Mode Code", "Lot ID", "Product ID", 
-                   "Node Name", "Tester Type", "Job Name", "Job Revision", "Sublot ID", "Operator ID", "Tester Software Type", "Tester Software Version", "Step ID", "Test Temperature", 
-                   "User Text", "Auxiliary File Name", "Package Type", "Family ID", "Date Code", "Facility ID", "Floor ID", "Process ID", "Operation Frequency", "Test Spec Name", 
-                   "Test Spec Version", "Flow ID", "Setup ID", "Design Revision", "Engineer Lot ID", "ROM Code ID", "Serial Number", "Supervisor ID", "Lot Disposition Code", "Lot Description From User", "Lot Description From Exec"]
+mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time", 
+                   "Station Number", "Test Mode Code", "Retest Code", 
+                   "Protection Code", "Burn-in Time", "Command Mode Code", 
+                   "Lot ID", "Product ID", "Node Name", "Tester Type", 
+                   "Job Name", "Job Revision", "Sublot ID", "Operator ID", 
+                   "Tester Software Type", "Tester Software Version", 
+                   "Step ID", "Test Temperature", "User Text", 
+                   "Auxiliary File Name", "Package Type", "Family ID", 
+                   "Date Code", "Facility ID", "Floor ID", "Process ID", 
+                   "Operation Frequency", "Test Spec Name", "Test Spec Version", 
+                   "Flow ID", "Setup ID", "Design Revision", "Engineer Lot ID", 
+                   "ROM Code ID", "Serial Number", "Supervisor ID", 
+                   "Lot Disposition Code", "Lot Description From User", 
+                   "Lot Description From Exec"]
 
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
@@ -405,8 +422,8 @@ def isHexColor(color: str) -> bool:
     color = color.lower()
     if color.startswith("#") and len(color) in [7, 9]:
         hexNum = list(map(lambda num: f'{num:x}', range(16)))
-        for hex in color[1:]:
-            if not hex in hexNum:
+        for letter in color[1:]:
+            if not letter in hexNum:
                 return False
         return True
     else:
@@ -448,7 +465,7 @@ def init_logger(rootFolder):
     allLogFiles = sorted([os.path.join(logFolder, f) 
                         for f in os.listdir(logFolder) 
                         if f.endswith('.log') and os.path.isfile(os.path.join(logFolder, f))])
-    [os.remove(allLogFiles[i]) for i in range(len(allLogFiles)-5)] if len(allLogFiles) > 5 else []
+    _ = [os.remove(allLogFiles[i]) for i in range(len(allLogFiles)-5)] if len(allLogFiles) > 5 else []
 
 
 def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:

@@ -195,9 +195,12 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox = QMessageBox(self)
                 msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
                 msgBox.setTextFormat(Qt.TextFormat.RichText)
-                msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;<a href='{2}'>{1}</a></span>".format(self.tr("{0} is available!").format(latestTag),
-                                                                                                                      self.tr("→Go to download page←"),
-                                                                                                                      releaseLink))
+                msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;\
+                                <a href='{2}'>{1}</a></span>".format(
+                                    self.tr("{0} is available!").format(latestTag),
+                                    self.tr("→Go to download page←"),
+                                    releaseLink))
+                
                 msgBox.setInformativeText(self.tr("Change List:") + "\n\n" + changeList)
                 msgBox.addButton(self.tr("Maybe later"), QMessageBox.ButtonRole.NoRole)
                 msgBox.exec_()
@@ -209,12 +212,12 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox.exec_()
             
         except Exception as e:
-                # tell user cannot connect to the internet
-                msgBox = QMessageBox(self)
-                msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
-                msgBox.setText(self.tr("Cannot connect to Github"))
-                msgBox.setInformativeText(repr(e))
-                msgBox.exec_()
+            # tell user cannot connect to the internet
+            msgBox = QMessageBox(self)
+            msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+            msgBox.setText(self.tr("Cannot connect to Github"))
+            msgBox.setInformativeText(repr(e))
+            msgBox.exec_()
         
     
     def showDebugPanel(self):
@@ -253,9 +256,9 @@ class MyWindow(QtWidgets.QMainWindow):
             
         newfont = QtGui.QFont(font)
         _app.setFont(newfont)
-        [w.setFont(newfont) if not isinstance(w, QtWidgets.QListView) else None for w in QApplication.allWidgets()]
+        _ = [w.setFont(newfont) if not isinstance(w, QtWidgets.QListView) else None for w in QApplication.allWidgets()]
         # actions is not listed in qapp all widgets, iterate separately
-        [w.setFont(newfont) for w in self.ui.toolBar.actions()]
+        _ = [w.setFont(newfont) for w in self.ui.toolBar.actions()]
         # retranslate UIs
         # mainUI
         _app.installTranslator(self.translatorUI)
@@ -371,15 +374,22 @@ class MyWindow(QtWidgets.QMainWindow):
         msgBox = QMessageBox(self)
         msgBox.setWindowTitle(self.tr("About"))
         msgBox.setTextFormat(Qt.TextFormat.RichText)
-        msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span><br>{0}: {1}<br>{2}: noonchen<br>{3}: chennoon233@foxmail.com<br>".format(self.tr("Version"), 
-                                                                                                                                                               Version, 
-                                                                                                                                                               self.tr("Author"), 
-                                                                                                                                                               self.tr("Email")))
+        msgBox.setText("<span style='color:#930DF2;font-size:20px'>STDF Viewer</span>\
+                        <br>{0}: {1}\
+                        <br>{2}: noonchen\
+                        <br>{3}: chennoon233@foxmail.com<br>".format(
+                            self.tr("Version"), 
+                            Version,  
+                            self.tr("Author"),
+                            self.tr("Email")))
+        
         msgBox.setInformativeText("{0}:\
             <br><a href='https://github.com/noonchen/STDF_Viewer'>noonchen @ STDF_Viewer</a>\
             <br>\
             <br><span style='font-size:10px'>{1}</span>".format(self.tr("For instructions, please refer to the ReadMe in the repo"), 
-                                                               self.tr("Disclaimer: This free app is licensed under GPL 3.0, you may use it free of charge but WITHOUT ANY WARRANTY, it might contians bugs so use it at your own risk.")))
+                                                               self.tr("Disclaimer: This free app is licensed under GPL 3.0, \
+                                                                        you may use it free of charge but WITHOUT ANY WARRANTY, \
+                                                                        it might contians bugs so use it at your own risk.")))
         appIcon = getIcon("App").pixmap(250, 250)
         appIcon.setDevicePixelRatio(2.0)
         msgBox.setIconPixmap(appIcon)
@@ -614,7 +624,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 if getSetting().language != "English":
                     # fix weird font when switch to chinese-s
                     qfont = QtGui.QFont(getSetting().font)
-                    [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
+                    _ = [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
             # horizontalHeader.resizeSection(0, 250)
@@ -684,7 +694,7 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def toggleSite(self, on=True):
         self.ui.All.setChecked(on)
-        for siteNum, cb in self.site_cb_dict.items():
+        for _, cb in self.site_cb_dict.items():
             cb.setChecked(on)
         self.onSiteChecked()
                 
@@ -831,7 +841,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         testSortMethod = getSetting().sortTestList
         if testSortMethod == "Number":
-            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: parseTestString(x)))
+            self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: parseTestString(x)[0]))
         elif testSortMethod == "Name":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: x.split("\t")[-1]))
         else:
@@ -1269,9 +1279,9 @@ class MyWindow(QtWidgets.QMainWindow):
         QApplication.processEvents()
         
     
-    def eventFilter(self, object, event: QtCore.QEvent):
+    def eventFilter(self, widget, event: QtCore.QEvent):
         # modified from https://stackoverflow.com/questions/18001944/pyqt-drop-event-without-subclassing
-        if object in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
+        if widget in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
             if (event.type() == QtCore.QEvent.Type.DragEnter):
                 if event.mimeData().hasUrls():
                     event.accept()   # must accept the dragEnterEvent or else the dropEvent can't occur !!!
@@ -1311,5 +1321,6 @@ def run():
         window.callFileLoader(pathFromArgs)
     sys.exit(app.exec_())
     
+
 if __name__ == '__main__':
     run()

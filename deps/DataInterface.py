@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Dec 04 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -114,23 +114,43 @@ class DataInterface:
             wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(self.num_files)])
             if "WAFR_SIZ" in InfoDict:
                 wafer_size_tuple = InfoDict.pop("WAFR_SIZ")
-                metaDataList.append(["Wafer Size: ", *[f"{size} {unit}" if size is not None and unit is not None else "" for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
+                metaDataList.append(["Wafer Size: ", 
+                                     *[f"{size} {unit}" 
+                                       if size is not None and unit is not None 
+                                       else "" 
+                                       for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
             if "DIE_WID" in InfoDict and "DIE_HT" in InfoDict:
                 wid_tuple = InfoDict.pop("DIE_WID")
                 ht_tuple = InfoDict.pop("DIE_HT")
-                metaDataList.append(["Wafer Die Width Height: ", *[f"{wid} {unit} × {ht} {unit}" if wid is not None and ht is not None and unit is not None else "" for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
+                metaDataList.append(["Wafer Die Width Height: ", 
+                                     *[f"{wid} {unit} × {ht} {unit}" 
+                                       if wid is not None and ht is not None and unit is not None 
+                                       else "" 
+                                       for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
             if "CENTER_X" in InfoDict and "CENTER_Y" in InfoDict:
                 cent_x_tuple = InfoDict.pop("CENTER_X")
                 cent_y_tuple = InfoDict.pop("CENTER_Y")
-                metaDataList.append(["Wafer Center: ", *[f"({x}, {y})" if x is not None and y is not None else "" for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
+                metaDataList.append(["Wafer Center: ", 
+                                     *[f"({x}, {y})" 
+                                       if x is not None and y is not None 
+                                       else "" 
+                                       for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
             if "WF_FLAT" in InfoDict:
                 flat_orient_tuple = InfoDict.pop("WF_FLAT")
-                metaDataList.append(["Wafer Flat Direction: ", *[wafer_direction_name(d) if d is not None else "" for d in flat_orient_tuple] ])
+                metaDataList.append(["Wafer Flat Direction: ", 
+                                     *[wafer_direction_name(d) 
+                                       if d is not None 
+                                       else "" 
+                                       for d in flat_orient_tuple] ])
             if "POS_X" in InfoDict and "POS_Y" in InfoDict:
                 pos_x_tuple = InfoDict.pop("POS_X")
                 pos_y_tuple = InfoDict.pop("POS_Y")
                 self.waferOrientation = (pos_x_tuple, pos_y_tuple)
-                metaDataList.append(["Wafer XY Direction: ", *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" if x_orient is not None and y_orient is not None else "" for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+                metaDataList.append(["Wafer XY Direction: ", 
+                                     *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" 
+                                       if x_orient is not None and y_orient is not None 
+                                       else "" 
+                                       for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
         # append other info: ATR, RDR, SDRs, sort names for better display
         for propertyName in sorted(InfoDict.keys()):
             value: tuple = InfoDict[propertyName]
@@ -347,7 +367,7 @@ class DataInterface:
         return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
-    def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []) -> dict:
+    def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None) -> dict:
         '''
         Get all required test data for TestDataTable display
         
@@ -471,7 +491,7 @@ class DataInterface:
         return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
     
     
-    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []):
+    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):
         '''
         Generate data of `Test Statistic` table when `Trend`/`Histo`/`Info` tab is activated
         
@@ -531,7 +551,10 @@ class DataInterface:
                 if containsFTR:
                     row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["recHeader"] == REC.FTR else [""]
                 if containsMPR:
-                    row[1:1] = [str(pmr), testDataDict["LOG_NAM"], testDataDict["PHY_NAM"], testDataDict["CHAN_NAM"]] if testDataDict["recHeader"] == REC.MPR else ["", "", "", ""]
+                    row[1:1] = [str(pmr), 
+                                testDataDict["LOG_NAM"], 
+                                testDataDict["PHY_NAM"], 
+                                testDataDict["CHAN_NAM"]] if testDataDict["recHeader"] == REC.MPR else ["", "", "", ""]
                     
                 rowList.append(row)
             else:
@@ -662,7 +685,7 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}    
 
 
-    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], _selectFiles: list[int] = []) -> dict:
+    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], _selectFiles: list[int] = None) -> dict:
         '''
         Get single-head, multi-site trend chart data of ONE test item
         

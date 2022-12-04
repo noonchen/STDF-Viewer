@@ -412,8 +412,12 @@ class reportGenerator(QtCore.QObject):
                 sv.binRow += 1
             sv.binRow += 3
             
-            for l in (dataTable_HB + dataTable_SB):
-                maxColWidth = [getMaxSeg(s) if maxColWidth[col:col+1] == [] or getMaxSeg(s) > maxColWidth[col] else maxColWidth[col] for col, s in enumerate(l)]
+            for dataL in (dataTable_HB + dataTable_SB):
+                maxColWidth = [getMaxSeg(s) 
+                               if maxColWidth[col:col+1] == [] 
+                               or getMaxSeg(s) > maxColWidth[col] 
+                               else maxColWidth[col] 
+                               for col, s in enumerate(dataL)]
             
         self.loopCount += 1
         self.sendProgress()
@@ -646,8 +650,11 @@ class progressDisplayer(QtWidgets.QDialog):
             event.accept()
         else:
             # close by clicking X
-            close = QMessageBox.question(self, self.tr("QUIT"), self.tr("Report is not finished,\nwanna terminate the process?"), QMessageBox.Yes | QMessageBox.No, defaultButton=QMessageBox.No)
-            if close == QMessageBox.Yes:
+            close = QMessageBox.question(self, self.tr("QUIT"), 
+                                         self.tr("Report is not finished,\nwanna terminate the process?"), 
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                         defaultButton=QMessageBox.StandardButton.No)
+            if close == QMessageBox.StandardButton.Yes:
                 # if user clicked yes, temrinate thread and close window
                 self.rg.forceQuit = True
                 self.workThread.quit()
@@ -1163,13 +1170,4 @@ class stdfExporter(QtWidgets.QDialog):
         elif msgbox.clickedButton() == openBtn:
             openFileInOS(reportPath)
 
-
-    def closeEvent(self, event):
-        # close by clicking X
-        # close = QMessageBox.question(self, "QUIT", "All changes will be lost,\nstill wanna quit?", QMessageBox.Yes | QMessageBox.No, defaultButton=QMessageBox.No)
-        # if close == QMessageBox.Yes:
-        #     # if user clicked yes, temrinate thread and close window
-        event.accept()
-        # else:
-        #     event.ignore()
 

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Dec 04 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -75,10 +75,10 @@ class DatabaseFetcher:
                                                     By Fid, SubFid'''):
             d.setdefault(fid, []).append(path)
         
-        l = []
+        file_paths = []
         for fid in sorted(d.keys()):
-            l.append(d[fid])
-        self.file_paths = l
+            file_paths.append(d[fid])
+        self.file_paths = file_paths
         
     
     @property
@@ -261,7 +261,13 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         BinInfoDict = {}
-        for BIN_NUM, BIN_NAME, BIN_PF in self.cursor.execute('''SELECT BIN_NUM, BIN_NAME, BIN_PF FROM Bin_Info WHERE BIN_TYPE = ? ORDER by BIN_NUM''', "H" if isHBIN else "S"):
+        for BIN_NUM, BIN_NAME, BIN_PF in self.cursor.execute('''SELECT 
+                                                                    BIN_NUM, BIN_NAME, BIN_PF 
+                                                                FROM 
+                                                                    Bin_Info 
+                                                                WHERE 
+                                                                    BIN_TYPE = ? 
+                                                                ORDER by BIN_NUM''', "H" if isHBIN else "S"):
             BinInfoDict[BIN_NUM] = {"BIN_NAME": BIN_NAME, "BIN_PF": BIN_PF}
         return BinInfoDict
         
@@ -274,9 +280,20 @@ class DatabaseFetcher:
         binType = "HBIN" if isHBIN else "SBIN"
         sql_param = {"HEAD_NUM":head, "SITE_NUM":site}
         if site == -1:
-            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND Supersede=0 GROUP by Fid, {binType}'''
+            sql = f'''SELECT 
+                            Fid, {binType}, count({binType}) 
+                        FROM 
+                            Dut_Info 
+                        WHERE 
+                            HEAD_NUM=:HEAD_NUM AND Supersede=0 GROUP by Fid, {binType}'''
         else:
-            sql = f'''SELECT Fid, {binType}, count({binType}) FROM Dut_Info WHERE HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM AND Supersede=0 GROUP by Fid, {binType}'''
+            sql = f'''SELECT 
+                            Fid, {binType}, count({binType}) 
+                        FROM 
+                            Dut_Info 
+                        WHERE 
+                            HEAD_NUM=:HEAD_NUM AND SITE_NUM=:SITE_NUM AND Supersede=0 
+                        GROUP by Fid, {binType}'''
             
         for fid, bin_num, count in self.cursor.execute(sql, sql_param):
             if bin_num is None: continue
@@ -355,19 +372,50 @@ class DatabaseFetcher:
             "Unknown":      [0 for _ in range(self.num_files)], 
             }
         # total duts from all files
-        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info GROUP by Fid ORDER by Fid"):
+        for fid, count in self.cursor.execute("""SELECT 
+                                                    Fid, count(*) 
+                                                FROM 
+                                                    Dut_Info 
+                                                GROUP by Fid 
+                                                ORDER by Fid"""):
             cntDict["Total"][fid] = count
         # pass duts from all files
-        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 0 GROUP by Fid ORDER by Fid"):
+        for fid, count in self.cursor.execute("""SELECT 
+                                                    Fid, count(*) 
+                                                FROM 
+                                                    Dut_Info 
+                                                WHERE Supersede=0 AND Flag & 24 = 0 
+                                                GROUP by Fid 
+                                                ORDER by Fid"""):
             cntDict["Pass"][fid] = count
         # fail duts from all files
-        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 8 GROUP by Fid ORDER by Fid"):
+        for fid, count in self.cursor.execute("""SELECT 
+                                                    Fid, count(*) 
+                                                FROM 
+                                                    Dut_Info 
+                                                WHERE 
+                                                    Supersede=0 AND Flag & 24 = 8 
+                                                GROUP by Fid 
+                                                ORDER by Fid"""):
             cntDict["Failed"][fid] = count
         # fail duts from all files
-        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16) GROUP by Fid ORDER by Fid"):
+        for fid, count in self.cursor.execute("""SELECT 
+                                                    Fid, count(*) 
+                                                FROM 
+                                                    Dut_Info 
+                                                WHERE 
+                                                    Flag is NULL OR (Supersede=0 AND Flag & 16 = 16) 
+                                                GROUP by Fid 
+                                                ORDER by Fid"""):
             cntDict["Unknown"][fid] = count
         # superseded duts from all files
-        for fid, count in self.cursor.execute("SELECT Fid, count(*) FROM Dut_Info WHERE Supersede=1 GROUP by Fid ORDER by Fid"):
+        for fid, count in self.cursor.execute("""SELECT 
+                                                    Fid, count(*) 
+                                                FROM 
+                                                    Dut_Info 
+                                                WHERE Supersede=1 
+                                                GROUP by Fid 
+                                                ORDER by Fid"""):
             cntDict["Superseded"][fid] = count
             
         return cntDict
@@ -384,16 +432,36 @@ class DatabaseFetcher:
         
         counts = []
         # pass duts
-        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24=0{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+        for count, in self.cursor.execute(f"""SELECT 
+                                                count(*) 
+                                            FROM 
+                                                Dut_Info 
+                                            WHERE 
+                                                Supersede=0 AND Flag & 24=0{head_cond}{site_cond}{wfid_cond}{file_cond}"""):
             counts.append(count)
         # fail duts
-        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=0 AND Flag & 24 = 8{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+        for count, in self.cursor.execute(f"""SELECT 
+                                                count(*) 
+                                            FROM 
+                                                Dut_Info 
+                                            WHERE 
+                                                Supersede=0 AND Flag & 24 = 8{head_cond}{site_cond}{wfid_cond}{file_cond}"""):
             counts.append(count)
         # unknown duts
-        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){head_cond}{site_cond}{wfid_cond}{file_cond}"):
+        for count, in self.cursor.execute(f"""SELECT 
+                                                count(*) 
+                                            FROM 
+                                                Dut_Info 
+                                            WHERE 
+                                                Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){head_cond}{site_cond}{wfid_cond}{file_cond}"""):
             counts.append(count)
         # superseded duts
-        for count, in self.cursor.execute(f"SELECT count(*) FROM Dut_Info WHERE Supersede=1{head_cond}{site_cond}{wfid_cond}{file_cond}"):
+        for count, in self.cursor.execute(f"""SELECT 
+                                                count(*) 
+                                            FROM 
+                                                Dut_Info 
+                                            WHERE 
+                                                Supersede=1{head_cond}{site_cond}{wfid_cond}{file_cond}"""):
             counts.append(count)
             
         return counts
@@ -765,7 +833,7 @@ class DatabaseFetcher:
         return failDict
     
     
-    def getDUTIndexFromBin(self, head: int, site: int, bin: int, isHBIN: bool = True, fileId: int = -1) -> list:
+    def getDUTIndexFromBin(self, head: int, site: int, binNum: int, isHBIN: bool = True, fileId: int = -1) -> list:
         '''
         returns list[ (File ID, DutIndex) ] that is in BIN{bin}
         '''        
@@ -779,7 +847,7 @@ class DatabaseFetcher:
         binType = "HBIN" if isHBIN else "SBIN"
         
         dutIndexList = []
-        sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {binType}={bin} AND HEAD_NUM={head} {ext_condition}"
+        sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {binType}={binNum} AND HEAD_NUM={head}{ext_condition}"
             
         for fid, dutIndex, in self.cursor.execute(sql):
             dutIndexList.append( (fid, dutIndex) )

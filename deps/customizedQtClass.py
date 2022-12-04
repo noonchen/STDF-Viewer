@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sun Dec 04 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -415,8 +415,6 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
 
             # lower left contains dut info
             if index.row() >= len(self.vheader_base) and index.column() < len(self.hheader_base):
-                # get test data indexes
-                test_index = index.column() - len(self.hheader_base)
                 fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
                 fid = int(fileStr.strip("File"))
                 dutIndex = int(dutIndStr.strip("#"))
@@ -630,7 +628,7 @@ class TestStatisticTableModel(QtCore.QAbstractTableModel):
     
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         try:
-            self.content[index.row()][index.column()]
+            _ = self.content[index.row()][index.column()]
             return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         except IndexError:
             return Qt.ItemFlag.NoItemFlags
@@ -689,7 +687,6 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
         self.vheader = vheader
         
     def data(self, index: QModelIndex, role: int):
-        item = ("", -1, False)
         try:
             item: tuple = self.content[index.row()][index.column()]
         except IndexError:
