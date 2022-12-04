@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Sun Dec 04 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -360,18 +360,18 @@ class reportGenerator(QtCore.QObject):
         sv.dutCol = len(headerLabelList[0])
     
     
-    def writeDUT_Testdata(self, testTuple):
+    def writeDUT_Testdata(self, testTuples: list):
+        #TODO a little complex...
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
         if DutSheet is None:
             return
 
-        return
         #TODO append test raw data to the last column
         max_width = 0
         test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, 
                                                                 self.selectedSites, 
                                                                 self.selectedFiles, 
-                                                                {"testTuple": testTuple})
+                                                                {"testTuples": testTuples})
         data_style_list = [self.centerStyle if stat else self.failedStyle for stat in test_stat_list]
         write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
         max_width = max([len(s) for s in test_data_list])
@@ -567,6 +567,7 @@ class reportGenerator(QtCore.QObject):
             # dut summary (dut part)
             self.writeDUT_Summary()
             if self.forceQuit: return
+            
             # bin sheet
             self.writeBinChart()
             if self.forceQuit: return
@@ -576,10 +577,10 @@ class reportGenerator(QtCore.QObject):
             
             # ** write contents related to test numbers
             self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
+            if self.forceQuit: return
+            self.writeDUT_Testdata(self.testTuples)
 
             for testTuple in self.testTuples:
-                self.writeDUT_Testdata(testTuple)
-                
                 for head, site in product(self.selectedHeads, self.selectedSites):
                     if self.forceQuit: return
 
@@ -722,11 +723,7 @@ class progressDisplayer(QtWidgets.QDialog):
         
     @Slot(list, list, list, dict)
     def getDutSummaryFromParent(self, selectedHeads: list, seletedSites: list, selectedFiles: list, kargs: dict):
-        if len(kargs) == 0:
-            self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles)
-        else:
-            #TODO
-            self.channel.dataListChannel = self.mainUI.prepareDUTSummaryForExporter(selectedHeads, seletedSites, **kargs)
+        self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles, kargs)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
