@@ -100,7 +100,10 @@ jobs:
         working-directory: .
         run: |
           # qt issue on linux
-          sudo apt install --reinstall libxcb-xinerama0
+          export QT_DEBUG_PLIGINS=1
+          sudo apt-get install libxcb-xinerama0
+          sudo apt-get install libxcb-icccm
+
           pyinstaller build_tools/linux.spec
 
       - name: Freeze Windows app
@@ -125,7 +128,7 @@ jobs:
           mv "dist/STDF Viewer.app" build_tools/STDF-Viewer-emptyDMG
           appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         name: Upload macOS app
         if: runner.os == 'macOS'
         with:
@@ -140,7 +143,7 @@ jobs:
           cp -avr dist/STDF-Viewer build_tools/STDF-Viewer-emptyDEB/usr/local/bin
           dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
       
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         name: Upload Linux app
         if: runner.os == 'Linux'
         with:
@@ -148,7 +151,7 @@ jobs:
           path: build_tools/STDF-Viewer-emptyDEB.deb
 
       # Windows
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         name: Upload Windows app
         with:
           name: STDF_Viewer_win_64bit
