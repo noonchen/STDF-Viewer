@@ -17,7 +17,7 @@ jobs:
   build-STDF-Viewer:
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [macos-11, windows-latest, ubuntu-latest]
 
@@ -104,6 +104,7 @@ jobs:
           export QT_DEBUG_PLUGINS=1
           sudo apt-get install libxcb-xinerama0
           sudo apt-get install libxcb-icccm4
+          sudo apt-get install libxcb-image0
 
           pyinstaller build_tools/linux.spec
 
