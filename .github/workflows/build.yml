@@ -1,84 +1,75 @@
-# This is a basic workflow to help you get started with Actions
-
 name: build
 
-# Controls when the workflow will run
 on:
   #push:
   #  branches: [ main ]
   pull_request:
     branches: [ main ]
+    paths-ignore:
+     - '**.md'
+     - '**.png'
+     - 'deps/cystdf/**.*'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
+  build-STDF-Viewer:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-11, windows-latest, ubuntu-latest]
 
-  macos-cp39:
-    # The type of runner that the job will run on
-    runs-on: macos-11
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-
-      - name: Setup Python
-        uses: actions/setup-python@v2.2.2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: 3.9
           architecture: x64
 
-      # - name: Install Cython
-      #   run: |
-      #     python -m pip install cython==3.0a6
+      # setup rust env and build helper
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Rust-STDF-Helper
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          working-directory: ./deps/rust_stdf_helper
+          args: --release --out dist
+      
+      - name: Install Rust-STDF-Helper
+        working-directory: ./deps/rust_stdf_helper
+        run: |
+          pip install rust_stdf_helper --no-index --find-links dist --force-reinstall
+          python -c "import rust_stdf_helper"
 
-      # - uses: robinraju/release-downloader@v1.2
-      #   name: Download latest numpy source
-      #   with: 
-      #     repository: "numpy/numpy"
-      #     latest: true
-      #     zipBall: true
-      #     out-file-path: "downloads"
+      - name: Get appdmg for dmg build
+        if: runner.os == 'macOS'
+        run: npm install -g appdmg
           
-      # - name: Get appdmg for dmg build
-      #   run: npm install -g appdmg
-          
-      # - name: Install Numpy-No-ACC-Pack
-      #   run: |
-      #     # cd downloads/
-      #     # for f in `ls . *.zip`
-      #     # do
-      #     # echo "found zip $f"
-      #     # done
-      #     cd .github/workflows/
-      #     unzip "numpy-1.22.1.zip" -d .
-      #     for d in */
-      #     do
-      #     echo ""
-      #     done
-      #     cd "$d"
-      #     NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
-      #     python setup.py install
+      # install numpy
+      - name: Install numpy vanilla
+        if: runner.os == 'Windows'
+        run: |
+          pip install .github/workflows/numpy-1.21.5+vanilla-cp39-cp39-win_amd64.whl
 
+      - name: Install Numpy-No-ACC-Pack
+        if: runner.os == 'macOS' || runner.os == 'Linux'
+        run: |
+          cd .github/workflows/
+          unzip "numpy-1.22.1.zip" -d .
+          for d in */
+          do
+          echo ""
+          done
+          cd "$d"
+          NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
+          python setup.py install
+
+      # install other dependencies
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
         
-      # - name: Compile libomp
-      #   working-directory: ./deps/cystdf/libomp
-      #   run: |
-      #     tar -xf openmp-13.0.0.src.tar.xz
-      #     mkdir build && cd build
-      #     cmake -DLIBOMP_ENABLE_SHARED=OFF -DLIBOMP_INSTALL_ALIASES=OFF -DCMAKE_INSTALL_PREFIX="" ../openmp-13.0.0.src/
-      #     export DESTDIR=.. && make install
-
-      # - name: Compile cystdf module
-      #   working-directory: ./deps/cystdf
-      #   run: |
-      #     python cystdf_amalgamation_setup.py build_ext --inplace
-
       # - name: Customize Pyinstaller
       #   working-directory: .
       #   run: |
@@ -96,198 +87,66 @@ jobs:
       #     # delete some hooks
       #     python build_tools/removePyinstallerHooks.py
 
-      # - name: Freeze app
-      #   working-directory: .
+      - name: Freeze macOS app
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: |
+          pyinstaller build_tools/macos.spec
+
+      - name: Freeze Linux app
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          pyinstaller build_tools/linux.spec
+
+      - name: Freeze Windows app
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          pyinstaller build_tools\\windows.spec
+
+      # - name: Clean dist folder
       #   run: |
-      #     pyinstaller build_tools/macos.spec
+      #     python build_tools/clean.py
 
       # - name: Clean dist folder
       #   run: |
       #     rm -rf "./dist/STDF-Viewer"
       #     python build_tools/clean.py
 
-      # - name: Build dmg package
-      #   run: |
-      #     mv "dist/STDF Viewer.app" build_tools/STDF-Viewer-emptyDMG
-      #     appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
+      # macOS
+      - name: Build macOS dmg package
+        if: runner.os == 'macOS'
+        run: |
+          mv "dist/STDF Viewer.app" build_tools/STDF-Viewer-emptyDMG
+          appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
 
-      # - uses: actions/upload-artifact@v2
-      #   name: Upload Artifact
-      #   with:
-      #     name: STDF_Viewer_macos
-      #     path: build_tools/STDF-Viewer-macos.dmg
-
-
-  ubuntu-cp39:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-
-      - name: Setup Python
-        uses: actions/setup-python@v2.2.2
+      - uses: actions/upload-artifact@v2
+        name: Upload macOS app
+        if: runner.os == 'macOS'
         with:
-          python-version: 3.9
-          architecture: x64
+          name: STDF_Viewer_macos
+          path: build_tools/STDF-Viewer-macos.dmg
 
-      # - name: Install Cython
-      #   run: |
-      #     python -m pip install cython==3.0a6
-
-      # - uses: robinraju/release-downloader@v1.2
-      #   name: Download latest numpy source
-      #   with: 
-      #     repository: "numpy/numpy"
-      #     tag: "v1.21.5"
-      #     zipBall: true
-      #     out-file-path: "downloads"
-          
-      # - name: Install Numpy-No-ACC-Pack
-      #   run: |
-      #     # cd downloads/
-      #     # for f in `ls . *.zip`
-      #     # do
-      #     # echo "found zip $f"
-      #     # done
-      #     cd .github/workflows/
-      #     unzip "numpy-1.22.1.zip" -d .          
-      #     for d in */
-      #     do
-      #     echo ""
-      #     done
-      #     cd "$d"
-      #     NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
-      #     python setup.py install
-
-      - name: Install dependencies
+      # Linux
+      - name: Build Linux deb
+        if: runner.os == 'Linux'
         run: |
-          pip install -r requirements.txt
-        
-      # - name: Compile cystdf module
-      #   working-directory: ./deps/cystdf
-      #   run: |
-      #     python cystdf_amalgamation_setup.py build_ext --inplace
-
-      # - name: Customize Pyinstaller
-      #   working-directory: .
-      #   run: |
-      #     # patch two pys
-      #     python -c "import os, PyInstaller; \
-      #     qthook=os.path.join(os.path.dirname(PyInstaller.__file__), 'utils', 'hooks', 'qt.py'); \
-      #     rthooks=os.path.join(os.path.dirname(PyInstaller.__file__), 'hooks', 'rthooks.dat'); \
-      #     qtpatchpath=os.path.join('.github', 'workflows', 'qt.py.patch'); \
-      #     rthookpatchpath=os.path.join('.github', 'workflows', 'rthooks.dat.patch'); \
-      #     command1='patch -u '+qthook+' '+qtpatchpath; \
-      #     command2='patch -u '+rthooks+' '+rthookpatchpath; \
-      #     os.system(command1); \
-      #     os.system(command2); \
-      #     print(command1); print(command2)"
-      #     # delete some hooks
-      #     python build_tools/removePyinstallerHooks.py
-
-      # - name: Freeze app
-      #   working-directory: .
-      #   run: |
-      #     pyinstaller build_tools/linux.spec
-
-      # - name: Clean dist folder
-      #   run: |
-      #     python build_tools/clean.py
-
-      # - name: Build deb package
-      #   run: |
-      #     rm build_tools/STDF-Viewer-emptyDEB/usr/local/bin/placeholder
-      #     cp -avr dist/STDF-Viewer build_tools/STDF-Viewer-emptyDEB/usr/local/bin
-      #     dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
+          rm build_tools/STDF-Viewer-emptyDEB/usr/local/bin/placeholder
+          cp -avr dist/STDF-Viewer build_tools/STDF-Viewer-emptyDEB/usr/local/bin
+          dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
       
-      # - uses: actions/upload-artifact@v2
-      #   name: Upload Artifact
-      #   with:
-      #     name: STDF_Viewer_linux
-      #     path: build_tools/STDF-Viewer-emptyDEB.deb
-
-
-  windows-cp39:
-    # The type of runner that the job will run on
-    runs-on: windows-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-      
-      - name: Setup Python
-        uses: actions/setup-python@v2.2.2
+      - uses: actions/upload-artifact@v2
+        name: Upload Linux app
+        if: runner.os == 'Linux'
         with:
-          # known bug when using pyinstaller 4.7 in python 3.9.8
-          python-version: 3.9.5
-          architecture: x64
-          
-      # - name: Set Mingw as default
-      #   working-directory: .
-      #   run: |
-      #     # add distutils.cfg
-      #     python -c "import os, distutils; f=open(os.path.join(os.path.dirname(distutils.__file__), 'distutils.cfg'), 'w'); f.writelines('[build]\ncompiler = mingw32\n\n[build_ext]\ncompiler=mingw32'); f.close()"
-      #     # add a patch to cygwinccompiler.py
-      #     python -c "import os, distutils, string; cypath=os.path.join(os.path.dirname(distutils.__file__), 'cygwinccompiler.py'); patchpath=os.path.join('.github', 'workflows', 'cy.patch'); command='patch -u '+cypath+' '+patchpath; os.system(command)"
+          name: STDF_Viewer_linux
+          path: build_tools/STDF-Viewer-emptyDEB.deb
 
-      # - uses: suisei-cn/actions-download-file@v1
-      #   id: numpy_vanilla
-      #   name: Download numpy vanilla
-      #   with:
-      #     url: "https://download.lfd.uci.edu/pythonlibs/w6tyco5e/numpy-1.21.4+vanilla-cp39-cp39-win_amd64.whl"
-      #     target: "mydownloads"
+      # Windows
+      - uses: actions/upload-artifact@v2
+        name: Upload Windows app
+        with:
+          name: STDF_Viewer_win_64bit
+          path: dist/
 
-      - name: Install numpy vanilla
-        run: |
-          # cd mydownloads
-          # pip install ${{steps.numpy_vanilla.outputs.filename}}
-          pip install .github/workflows/numpy-1.21.5+vanilla-cp39-cp39-win_amd64.whl
-      
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-        
-      # - name: Compile cystdf module
-      #   working-directory: ./deps/cystdf
-      #   run: |
-      #     python cystdf_amalgamation_setup.py build_ext --inplace --compile=mingw32
-
-      # - name: Customize Pyinstaller
-      #   working-directory: .
-      #   run: |
-      #     # patch two pys
-      #     python -c "import os, PyInstaller; \
-      #     qthook=os.path.join(os.path.dirname(PyInstaller.__file__), 'utils', 'hooks', 'qt.py'); \
-      #     rthooks=os.path.join(os.path.dirname(PyInstaller.__file__), 'hooks', 'rthooks.dat'); \
-      #     qtpatchpath=os.path.join('.github', 'workflows', 'qt.py.patch'); \
-      #     rthookpatchpath=os.path.join('.github', 'workflows', 'rthooks.dat.patch'); \
-      #     command1='patch -u '+qthook+' '+qtpatchpath; \
-      #     command2='patch -u '+rthooks+' '+rthookpatchpath; \
-      #     os.system(command1); \
-      #     os.system(command2); \
-      #     print(command1); print(command2)"
-      #     # delete some hooks
-      #     python build_tools/removePyinstallerHooks.py
-
-      # - name: Freeze app
-      #   working-directory: .
-      #   run: |
-      #     pyinstaller build_tools\\windows.spec
-
-      # - name: Print SPEC File
-      #   run: |
-      #     Get-ChildItem -Path . *.spec | ForEach-Object {cat $_.Name}
-
-      # - name: Clean dist folder
-      #   run: |
-      #     python build_tools/clean.py
-
-      # - uses: actions/upload-artifact@v2
-      #   name: Upload Artifact
-      #   with:
-      #     name: STDF_Viewer_win_64bit
-      #     path: dist/
