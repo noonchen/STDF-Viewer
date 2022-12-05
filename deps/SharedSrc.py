@@ -17,7 +17,8 @@ import rust_stdf_helper
 import numpy as np
 from enum import IntEnum
 from random import choice
-from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5 import QtGui, QtCore
+from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
@@ -360,12 +361,14 @@ class tab(IntEnum):
     Wafer = 5
     Correlate = 6
     
+
 class REC(IntEnum):
     '''Constants of STDF Test Records: sub'''
     PTR = 10
     FTR = 20
     MPR = 15
     
+
 record_name_dict = {
     REC.PTR: "PTR",
     REC.FTR: "FTR",
@@ -413,7 +416,7 @@ mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time",
 
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
-rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for _ in range(6)])
 
 
 # check if a hex color string
@@ -493,7 +496,7 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
 
 def deleteWidget(w2delete):
     '''delete QWidget(s) and release its memory'''
-    if isinstance(w2delete, QtWidgets.QWidget):
+    if isinstance(w2delete, QWidget):
         w2delete.setParent(None)
         w2delete.deleteLater()
     elif isinstance(w2delete, list):
@@ -634,33 +637,6 @@ def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
         return (test_num, pmr, test_name)
 
 
-def stringifyTestData(testDict: dict, valueFormat: str) -> list:
-    '''Stringify data for displaying and saving to reports'''
-    recHeader = testDict["recHeader"]
-    test_data_list = [testDict["TEST_NAME"], 
-                        "%d" % testDict["TEST_NUM"],
-                        "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
-                        "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
-                        testDict["Unit"]]
-        
-    if recHeader == REC.FTR:
-        # FTR only contains test flag
-        test_data_list += ["-" if np.isnan(data) else "Test Flag: %d" % data for data in testDict["dataList"]]
-        
-    elif recHeader == REC.PTR:
-        test_data_list += ["-" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
-        
-    else:
-        if testDict["dataList"].size == 0:
-            # No PMR related and no test data in MPR, use test flag instead
-            test_data_list += ["-" if flag < 0 else "Test Flag: %d" % flag for flag in testDict["flagList"]]
-        else:
-            # Test data exists
-            test_data_list += ["-" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
-            
-    return test_data_list
-
-
 def openFileInOS(filepath: str):
     # https://stackoverflow.com/a/435669
     filepath = os.path.normpath(filepath)
@@ -759,6 +735,32 @@ def pyqtGraphPlot2Bytes(chart) -> io.BytesIO:
     return None
 
 
+def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon=None):
+    msgbox = QMessageBox(None)
+    if title:
+        msgbox.setText(transFunc(title))
+    else:
+        msgbox.setText(transFunc("Completed"))
+    
+    if infoText:
+        msgbox.setInformativeText(transFunc(infoText))
+    else:
+        msgbox.setInformativeText(transFunc("File is saved in %s") % outPath)
+    
+    if icon:
+        msgbox.setIcon(icon)
+    
+    revealBtn = msgbox.addButton(transFunc(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+    openBtn = msgbox.addButton(transFunc("Open..."), QMessageBox.ButtonRole.ActionRole)
+    okBtn = msgbox.addButton(transFunc("OK"), QMessageBox.ButtonRole.YesRole)
+    msgbox.setDefaultButton(okBtn)
+    msgbox.exec_()
+    if msgbox.clickedButton() == revealBtn:
+        revealFile(outPath)
+    elif msgbox.clickedButton() == openBtn:
+        openFileInOS(outPath)
+    
+
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
@@ -771,7 +773,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
-           "openFileInOS", "revealFile", "rHEX", "get_file_size",
+           "showCompleteMessage", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",

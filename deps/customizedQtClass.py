@@ -99,8 +99,8 @@ class StyleDelegateForTable_List(QStyledItemDelegate):
 
 
 def getHS(text: str):
-    l = text.split(" ")
-    head, site = [int(ele) for ele in l if ele.isdigit()]
+    seglist = text.split(" ")
+    head, site = [int(ele) for ele in seglist if ele.isdigit()]
     return head << 8 | site
 
 
@@ -715,7 +715,7 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
     
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         try:
-            self.content[index.row()][index.column()]
+            _ = self.content[index.row()][index.column()]
             return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         except IndexError:
             return Qt.ItemFlag.NoItemFlags

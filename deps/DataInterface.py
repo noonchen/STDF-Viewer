@@ -565,7 +565,7 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "HHeader": hHeaderLabels, "Rows": rowList}
     
     
-    def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = []):
+    def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):
         '''
         Generate HBIN/SBIN distribution of selected heads and sites
         

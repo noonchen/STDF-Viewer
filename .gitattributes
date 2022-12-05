@@ -1,3 +1,5 @@
 *.* linguist-vendored=false
 # exclude deprecated cystdf
-deps/cystdf/**.* linguist-vendored=true
+deps/cystdf/** linguist-vendored
+# exclude build tools
+deps/build_tools/** linguist-vendored
