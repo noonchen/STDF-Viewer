@@ -1,5 +1,6 @@
 numpy
 PyQt5>=5.15.2
+pyqtgraph
 toml==0.10.2
 XlsxWriter==3.0.3
-pyinstaller==4.7
+pyinstaller
