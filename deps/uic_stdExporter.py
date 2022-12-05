@@ -1156,18 +1156,10 @@ class stdfExporter(QtWidgets.QDialog):
             title = self.tr("Process Aborted!")
             msg = self.tr("Partial report is saved in:")
             
-        msgbox = QMessageBox(None)
-        msgbox.setText(title)
-        msgbox.setInformativeText('%s\n\n%s\n'%(msg, reportPath))
-        msgbox.setIcon(QMessageBox.Icon.Information)
-        revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
-        openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
-        okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
-        msgbox.setDefaultButton(okBtn)
-        msgbox.exec_()
-        if msgbox.clickedButton() == revealBtn:
-            revealFile(reportPath)
-        elif msgbox.clickedButton() == openBtn:
-            openFileInOS(reportPath)
+        showCompleteMessage(self.tr, 
+                            reportPath, 
+                            title, 
+                            '%s\n\n%s\n'%(msg, reportPath), 
+                            QMessageBox.Icon.Information)
 
 

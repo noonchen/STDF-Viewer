@@ -17,7 +17,8 @@ import rust_stdf_helper
 import numpy as np
 from enum import IntEnum
 from random import choice
-from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5 import QtGui, QtCore
+from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
@@ -493,7 +494,7 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
 
 def deleteWidget(w2delete):
     '''delete QWidget(s) and release its memory'''
-    if isinstance(w2delete, QtWidgets.QWidget):
+    if isinstance(w2delete, QWidget):
         w2delete.setParent(None)
         w2delete.deleteLater()
     elif isinstance(w2delete, list):
@@ -759,6 +760,32 @@ def pyqtGraphPlot2Bytes(chart) -> io.BytesIO:
     return None
 
 
+def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon=None):
+    msgbox = QMessageBox(None)
+    if title:
+        msgbox.setText(transFunc(title))
+    else:
+        msgbox.setText(transFunc("Completed"))
+    
+    if infoText:
+        msgbox.setInformativeText(transFunc(infoText))
+    else:
+        msgbox.setInformativeText(transFunc("File is saved in %s") % outPath)
+    
+    if icon:
+        msgbox.setIcon(icon)
+    
+    revealBtn = msgbox.addButton(transFunc(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
+    openBtn = msgbox.addButton(transFunc("Open..."), QMessageBox.ButtonRole.ActionRole)
+    okBtn = msgbox.addButton(transFunc("OK"), QMessageBox.ButtonRole.YesRole)
+    msgbox.setDefaultButton(okBtn)
+    msgbox.exec_()
+    if msgbox.clickedButton() == revealBtn:
+        revealFile(outPath)
+    elif msgbox.clickedButton() == openBtn:
+        openFileInOS(outPath)
+    
+
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
@@ -771,7 +798,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
-           "openFileInOS", "revealFile", "rHEX", "get_file_size",
+           "showCompleteMessage", "rHEX", "get_file_size",
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -165,18 +165,7 @@ class DutDataDisplayer(QtWidgets.QDialog):
                                                                     Qt.ItemDataRole.DisplayRole)) for col in range(columnTotal)]
                     f.write(",".join([vh[row]] + rowDataList)+"\n")
             
-            msgbox = QMessageBox(None)
-            msgbox.setText(self.tr("Completed"))
-            msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
-            msgbox.setDefaultButton(okBtn)
-            msgbox.exec_()
-            if msgbox.clickedButton() == revealBtn:
-                revealFile(outPath)
-            elif msgbox.clickedButton() == openBtn:
-                openFileInOS(outPath)
+            showCompleteMessage(self.tr, outPath)
             
     
     def onSave_xlsx(self):
@@ -246,18 +235,7 @@ class DutDataDisplayer(QtWidgets.QDialog):
                     write_row(sheetOBJ, row + 1, 0, rowDataList, rowStyleList)
                 
                 # resize columns
-                [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
+                _ = [sheetOBJ.set_column(col, col, strLen * 1.1) for col, strLen in enumerate(col_width)]
                 
-            msgbox = QMessageBox(None)
-            msgbox.setText(self.tr("Completed"))
-            msgbox.setInformativeText(self.tr("File is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
-            msgbox.setDefaultButton(okBtn)
-            msgbox.exec_()
-            if msgbox.clickedButton() == revealBtn:
-                revealFile(outPath)
-            elif msgbox.clickedButton() == openBtn:
-                openFileInOS(outPath)
+            showCompleteMessage(self.tr, outPath)
 

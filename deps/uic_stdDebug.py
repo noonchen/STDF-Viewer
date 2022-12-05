@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -147,18 +147,7 @@ class stdDebugPanel(QtWidgets.QDialog):
             with open(outPath, "w") as f:
                 f.write(self.dbgUI.textBrowser.toPlainText())
                 
-            msgbox = QMessageBox(None)
-            msgbox.setText(self.tr("Completed"))
-            msgbox.setInformativeText(self.tr("Text file is saved in %s") % outPath)
-            revealBtn = msgbox.addButton(self.tr(" Reveal in folder "), QMessageBox.ButtonRole.ApplyRole)
-            openBtn = msgbox.addButton(self.tr("Open..."), QMessageBox.ButtonRole.ActionRole)
-            okBtn = msgbox.addButton(self.tr("OK"), QMessageBox.ButtonRole.YesRole)
-            msgbox.setDefaultButton(okBtn)
-            msgbox.exec_()
-            if msgbox.clickedButton() == revealBtn:
-                revealFile(outPath)
-            elif msgbox.clickedButton() == openBtn:
-                openFileInOS(outPath)
+            showCompleteMessage(self.tr, outPath)
 
             
     def closeEvent(self, event):
