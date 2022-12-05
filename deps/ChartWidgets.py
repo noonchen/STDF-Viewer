@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Fri Dec 02 2022
+# Last Modified: Mon Dec 05 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -569,7 +569,10 @@ class WaferMap(pg.GraphicsView):
                                  rowspan=1, colspan=2, size="20pt")
         # die size
         if die_size:
-            pitem.addItem(pg.TextItem(die_size, color="#000000"))
+            dieSizeText = pg.LabelItem(die_size, size="12pt", color="#000000", anchor=(0, 0))
+            dieSizeText.setParentItem(pitem)
+            dieSizeText.anchor(itemPos=(0, 0), parentPos=(0, 0), offset=(30, 30))
+            
         # add map and axis
         self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)
         # add legend
