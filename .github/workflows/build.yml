@@ -102,7 +102,6 @@ jobs:
           # qt issue on linux
           export QT_DEBUG_PLIGINS=1
           sudo apt-get install libxcb-xinerama0
-          sudo apt-get install libxcb-icccm
 
           pyinstaller build_tools/linux.spec
 
