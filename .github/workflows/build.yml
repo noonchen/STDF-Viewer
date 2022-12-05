@@ -17,6 +17,7 @@ jobs:
   build-STDF-Viewer:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-11, windows-latest, ubuntu-latest]
 
@@ -98,6 +99,8 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: .
         run: |
+          # qt issue on linux
+          sudo apt install --reinstall libxcb-xinerama0
           pyinstaller build_tools/linux.spec
 
       - name: Freeze Windows app
