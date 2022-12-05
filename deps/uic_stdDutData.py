@@ -30,7 +30,7 @@ from .customizedQtClass import *
 from .SharedSrc import *
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton, QMessageBox
+from PyQt5.QtWidgets import QAbstractItemView, QFileDialog, QPushButton
 from PyQt5.QtCore import QTranslator, Qt
 from .ui.stdfViewer_dutDataUI import Ui_dutData
 # pyside2

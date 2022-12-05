@@ -58,7 +58,7 @@ class DatabaseFetcher:
         
     
     def closeDB(self):
-        if not self.connection is None:
+        if self.connection:
             self.connection.close()
         
     

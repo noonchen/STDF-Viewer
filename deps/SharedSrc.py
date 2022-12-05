@@ -361,12 +361,14 @@ class tab(IntEnum):
     Wafer = 5
     Correlate = 6
     
+
 class REC(IntEnum):
     '''Constants of STDF Test Records: sub'''
     PTR = 10
     FTR = 20
     MPR = 15
     
+
 record_name_dict = {
     REC.PTR: "PTR",
     REC.FTR: "FTR",
@@ -414,7 +416,7 @@ mirDescriptions = ["Byte Order", "Setup Time", "Start Time", "Finish Time",
 
 mirDict = dict(zip(mirFieldNames, mirDescriptions))
 
-rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for j in range(6)])
+rHEX = lambda: "#"+"".join([choice('0123456789ABCDEF') for _ in range(6)])
 
 
 # check if a hex color string
@@ -633,33 +635,6 @@ def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
                 test_name = f"{tmpList[1]}\t{test_name}"
                 
         return (test_num, pmr, test_name)
-
-
-def stringifyTestData(testDict: dict, valueFormat: str) -> list:
-    '''Stringify data for displaying and saving to reports'''
-    recHeader = testDict["recHeader"]
-    test_data_list = [testDict["TEST_NAME"], 
-                        "%d" % testDict["TEST_NUM"],
-                        "N/A" if np.isnan(testDict["HL"]) else valueFormat % testDict["HL"],
-                        "N/A" if np.isnan(testDict["LL"]) else valueFormat % testDict["LL"],
-                        testDict["Unit"]]
-        
-    if recHeader == REC.FTR:
-        # FTR only contains test flag
-        test_data_list += ["-" if np.isnan(data) else "Test Flag: %d" % data for data in testDict["dataList"]]
-        
-    elif recHeader == REC.PTR:
-        test_data_list += ["-" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
-        
-    else:
-        if testDict["dataList"].size == 0:
-            # No PMR related and no test data in MPR, use test flag instead
-            test_data_list += ["-" if flag < 0 else "Test Flag: %d" % flag for flag in testDict["flagList"]]
-        else:
-            # Test data exists
-            test_data_list += ["-" if np.isnan(data) else valueFormat % data for data in testDict["dataList"]]
-            
-    return test_data_list
 
 
 def openFileInOS(filepath: str):

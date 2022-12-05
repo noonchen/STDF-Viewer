@@ -32,7 +32,7 @@ import rust_stdf_helper
 # pyqt5
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
-from PyQt5.QtCore import QTranslator, pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
+from PyQt5.QtCore import QTranslator, pyqtSignal as Signal, pyqtSlot as Slot
 
 
 
