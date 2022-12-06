@@ -56,17 +56,16 @@ jobs:
       - name: Install Numpy-No-ACC-Pack
         if: runner.os == 'macOS' || runner.os == 'Linux'
         run: |
-          # pip install cython
-          # cd .github/workflows/
-          # unzip "numpy-1.22.1.zip" -d .
-          # for d in */
-          # do
-          # echo ""
-          # done
-          # cd "$d"
-          # NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
-          # python setup.py install
-          pip install numpy
+          pip install cython
+          cd .github/workflows/
+          unzip "numpy-1.22.1.zip" -d .
+          for d in */
+          do
+          echo ""
+          done
+          cd "$d"
+          NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
+          python setup.py install
 
       # install other dependencies
       - name: Install dependencies
