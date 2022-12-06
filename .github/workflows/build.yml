@@ -102,9 +102,10 @@ jobs:
         run: |
           # qt issue on linux
           export QT_DEBUG_PLUGINS=1
-          sudo apt-get install libxcb-xinerama0
-          sudo apt-get install libxcb-icccm4
-          sudo apt-get install libxcb-image0
+          sudo apt-get install \
+            libxcb-xinerama0 libxcb-image0 \ 
+            libxcb-keysyms1 libxcb-render-util0 \
+            libxkbcommon-x11-0 libxcb-icccm4 libxcb1
 
           pyinstaller build_tools/linux.spec
 
