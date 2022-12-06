@@ -74,23 +74,6 @@ jobs:
           pip install -r requirements.txt
           pip3 install -U pyinstaller wheel pyinstaller-hooks-contrib
         
-      # - name: Customize Pyinstaller
-      #   working-directory: .
-      #   run: |
-      #     # patch two pys
-      #     python -c "import os, PyInstaller; \
-      #     qthook=os.path.join(os.path.dirname(PyInstaller.__file__), 'utils', 'hooks', 'qt.py'); \
-      #     rthooks=os.path.join(os.path.dirname(PyInstaller.__file__), 'hooks', 'rthooks.dat'); \
-      #     qtpatchpath=os.path.join('.github', 'workflows', 'qt.py.patch'); \
-      #     rthookpatchpath=os.path.join('.github', 'workflows', 'rthooks.dat.patch'); \
-      #     command1='patch -u '+qthook+' '+qtpatchpath; \
-      #     command2='patch -u '+rthooks+' '+rthookpatchpath; \
-      #     os.system(command1); \
-      #     os.system(command2); \
-      #     print(command1); print(command2)"
-      #     # delete some hooks
-      #     python build_tools/removePyinstallerHooks.py
-
       - name: Freeze macOS app
         if: runner.os == 'macOS'
         working-directory: .
@@ -137,6 +120,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mv "dist/STDF Viewer.app" build_tools/STDF-Viewer-emptyDMG
+          ls -lahR build_tools/STDF-Viewer-emptyDMG
+
           appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
 
       - uses: actions/upload-artifact@v3
@@ -152,6 +137,8 @@ jobs:
         run: |
           rm build_tools/STDF-Viewer-emptyDEB/usr/local/bin/placeholder
           cp -avr dist/STDF-Viewer build_tools/STDF-Viewer-emptyDEB/usr/local/bin
+          ls -lahR build_tools/STDF-Viewer-emptyDEB
+          
           dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
       
       - uses: actions/upload-artifact@v3
@@ -162,9 +149,16 @@ jobs:
           path: build_tools/STDF-Viewer-emptyDEB.deb
 
       # Windows
+      - name: Pack Windows app
+        if: runner.os == 'Windows'
+        run: |
+          ls -R dist
+          7z a -tzip STDF_Viewer_win.zip dist/
+
       - uses: actions/upload-artifact@v3
         name: Upload Windows app
+        if: runner.os == 'Windows'
         with:
           name: STDF_Viewer_win_64bit
-          path: dist/
+          path: STDF_Viewer_win.zip
 
