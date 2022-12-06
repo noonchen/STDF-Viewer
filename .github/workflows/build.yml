@@ -109,6 +109,8 @@ jobs:
           sudo apt-get install libxcb-render-util0
           sudo apt-get install libxkbcommon-x11-0
           sudo apt-get install libxcb1
+          sudo apt-get install libxcb-randr0
+          ldd /opt/hostedtoolcache/Python/3.9.15/x64/lib/python3.9/site-packages/PyQt5/Qt5/plugins/platforms/libqxcb.so
 
           pyinstaller build_tools/linux.spec
 
