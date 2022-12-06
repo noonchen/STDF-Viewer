@@ -115,9 +115,7 @@ jobs:
             libxcb-randr0 \
             libxcb-shape0
           
-          xvfb-run pack command
-
-          pyinstaller build_tools/linux.spec
+          xvfb-run pyinstaller build_tools/linux.spec
 
       - name: Freeze Windows app
         if: runner.os == 'Windows'
