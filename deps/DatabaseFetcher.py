@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Thu Dec 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -134,9 +134,15 @@ class DatabaseFetcher:
                                                                     ORDER by Test_Info.TEST_ID, TestPin_Map.ROWID"):
             if isinstance(PMR_INDX, int):
                 # Create test items for each pin in MPR data
-                TestList.append(f"{TEST_NUM}\t#{PMR_INDX}\t{TEST_NAME}")
+                item = f"{TEST_NUM}\t#{PMR_INDX}\t{TEST_NAME}"
             else:
-                TestList.append(f"{TEST_NUM}\t{TEST_NAME}")
+                item = f"{TEST_NUM}\t{TEST_NAME}"
+            
+            # there will be duplicated items
+            # if multiple files belong to a same lot/ sub lots.
+            if item not in TestList:
+                TestList.append(item)
+            
         return TestList
     
     
@@ -623,6 +629,7 @@ class DatabaseFetcher:
         
         dutList = np.array(sorted(duts), dtype=np.uint32)
         dutMap = dict(zip(dutList, range(dutsCount)))
+        maxDutIndex = np.max(dutList)
         # initiate default value, shape of dataList is related to 
         # record type, thus it is moved inside case block
         flagList = np.full(dutsCount, fill_value=-1, dtype=np.int16)
@@ -637,6 +644,8 @@ class DatabaseFetcher:
                                                             WHERE TEST_ID={testID}{dut_condition}
                                                             ORDER By DUTIndex
                                                             '''):
+                if dutIndex > maxDutIndex: break
+                elif dutIndex not in dutMap: continue
                 arrayInd = dutMap[dutIndex]
                 dataList[arrayInd] = rslt
                 flagList[arrayInd] = flag
@@ -660,6 +669,8 @@ class DatabaseFetcher:
                                                             WHERE TEST_ID={testID}{dut_condition}
                                                             ORDER By DUTIndex
                                                             '''):
+                if dutIndex > maxDutIndex: break
+                elif dutIndex not in dutMap: continue
                 arrayInd = dutMap[dutIndex]
                 flagList[arrayInd] = flag
                 if mprRsltCnt > 0:
@@ -681,6 +692,8 @@ class DatabaseFetcher:
                                                         WHERE TEST_ID={testID}{dut_condition}
                                                         ORDER By DUTIndex
                                                         '''):
+                if dutIndex > maxDutIndex: break
+                elif dutIndex not in dutMap: continue
                 arrayInd = dutMap[dutIndex]
                 flagList[arrayInd] = flag
             return {"dutList": dutList, 
@@ -971,28 +984,31 @@ class DatabaseFetcher:
         return info
 
 
-    def getFullDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileIds: list[int]) -> list:
+    def getDutIndexDictFromHeadSite(self, heads: list[int], sites: list[int], fileIds: list[int]) -> dict:
         '''
-        return a list of `full dut info`
+        return a dict, key: File id, value: a list of DUTIndex that meets the head site condition
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        info = []
+        dutIndexDict = {}
         if len(heads) == 0 or len(sites) == 0:
-            return info
+            return dutIndexDict
 
-        file_condition = f" Dut_Info.Fid in ({','.join(map(str, fileIds))})"
+        file_condition = f" Fid in ({','.join(map(str, fileIds))})"
         head_condition = f" AND HEAD_NUM in ({','.join(map(str, heads))})"
         site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({','.join(map(str, sites))})"
         
-        sql = f'''{DUT_SUMMARY_QUERY} 
-                    WHERE {file_condition}{head_condition}{site_condition}
-                    ORDER By Dut_Info.Fid, DUTIndex'''
+        sql = f'''SELECT 
+                    Fid, DUTIndex 
+                FROM 
+                    Dut_Info
+                WHERE {file_condition}{head_condition}{site_condition}
+                ORDER By Fid, DUTIndex'''
         
-        for _, *full_tup in self.cursor.execute(sql):
-            info.append(full_tup)
+        for fid, DUTIndex in self.cursor.execute(sql):
+            dutIndexDict.setdefault(fid, []).append(DUTIndex)
             
-        return info
+        return dutIndexDict
 
 
 

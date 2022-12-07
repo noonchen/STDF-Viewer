@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Thu Dec 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1029,17 +1029,12 @@ class MyWindow(QtWidgets.QMainWindow):
         return info
     
     
-    def getDUTSummaryForReport(self, heads: list[int], sites: list[int], fids: list[int], kargs: dict):
-        # TODO get dut summary from all files for now
-        fids = list(range(self.data_interface.num_files))
-        
-        if "testTuples" in kargs:
-            testTuples = kargs["testTuples"]
-            #TODO a little complex... do it later..
-            tdata = self.data_interface.getTestDataTableContent(testTuples, heads, sites)
-            return tdata
-        else:
-            return self.data_interface.DatabaseFetcher.getFullDUTInfoOnCondition(heads, sites, fids)
+    def getDUTSummaryForReport(self, heads: list[int], sites: list[int], fids: list[int], testTuples: list):
+        '''
+        For report generator
+        Return data for `DutSummary` content
+        '''
+        return self.data_interface.getDutSummaryReportContent(testTuples, heads, sites, fids)
     
     
     def getDatalogForReport(self):

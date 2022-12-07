@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Thu Dec 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -337,8 +337,8 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
         super().__init__()
         self.testData = {}
         self.testInfo = {}
-        self.dutIndMap = []
-        self.dutInfoMap = []
+        self.dutIndMap = {}
+        self.dutInfoMap = {}
         self.hheader_base = []
         self.vheader_base = []
         self.testLists = []
@@ -352,10 +352,10 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
     def setTestInfo(self, testInfo: dict):
         self.testInfo = testInfo
         
-    def setDutIndexMap(self, dutIndMap: list):
+    def setDutIndexMap(self, dutIndMap: dict):
         self.dutIndMap = dutIndMap
         
-    def setDutInfoMap(self, dutInfo: list):
+    def setDutInfoMap(self, dutInfo: dict):
         self.dutInfoMap = dutInfo
         
     def setHHeaderBase(self, hheaderBase: list):
@@ -472,7 +472,7 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                     recHeader = data_test_file["recHeader"]
                     if recHeader == REC.FTR:
                         data = data_test_file["dataList"][data_ind]
-                        return "Not Tested" if np.isnan(data) else f"Test Flag: {int(data)}"
+                        return "Not Tested" if np.isnan(data) or data < 0 else f"Test Flag: {int(data)}"
                     elif recHeader == REC.PTR:
                         data = data_test_file["dataList"][data_ind]
                         return "Not Tested" if np.isnan(data) else self.floatFormat % data
