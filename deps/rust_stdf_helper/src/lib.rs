@@ -591,8 +591,9 @@ fn generate_database(
                         }
                     };
                     // calculate the reading progress in each thread
-                    let file_progress = (sub_fid + 1) as f32 / num_files as f32;
-                    let progress_x100 = raw_rec.offset as f32 * file_progress * 10000.0 / file_size;
+                    let progress_x100 = 10000.0
+                        * (raw_rec.offset as f32 / file_size + sub_fid as f32)
+                        / num_files as f32;
                     // send
                     if thread_tx
                         .send((fid, sub_fid, progress_x100, raw_rec))
