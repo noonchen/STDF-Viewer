@@ -377,10 +377,12 @@ class reportGenerator(QtCore.QObject):
         for testTuple in self.testTuples:
             testInfo = summaryTable["TestInfo"][testTuple]
             testData = summaryTable["Data"][testTuple]
+            recHeader = REC.PTR
             dataList = []
             flagList = []
             for fid, dutIndex in order:
                 try:
+                    recHeader = testData[fid]["recHeader"]
                     dataIndex = summaryTable["dut2ind"][fid][dutIndex]
                     dataList.append(testData[fid]["dataList"][dataIndex])
                     flagList.append(testData[fid]["flagList"][dataIndex])
@@ -391,6 +393,7 @@ class reportGenerator(QtCore.QObject):
             write_row_col(DutSheet, 
                           0, sv.dutCol, 
                           *self.stringifyDutSummaryTestData(testInfo, 
+                                                            recHeader,
                                                             dataList, 
                                                             flagList), 
                           writeRow=False)
@@ -399,7 +402,7 @@ class reportGenerator(QtCore.QObject):
             self.sendProgress()
                     
             
-    def stringifyDutSummaryTestData(self, testInfo: list, dataList: list, flagList: list):
+    def stringifyDutSummaryTestData(self, testInfo: list, recHeader: int, dataList: list, flagList: list):
         floatFormat = getSetting().getFloatFormat()
         dataRow = []
         cellFormats = []
@@ -408,9 +411,11 @@ class reportGenerator(QtCore.QObject):
         dataRow.extend(testInfo)
         cellFormats.extend([self.centerStyle for _ in enumerate(testInfo)])
         # convert dataList
-        #TODO, special handling for FTR
         for data, flag in zip(dataList, flagList):
-            dataRow.append("-" if np.isnan(data) else floatFormat % data)
+            if recHeader == REC.FTR:
+                dataRow.append("-" if np.isnan(data) or data < 0 else f"Test Flag: {data}")
+            else:
+                dataRow.append("-" if np.isnan(data) else floatFormat % data)
             cellFormats.append(self.centerStyle if isPass(flag) else self.failedStyle)
         
         return dataRow, cellFormats
@@ -628,8 +633,6 @@ class reportGenerator(QtCore.QObject):
                 sv.trendRow += 2     # add gap between different test items
                 sv.histoRow += 2     # add gap between different test items
             
-            # if tab.Trend in self.contL: [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(trend_col_width)]
-            # if tab.Histo in self.contL: [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(histo_col_width)]
         self.closeSignal.emit(True)
         
           
@@ -678,8 +681,15 @@ class progressDisplayer(QtWidgets.QDialog):
         self.exec_()
     
     
+    def clean(self):
+        del self.rg
+        self.channel.imageChannel = None
+        self.channel.dataListChannel = None
+    
+    
     def closeEvent(self, event):
         if self.closeEventByThread:
+            self.clean()
             event.accept()
         else:
             # close by clicking X
@@ -692,6 +702,7 @@ class progressDisplayer(QtWidgets.QDialog):
                 self.rg.forceQuit = True
                 self.workThread.quit()
                 # self.thread.wait()
+                self.clean()
                 event.accept()
             else:
                 event.ignore()
