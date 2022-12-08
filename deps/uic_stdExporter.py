@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Thu Dec 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -26,6 +26,7 @@
 
 import re
 import os, io, logging
+import numpy as np
 from enum import IntEnum
 from itertools import product
 from xlsxwriter import Workbook
@@ -180,8 +181,8 @@ class signals(QtCore.QObject):
     # True, FileInfo table; False: DTR table
     retrieveTableDataSignal = Signal(bool)
     
-    # selected heads, selected sites, selected files, {testTuple}, get dut info or dut test data
-    retrieveDutSummarySignal = Signal(list, list, list, dict)
+    # selected heads, selected sites, selected files, testTuples
+    retrieveDutSummarySignal = Signal(list, list, list, list)
     
     
     
@@ -242,9 +243,9 @@ class reportGenerator(QtCore.QObject):
         return self.channel.dataListChannel
     
     
-    def waitForDutSummary(self, selectedHeads: list[int], selectedSites: list[int], selectedFiles: list[int], kargs: dict):
+    def waitForDutSummary(self, selectedHeads: list[int], selectedSites: list[int], selectedFiles: list[int], testTuples: list):
         self.mutex.lock()
-        self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, selectedFiles, kargs)
+        self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, selectedFiles, testTuples)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
@@ -330,13 +331,26 @@ class reportGenerator(QtCore.QObject):
             DutSheet.write_row(sv.dutRow, sv.dutCol, h, self.centerStyle)
             sv.dutRow += 1
         # write DUT info
-        # 2d, row: dut info of a dut, col: [id, site, ...]
+        # a complex dict structure
+        # key: Data, value:     testTuple -> {fid, testDataDict}
+        # key: TestInfo, value: testTuple -> testInfoDict
+        # key: dut2ind, value:  fid -> {dutIndex -> dataIndex}
+        # key: dutInfo, value:  fid -> {dutIndex -> dutSummary}
         summaryTable = self.waitForDutSummary(self.selectedHeads, 
                                               self.selectedSites, 
-                                              self.selectedFiles, {})
-        for ind, dataRow in enumerate(summaryTable):
+                                              self.selectedFiles,
+                                              self.testTuples)
+        # use a list to determine the dut order
+        order = []
+        for fid in sorted(summaryTable["dutInfo"].keys()):
+            for dutIndex in sorted(summaryTable["dutInfo"][fid].keys()):
+                order.append( (fid, dutIndex) )
+        
+        # write dut summary row by row
+        for ind, (fid, dutIndex) in enumerate(order):
             if self.forceQuit: return
             
+            dataRow = summaryTable["dutInfo"][fid][dutIndex]
             # convert all elements to str
             dataRow = ["#%d" % (ind+1)] + [d if isinstance(d, str) else str(d) for d in dataRow]
             # choose style by dut flag
@@ -358,30 +372,55 @@ class reportGenerator(QtCore.QObject):
         _ = [DutSheet.set_column(col, col, width*1.1) for col, width in enumerate(maxColWidth)]
         # set current col to the last empty column
         sv.dutCol = len(headerLabelList[0])
+        
+        # write test data col by col
+        for testTuple in self.testTuples:
+            testInfo = summaryTable["TestInfo"][testTuple]
+            testData = summaryTable["Data"][testTuple]
+            recHeader = REC.PTR
+            dataList = []
+            flagList = []
+            for fid, dutIndex in order:
+                try:
+                    recHeader = testData[fid]["recHeader"]
+                    dataIndex = summaryTable["dut2ind"][fid][dutIndex]
+                    dataList.append(testData[fid]["dataList"][dataIndex])
+                    flagList.append(testData[fid]["flagList"][dataIndex])
+                except (IndexError, KeyError):
+                    dataList.append(np.nan)
+                    flagList.append(-1)
+            
+            write_row_col(DutSheet, 
+                          0, sv.dutCol, 
+                          *self.stringifyDutSummaryTestData(testInfo, 
+                                                            recHeader,
+                                                            dataList, 
+                                                            flagList), 
+                          writeRow=False)
+            sv.dutCol += 1
+            self.loopCount += 1
+            self.sendProgress()
+                    
+            
+    def stringifyDutSummaryTestData(self, testInfo: list, recHeader: int, dataList: list, flagList: list):
+        floatFormat = getSetting().getFloatFormat()
+        dataRow = []
+        cellFormats = []
+        # only convert high low limits in `testInfo`
+        testInfo[2:4] = ["N/A" if lim is None or np.isnan(lim) else floatFormat % lim for lim in testInfo[2:4]]
+        dataRow.extend(testInfo)
+        cellFormats.extend([self.centerStyle for _ in enumerate(testInfo)])
+        # convert dataList
+        for data, flag in zip(dataList, flagList):
+            if recHeader == REC.FTR:
+                dataRow.append("-" if np.isnan(data) or data < 0 else f"Test Flag: {data}")
+            else:
+                dataRow.append("-" if np.isnan(data) else floatFormat % data)
+            cellFormats.append(self.centerStyle if isPass(flag) else self.failedStyle)
+        
+        return dataRow, cellFormats
     
     
-    def writeDUT_Testdata(self, testTuples: list):
-        #TODO a little complex...
-        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
-        if DutSheet is None:
-            return
-
-        #TODO append test raw data to the last column
-        max_width = 0
-        test_data_list, test_stat_list = self.waitForDutSummary(self.selectedHeads, 
-                                                                self.selectedSites, 
-                                                                self.selectedFiles, 
-                                                                {"testTuples": testTuples})
-        data_style_list = [self.centerStyle if stat else self.failedStyle for stat in test_stat_list]
-        write_row_col(DutSheet, 0, sv.dutCol, test_data_list, data_style_list, writeRow=False)
-        max_width = max([len(s) for s in test_data_list])
-        DutSheet.set_column(sv.dutCol, sv.dutCol, max_width*1.1)
-        sv.dutCol += 1
-        # loop cnt + 1 at the end
-        self.loopCount += 1
-        self.sendProgress()
-
-
     def writeBinChart(self):
         BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
         if BinSheet is None:
@@ -568,7 +607,7 @@ class reportGenerator(QtCore.QObject):
             # GDR & DTR Summary
             self.writeGDR_DTR()
             if self.forceQuit: return
-            # dut summary (dut part)
+            # dut summary
             self.writeDUT_Summary()
             if self.forceQuit: return
             
@@ -582,7 +621,6 @@ class reportGenerator(QtCore.QObject):
             # ** write contents related to test numbers
             self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
             if self.forceQuit: return
-            self.writeDUT_Testdata(self.testTuples)
 
             for testTuple in self.testTuples:
                 for head, site in product(self.selectedHeads, self.selectedSites):
@@ -595,8 +633,6 @@ class reportGenerator(QtCore.QObject):
                 sv.trendRow += 2     # add gap between different test items
                 sv.histoRow += 2     # add gap between different test items
             
-            # if tab.Trend in self.contL: [TrendSheet.set_column(col, col, width*1.1) for col, width in enumerate(trend_col_width)]
-            # if tab.Histo in self.contL: [HistoSheet.set_column(col, col, width*1.1) for col, width in enumerate(histo_col_width)]
         self.closeSignal.emit(True)
         
           
@@ -645,8 +681,15 @@ class progressDisplayer(QtWidgets.QDialog):
         self.exec_()
     
     
+    def clean(self):
+        del self.rg
+        self.channel.imageChannel = None
+        self.channel.dataListChannel = None
+    
+    
     def closeEvent(self, event):
         if self.closeEventByThread:
+            self.clean()
             event.accept()
         else:
             # close by clicking X
@@ -659,6 +702,7 @@ class progressDisplayer(QtWidgets.QDialog):
                 self.rg.forceQuit = True
                 self.workThread.quit()
                 # self.thread.wait()
+                self.clean()
                 event.accept()
             else:
                 event.ignore()
@@ -728,9 +772,9 @@ class progressDisplayer(QtWidgets.QDialog):
         self.mutex.unlock()
         
         
-    @Slot(list, list, list, dict)
-    def getDutSummaryFromParent(self, selectedHeads: list, seletedSites: list, selectedFiles: list, kargs: dict):
-        self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles, kargs)
+    @Slot(list, list, list, list)
+    def getDutSummaryFromParent(self, selectedHeads: list, seletedSites: list, selectedFiles: list, testTuples: list):
+        self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles, testTuples)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Thu Dec 08 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -379,10 +379,10 @@ class DataInterface:
         return a dictionary contains:
         `VHeader`: dut index as vertical header
         `TestLists`: testTuples, for ordering
-        `Data`: dict, key: testTuple, value: list of dicts from `getTestDataCore`
+        `Data`: dict, key: testTuple, value: fid -> dict from `getTestDataCore`
         `TestInfo`: dict, key: testTuple, value: list of info
-        `dut2ind`: list of maps, dutIndex to list index
-        `dutInfo`: list of maps, dutIndex to info tuple
+        `dut2ind`: fid -> map of dutIndex to list index
+        `dutInfo`: fid -> map of dutIndex to info tuple
         '''
         data = {}
         testInfo = {}
@@ -397,25 +397,26 @@ class DataInterface:
                                      test_fid.pop("Unit")]
             if ("dutList" in test_fid) and (fid not in dutIndexDict):
                 dutIndexDict[fid] = test_fid.pop("dutList")
-            data.setdefault(testTup, []).append(test_fid)
+            nest = data.setdefault(testTup, {})
+            nest[fid] = test_fid
         
         vheader = []
-        dutInfo = []
-        dut2ind = []
+        dutInfo = {}
+        dut2ind = {}
         for fid in range(self.num_files):
             if fid in dutIndexDict:
                 vheader.extend(map(lambda i: f"File{fid} #{i}", dutIndexDict[fid]))
-                dut2ind.append(dict(zip(dutIndexDict[fid], 
+                dut2ind[fid] = dict(zip(dutIndexDict[fid], 
                                         range(len(dutIndexDict[fid]))
-                                        )))
+                                        ))
                 # add dict of dut index -> (part id, head site, dut flag)
-                dutInfo.append(self.DatabaseFetcher.getPartialDUTInfoOnCondition(selectHeads, 
+                dutInfo[fid] = self.DatabaseFetcher.getPartialDUTInfoOnCondition(selectHeads, 
                                                                                  selectSites, 
-                                                                                 fid))
+                                                                                 fid)
             else:
                 # fid doesn't contain any tests in testTuples
-                dut2ind.append({})
-                dutInfo.append({})
+                dut2ind[fid] = {}
+                dutInfo[fid] = {}
                 
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
@@ -438,10 +439,10 @@ class DataInterface:
         return a dictionary contains:
         `VHeader`: dut index as vertical header
         `TestLists`: testTuples, for ordering
-        `Data`: dict, key: testTuple, value: list of dicts from `getTestDataCore`
+        `Data`: dict, key: testTuple, value: fid -> dict from `getTestDataCore`
         `TestInfo`: dict, key: testTuple, value: list of info
-        `dut2ind`: list of maps, dutIndex to list index
-        `dutInfo`: list of maps, dutIndex to dut summary
+        `dut2ind`: fid -> map of dutIndex to list index
+        `dutInfo`: fid -> map of dutIndex to dut summary
         '''
         data = {}
         testInfo = {}
@@ -456,17 +457,18 @@ class DataInterface:
                                      test_fid.pop("Unit")]
                 # already obtained the dutIndexList
                 test_fid.pop("dutList")
-            data.setdefault(testTup, []).append(test_fid)
+            nest = data.setdefault(testTup, {})
+            nest[fid] = test_fid
         
         vheader = []
-        dutInfo = []
-        dut2ind = []
+        dutInfo = {}
+        dut2ind = {}
         for fid in sorted(dutIndexDict.keys()):
             dutIndexList = sorted(dutIndexDict[fid])
             vheader.extend(map(lambda i: f"File{fid} #{i}", dutIndexList))
-            dut2ind.append(dict(zip(dutIndexList, range(len(dutIndexList)))))
+            dut2ind[fid] = dict(zip(dutIndexList, range(len(dutIndexList))))
             # add dict of dut index -> (part id, head site, ..., dut flag)
-            dutInfo.append(self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexList, fid))
+            dutInfo[fid] = self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexList, fid)
                 
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
@@ -488,6 +490,17 @@ class DataInterface:
         for fid, dutIndex in selectedDutIndex:
             dutIndexDict.setdefault(fid, []).append(dutIndex)
         
+        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
+    
+    
+    def getDutSummaryReportContent(self,  testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]) -> dict:
+        '''
+        For Report generation
+        Wrapper of `getDutSummaryWithTestDataCore`, converts heads and sites to {fid -> [dutIndex]}
+        
+        return a dict, see `getDutSummaryWithTestDataCore`
+        '''
+        dutIndexDict = self.DatabaseFetcher.getDutIndexDictFromHeadSite(selectHeads, selectSites, selectFiles)        
         return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
     
     
