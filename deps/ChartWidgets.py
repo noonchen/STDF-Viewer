@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Fri Dec 09 2022
+# Last Modified: Sat Dec 10 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -52,6 +52,7 @@ class PlotMenu(QMenu):
         self.scaleMode = QAction("Scale Mode", self)
         self.panMode = QAction("Pan Mode", self)
         self.pickMode = QAction("Data Pick Mode", self)
+        self.clearSelection = QAction("Clear Selections", self)
         self.showDutData = QAction("Show Selected DUT Data", self)
         # set left mouse button mode to checkable
         self.scaleMode.setCheckable(True)
@@ -63,6 +64,7 @@ class PlotMenu(QMenu):
                          self.scaleMode,
                          self.panMode,
                          self.pickMode,
+                         self.clearSelection,
                          self.showDutData])
         
     def connectRestore(self, restoreMethod):
@@ -77,6 +79,9 @@ class PlotMenu(QMenu):
     def connectPick(self, pickMethod):
         self.pickMode.triggered.connect(pickMethod)
         
+    def connectClearSelection(self, clearSelectionMethod):
+        self.clearSelection.triggered.connect(clearSelectionMethod)
+    
     def connectShowDut(self, showDutMethod):
         self.showDutData.triggered.connect(showDutMethod)
         
@@ -99,9 +104,10 @@ class GraphicViewWithMenu(pg.GraphicsView):
         # storing all viewboxes for changing 
         # options
         self.view_list = []
+        self.showDutSignal = None
         
-    def getAllViewBox(self):
-        return self.view_list
+    def setShowDutSignal(self, signal):
+        self.showDutSignal = signal
     
     def mousePressEvent(self, ev: QtGui.QMouseEvent):
         if ev.button() == Qt.MouseButton.RightButton:
@@ -133,10 +139,12 @@ class GraphicViewWithMenu(pg.GraphicsView):
         self.menu.connectPan(self.onPanMode)
         self.menu.connectScale(self.onScaleMode)
         self.menu.connectPick(self.onPickMode)
+        self.menu.connectClearSelection(self.onClearSel)
+        self.menu.connectShowDut(self.onShowDut)
     
     def onRestoreMode(self):
         for view in self.view_list:
-            view.autoRange()
+            view.enableAutoRange()
     
     def onScaleMode(self):
         self.menu.uncheckOthers("scale")
@@ -156,6 +164,19 @@ class GraphicViewWithMenu(pg.GraphicsView):
         for view in self.view_list:
             view.setLeftButtonAction('rect')
             view.enablePickMode = True
+
+    def onClearSel(self):
+        for view in self.view_list:
+            view.clearSelections()
+    
+    def onShowDut(self):
+        selectedData = []
+        for view in self.view_list:
+            selectedData.extend(view.getSelectedDataForDutTable())
+        #TODO send data to main UI
+        print(selectedData)
+        if self.showDutSignal:
+            self.showDutSignal.emit(selectedData)
 
 
 class StdfViewrViewBox(pg.ViewBox):
@@ -238,14 +259,79 @@ class StdfViewrViewBox(pg.ViewBox):
     
     def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
         print("`highlightitemsWithin` should be overrided", xrange, yrange)
+        
+    def clearSelections(self):
+        print("`clearSelections` should be overrided")
+    
+    def getSelectedDataForDutTable(self) -> list:
+        print("`getSelectedDataForDutTable` should be overrided")
+        return []
 
 
 class TrendViewBox(StdfViewrViewBox):
+    '''
+    All items that added to viewbox will have a same parent: `self.childGroup`
+    Items that will affect auto range will be added into `self.addedItems`
+    '''
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        # add scatter item for displaying 
+        # highlighted and selected point in pick mode
+        self.hlpoints = pg.ScatterPlotItem(brush="#111111", size=10, name="_highlight")
+        self.slpoints = pg.ScatterPlotItem(brush="#CC0000", size=10, name="_selection")
+        # set z value for them stay at the top
+        self.hlpoints.setZValue(1000)
+        self.slpoints.setZValue(999)
+        self.addItem(self.hlpoints)
+        self.addItem(self.slpoints)
+        # file id is for showing dut data only
+        self.fileID = 0
+    
+    def setFileID(self, fid: int):
+        self.fileID = fid
+    
+    def _getSelectedPoints(self, xrange: tuple, yrange: tuple) -> set:
+        pointSet = set()
+        for item in self.addedItems:
+            if not isinstance(item, pg.PlotDataItem):
+                continue
+            # trend plot is a scatter item
+            scatter = item.scatter
+            if (scatter.isVisible() and scatter.name() not in ["_selection", 
+                                                               "_highlight"]):
+                xData, yData = scatter.getData()
+                # get mask from xy selection range
+                mask = np.full(xData.size, True)
+                mask &= xData > xrange[0]
+                mask &= xData < xrange[1]
+                mask &= yData > yrange[0]
+                mask &= yData < yrange[1]
+                # add points to set
+                for x, y in zip(xData[mask], yData[mask]):
+                    pointSet.add( (x, y) )
+        return pointSet
+    
     def selectItemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Trend chart pick logic")
+        # clear highlight points when drag event is finished
+        self.hlpoints.clear()
+        pointSet = self._getSelectedPoints(xrange, yrange)
+        self.slpoints.addPoints(pos=pointSet)
     
     def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Trend chart highlight logic")
+        pointSet = self._getSelectedPoints(xrange, yrange)
+        # remove previous and add new points
+        self.hlpoints.clear()
+        self.hlpoints.addPoints(pos=pointSet)
+        
+    def clearSelections(self):
+        self.slpoints.clear()
+    
+    def getSelectedDataForDutTable(self):
+        dataSet = set()
+        dutIndexArray, _ = self.slpoints.getData()
+        # remove duplicates
+        _ = [dataSet.add((self.fileID, i)) for i in dutIndexArray]
+        return list(dataSet)
 
 
 class HistoViewBox(StdfViewrViewBox):
@@ -346,6 +432,7 @@ class TrendChart(GraphicViewWithMenu):
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = TrendViewBox()
+            view.setFileID(fid)
             view.setMouseMode(view.RectMode)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
