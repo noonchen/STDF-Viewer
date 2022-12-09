@@ -104,6 +104,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
         # storing all viewboxes for changing 
         # options
         self.view_list = []
+        self.connectActions()
         self.showDutSignal = None
         
     def setShowDutSignal(self, signal):
@@ -131,10 +132,6 @@ class GraphicViewWithMenu(pg.GraphicsView):
         self.menu.popup(ev.screenPos().toPoint())
         
     def connectActions(self):
-        '''
-        call this func after all views are stored
-        in self.view_list
-        '''
         self.menu.connectRestore(self.onRestoreMode)
         self.menu.connectPan(self.onPanMode)
         self.menu.connectScale(self.onScaleMode)
@@ -186,6 +183,7 @@ class StdfViewrViewBox(pg.ViewBox):
         # scale mode is enabled by default
         # wheel scale should be enabled as well
         self.enableWheelScale = True
+        self.state['mouseMode'] = pg.ViewBox.RectMode
         self.enablePickMode = False
     
     def wheelEvent(self, ev, axis=None):
@@ -293,10 +291,15 @@ class TrendViewBox(StdfViewrViewBox):
     def _getSelectedPoints(self, xrange: tuple, yrange: tuple) -> set:
         pointSet = set()
         for item in self.addedItems:
-            if not isinstance(item, pg.PlotDataItem):
+            if isinstance(item, pg.PlotDataItem):
+                # trend plot is a PlotDataItem
+                scatter = item.scatter
+            elif isinstance(item, pg.ScatterPlotItem):
+                # wafer map is a ScatterPlotItem
+                scatter = item
+            else:
                 continue
-            # trend plot is a scatter item
-            scatter = item.scatter
+            
             if (scatter.isVisible() and scatter.name() not in ["_selection", 
                                                                "_highlight"]):
                 xData, yData = scatter.getData()
@@ -350,12 +353,54 @@ class BinViewBox(StdfViewrViewBox):
         print("Bin chart highlight logic")
 
 
-class WaferViewBox(StdfViewrViewBox):
-    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Wafer pick logic")
-    
-    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Wafer highlight logic")
+class WaferViewBox(TrendViewBox):
+    '''
+    WaferViewBox and TrendViewBox are both draw in scatter plot
+    only difference is the data type of selections
+    '''
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        # remove scatter items in super() init
+        self.removeItem(self.hlpoints)
+        self.removeItem(self.slpoints)
+        # add scatter item for displaying 
+        # highlighted and selected point in pick mode
+        self.hlpoints = pg.ScatterPlotItem(symbol="h", 
+                                           pen=None, 
+                                           size=0.95, 
+                                           pxMode=False, 
+                                           brush="#111111", 
+                                           name="_highlight")
+        self.slpoints = pg.ScatterPlotItem(symbol="h", 
+                                           pen=None, 
+                                           size=0.95, 
+                                           pxMode=False, 
+                                           brush="#CC0000",
+                                           name="_selection")
+        # set z value for them stay at the top
+        self.hlpoints.setZValue(1000)
+        self.slpoints.setZValue(999)
+        self.addItem(self.hlpoints)
+        self.addItem(self.slpoints)
+        # file id and waferIndex is 
+        # for showing dut data
+        self.fileID = -1
+        self.waferInd = -1
+        
+    def setWaferIndex(self, ind: int):
+        self.waferInd = ind
+        
+    def getSelectedDataForDutTable(self):
+        # (waferInd, fid, (x, y))
+        dataSet = set()
+        xData, yData = self.slpoints.getData()
+        # remove duplicates
+        _ = [dataSet.add((self.waferInd, 
+                          self.fileID, 
+                          (x, y))) 
+             for x, y 
+             in zip(xData, yData)]
+        return list(dataSet)
 
 
 class TrendChart(GraphicViewWithMenu):
@@ -433,7 +478,6 @@ class TrendChart(GraphicViewWithMenu):
             isFirstPlot = len(self.view_list) == 0
             view = TrendViewBox()
             view.setFileID(fid)
-            view.setMouseMode(view.RectMode)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
             pitem.addLegend((0, 1), labelTextSize="12pt")
@@ -527,7 +571,6 @@ class TrendChart(GraphicViewWithMenu):
         # to fix the issue that y axis not synced
         for v in self.view_list:
             v.enableAutoRange(enable=True)
-        self.connectActions()
 
 
 class HistoChart(TrendChart):
@@ -865,7 +908,6 @@ class WaferMap(GraphicViewWithMenu):
         # add legend
         self.plotlayout.addItem(pitem_legend, row=1, col=2, rowspan=1, colspan=1)
         self.view_list.append(waferView)
-        self.connectActions()
 
 
 __all__ = ["TrendChart", 
