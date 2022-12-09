@@ -145,6 +145,9 @@ class GraphicViewWithMenu(pg.GraphicsView):
     
     def onScaleMode(self):
         self.menu.uncheckOthers("scale")
+        # if action is checked twice, 
+        # it will appear as unchecked...
+        self.menu.scaleMode.setChecked(True)
         for view in self.view_list:
             view.setLeftButtonAction('rect')
             view.enableWheelScale = True
@@ -152,12 +155,14 @@ class GraphicViewWithMenu(pg.GraphicsView):
 
     def onPanMode(self):
         self.menu.uncheckOthers("pan")
+        self.menu.panMode.setChecked(True)
         for view in self.view_list:
             view.setLeftButtonAction('pan')
             view.enableWheelScale = False
 
     def onPickMode(self):
         self.menu.uncheckOthers("pick")
+        self.menu.pickMode.setChecked(True)
         for view in self.view_list:
             view.setLeftButtonAction('rect')
             view.enablePickMode = True
@@ -505,12 +510,13 @@ class TrendChart(GraphicViewWithMenu):
                 fsymbol = settings.fileSymbol[fid]
                 siteColor = settings.siteColor[site]
                 # test value
+                site_info = "All Site" if site == -1 else f"Site {site}"
                 pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
                                       symbol=fsymbol, symbolPen="k", 
                                       symbolSize=8, symbolBrush=siteColor, 
-                                      name=f"Site {site}")
+                                      name=f"{site_info}")
                 pdi.scatter.opts.update(hoverable=True, 
-                                        tip=f"Site {site}\nDUTIndex: {{x:.0f}}\nValue: {{y:.3g}}".format,
+                                        tip=f"{site_info}\nDUTIndex: {{x:.0f}}\nValue: {{y:.3g}}".format,
                                         hoverSymbol="+",
                                         hoverSize=12,
                                         hoverPen=pg.mkPen("#ff0000", width=1))
@@ -627,7 +633,6 @@ class HistoChart(TrendChart):
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = HistoViewBox()
-            view.setMouseMode(view.RectMode)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
             pitem.addLegend((0, 1), labelTextSize="12pt")
@@ -662,16 +667,16 @@ class HistoChart(TrendChart):
                 bin_dut_dict = {}
                 for ind, dut in zip(bin_ind, x):
                     bin_dut_dict.setdefault(ind, []).append(dut)
-                site_name = f"Site {site}"
+                site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
-                hist_normalize = hist / hist.max()
+                hist = hist / hist.max()
                 bar = pg.BarGraphItem(x0=bar_base, y0=bin_edges[:len(hist)], 
-                                      width=hist_normalize, height=bin_width, 
-                                      brush=siteColor, name=site_name)
+                                      width=hist, height=bin_width, 
+                                      brush=siteColor, name=site_info)
                 pitem.addItem(bar)
                 # set the bar base of histogram of next site
                 inc = 1.2
-                ticks.append((bar_base + 0.5 * inc, site_name))
+                ticks.append((bar_base + 0.5 * inc, site_info))
                 bar_base += inc
                 # #TODO mean
                 # mean = data_per_site["Mean"]
@@ -703,8 +708,7 @@ class HistoChart(TrendChart):
             view.setRange(xRange=(0, bar_base), 
                           yRange=(y_min, y_max))
             view.setLimits(xMin=0, xMax=bar_base+0.5,
-                           yMin=y_min, yMax=y_max,
-                           minXRange=2)
+                           yMin=y_min, yMax=y_max)
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
             # link current viewbox to previous, 
@@ -784,7 +788,7 @@ class BinChart(GraphicViewWithMenu):
                 y_max = len(numList)
                 view_bin.setLimits(xMin=0, xMax=x_max, 
                                    yMin=-1, yMax=y_max, 
-                                   minXRange=2, minYRange=y_max+1)
+                                   minXRange=2, minYRange=4)
                 view_bin.setRange(xRange=(0, x_max), 
                                   yRange=(-1, y_max),
                                   disableAutoRange=False)
