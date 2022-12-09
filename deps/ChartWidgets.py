@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Fri Dec 09 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -24,7 +24,9 @@
 
 
 
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtWidgets import QMenu, QAction
+from PyQt5.QtCore import Qt, QPoint
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.functions as fn
@@ -41,7 +43,120 @@ def addFileLabel(parent, fid: int, yoffset = -50):
     file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
 
 
-class TrendChart(pg.GraphicsView):
+class PlotMenu(QMenu):
+    def __init__(self):
+        QMenu.__init__(self)
+        # actions
+        self.restoreMode = QAction("Restore View", self)
+        self.zoomMode = QAction("Zoom Mode", self)
+        self.panMode = QAction("Pan Mode", self)
+        self.pickMode = QAction("Data Pick Mode", self)
+        self.showDutData = QAction("Show Selected DUT Data", self)
+        self.addActions([self.restoreMode,
+                         self.zoomMode,
+                         self.panMode,
+                         self.pickMode,
+                         self.showDutData])
+        
+    def connectRestore(self, restoreMethod):
+        self.restoreMode.setCheckable(True)
+        self.restoreMode.triggered.connect(restoreMethod)
+        
+    def connectZoom(self, zoomMethod):
+        self.zoomMode.setCheckable(True)
+        self.zoomMode.triggered.connect(zoomMethod)
+        
+    def connectPan(self, panMethod):
+        self.panMode.setCheckable(True)
+        self.panMode.triggered.connect(panMethod)
+        
+    def connectPick(self, pickMethod):
+        self.pickMode.setCheckable(True)
+        self.pickMode.triggered.connect(pickMethod)
+        
+    def connectShowDut(self, showDutMethod):
+        self.showDutData.triggered.connect(showDutMethod)
+
+
+class GraphicViewWithMenu(pg.GraphicsView):
+    def __init__(self, minWidth=800, minHeight=400):
+        super().__init__()
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
+                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumWidth(minWidth)
+        self.setMinimumHeight(minHeight)
+        self.plotlayout = pg.GraphicsLayout()
+        self.setCentralWidget(self.plotlayout)
+        self.menu = PlotMenu()
+        # storing all viewboxes for changing 
+        # options
+        self.view_list = []
+        
+    def getAllViewBox(self):
+        return self.view_list
+    
+    def mousePressEvent(self, ev: QtGui.QMouseEvent):
+        if ev.button() == Qt.MouseButton.RightButton:
+            ev.accept()
+            self.showContextMenu(ev)
+            return
+        return super().mousePressEvent(ev)
+
+    def showContextMenu(self, ev):
+        # add export... from scene()
+        export = self.sceneObj.contextMenu[0]
+        if export not in self.menu.actions() and len(self.view_list) > 0:
+            # export dialog is usually triggered from a viewbox
+            # but in our case, menu is shown in GraphicView, 
+            # we don't have a MouseClickEvent that contains a viewbox
+            # As a workaround, manually assign a viewbox to `contextMenuItem`
+            # ao that the export dialog have somethings to display
+            setattr(self.sceneObj, "contextMenuItem", self.view_list[0])
+            self.menu.addSeparator()
+            self.menu.addAction(export)
+        self.menu.popup(ev.screenPos().toPoint())
+        
+    def connectActions(self):
+        '''
+        call this func after all views are stored
+        in self.view_list
+        '''
+        self.menu.connectRestore(self.onRestoreMode)
+        self.menu.connectPan(self.onPanMode)
+        self.menu.connectZoom(self.onZoomMode)
+        self.menu.connectPick(self.onPickMode)
+    
+    def onRestoreMode(self):
+        print("triggered restore")
+        for view in self.view_list:
+            view.autoRange()
+    
+    def onPanMode(self):
+        print("triggered pan")
+        for view in self.view_list:
+            view.setLeftButtonAction('pan')
+        
+    def onZoomMode(self):
+        print("triggered zoom")
+        for view in self.view_list:
+            view.setLeftButtonAction('rect')
+            
+    def onPickMode(self):
+        print("TODO... on pick mode")
+
+
+
+class TrendViewBox(pg.ViewBox):
+    def wheelEvent(self, ev, axis=None):
+        ev.ignore()
+        return
+    
+    def mouseClickEvent(self, ev):
+        print("clicked", ev.button())
+        return super().mouseClickEvent(ev)
+
+
+class TrendChart(GraphicViewWithMenu):
     def __init__(self, *arg, **kargs):
         super().__init__(*arg, **kargs)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, 
@@ -122,7 +237,7 @@ class TrendChart(pg.GraphicsView):
         # create same number of viewboxes as file counts
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
-            view = pg.ViewBox()
+            view = TrendViewBox()
             view.setMouseMode(view.RectMode)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
@@ -217,6 +332,7 @@ class TrendChart(pg.GraphicsView):
         # to fix the issue that y axis not synced
         for v in self.view_list:
             v.enableAutoRange(enable=True)
+        self.connectActions()
 
 
 class HistoChart(pg.GraphicsView):
@@ -476,7 +592,7 @@ class WaferBlock(pg.ItemSample):
         visible = self.item.isVisible()
         if not visible:
             icon = getGraphIcon("invisibleEye")
-            p.drawPixmap(QtCore.QPoint(1, 1), icon.pixmap(18, 18))
+            p.drawPixmap(QPoint(1, 1), icon.pixmap(18, 18))
             return
 
         symbol = opts.get('symbol', None)
