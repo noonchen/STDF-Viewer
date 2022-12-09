@@ -52,6 +52,12 @@ class PlotMenu(QMenu):
         self.panMode = QAction("Pan Mode", self)
         self.pickMode = QAction("Data Pick Mode", self)
         self.showDutData = QAction("Show Selected DUT Data", self)
+        # set left mouse button mode to checkable
+        self.zoomMode.setCheckable(True)
+        self.panMode.setCheckable(True)
+        self.pickMode.setCheckable(True)
+        # set zoom mode as default
+        self.zoomMode.setChecked(True)
         self.addActions([self.restoreMode,
                          self.zoomMode,
                          self.panMode,
@@ -59,23 +65,24 @@ class PlotMenu(QMenu):
                          self.showDutData])
         
     def connectRestore(self, restoreMethod):
-        self.restoreMode.setCheckable(True)
         self.restoreMode.triggered.connect(restoreMethod)
         
     def connectZoom(self, zoomMethod):
-        self.zoomMode.setCheckable(True)
         self.zoomMode.triggered.connect(zoomMethod)
         
     def connectPan(self, panMethod):
-        self.panMode.setCheckable(True)
         self.panMode.triggered.connect(panMethod)
         
     def connectPick(self, pickMethod):
-        self.pickMode.setCheckable(True)
         self.pickMode.triggered.connect(pickMethod)
         
     def connectShowDut(self, showDutMethod):
         self.showDutData.triggered.connect(showDutMethod)
+        
+    def uncheckOthers(self, currentName: str):
+        for n, act in [("zoom", self.zoomMode), ("pan", self.panMode), ("pick", self.pickMode)]:
+            if n != currentName:
+                act.setChecked(False)
 
 
 class GraphicViewWithMenu(pg.GraphicsView):
@@ -127,23 +134,24 @@ class GraphicViewWithMenu(pg.GraphicsView):
         self.menu.connectPick(self.onPickMode)
     
     def onRestoreMode(self):
-        print("triggered restore")
         for view in self.view_list:
             view.autoRange()
     
-    def onPanMode(self):
-        print("triggered pan")
-        for view in self.view_list:
-            view.setLeftButtonAction('pan')
-        
     def onZoomMode(self):
-        print("triggered zoom")
+        self.menu.uncheckOthers("zoom")
         for view in self.view_list:
             view.setLeftButtonAction('rect')
-            
-    def onPickMode(self):
-        print("TODO... on pick mode")
 
+    def onPanMode(self):
+        self.menu.uncheckOthers("pan")
+        for view in self.view_list:
+            view.setLeftButtonAction('pan')
+
+    def onPickMode(self):
+        self.menu.uncheckOthers("pick")
+        for view in self.view_list:
+            view.setLeftButtonAction('rect')
+            #TODO need customized to enable data pick
 
 
 class TrendViewBox(pg.ViewBox):
