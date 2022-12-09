@@ -26,11 +26,12 @@
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QMenu, QAction
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QRectF
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.functions as fn
 from pyqtgraph.icons import getGraphIcon
+from pyqtgraph.Point import Point
 from pyqtgraph.graphicsItems.ScatterPlotItem import drawSymbol
 import deps.SharedSrc as ss
 
@@ -48,18 +49,18 @@ class PlotMenu(QMenu):
         QMenu.__init__(self)
         # actions
         self.restoreMode = QAction("Restore View", self)
-        self.zoomMode = QAction("Zoom Mode", self)
+        self.scaleMode = QAction("Scale Mode", self)
         self.panMode = QAction("Pan Mode", self)
         self.pickMode = QAction("Data Pick Mode", self)
         self.showDutData = QAction("Show Selected DUT Data", self)
         # set left mouse button mode to checkable
-        self.zoomMode.setCheckable(True)
+        self.scaleMode.setCheckable(True)
         self.panMode.setCheckable(True)
         self.pickMode.setCheckable(True)
-        # set zoom mode as default
-        self.zoomMode.setChecked(True)
+        # set scale mode as default
+        self.scaleMode.setChecked(True)
         self.addActions([self.restoreMode,
-                         self.zoomMode,
+                         self.scaleMode,
                          self.panMode,
                          self.pickMode,
                          self.showDutData])
@@ -67,8 +68,8 @@ class PlotMenu(QMenu):
     def connectRestore(self, restoreMethod):
         self.restoreMode.triggered.connect(restoreMethod)
         
-    def connectZoom(self, zoomMethod):
-        self.zoomMode.triggered.connect(zoomMethod)
+    def connectScale(self, scaleMethod):
+        self.scaleMode.triggered.connect(scaleMethod)
         
     def connectPan(self, panMethod):
         self.panMode.triggered.connect(panMethod)
@@ -80,7 +81,7 @@ class PlotMenu(QMenu):
         self.showDutData.triggered.connect(showDutMethod)
         
     def uncheckOthers(self, currentName: str):
-        for n, act in [("zoom", self.zoomMode), ("pan", self.panMode), ("pick", self.pickMode)]:
+        for n, act in [("scale", self.scaleMode), ("pan", self.panMode), ("pick", self.pickMode)]:
             if n != currentName:
                 act.setChecked(False)
 
@@ -130,57 +131,156 @@ class GraphicViewWithMenu(pg.GraphicsView):
         '''
         self.menu.connectRestore(self.onRestoreMode)
         self.menu.connectPan(self.onPanMode)
-        self.menu.connectZoom(self.onZoomMode)
+        self.menu.connectScale(self.onScaleMode)
         self.menu.connectPick(self.onPickMode)
     
     def onRestoreMode(self):
         for view in self.view_list:
             view.autoRange()
     
-    def onZoomMode(self):
-        self.menu.uncheckOthers("zoom")
+    def onScaleMode(self):
+        self.menu.uncheckOthers("scale")
         for view in self.view_list:
             view.setLeftButtonAction('rect')
+            view.enableWheelScale = True
+            view.enablePickMode = False
 
     def onPanMode(self):
         self.menu.uncheckOthers("pan")
         for view in self.view_list:
             view.setLeftButtonAction('pan')
+            view.enableWheelScale = False
 
     def onPickMode(self):
         self.menu.uncheckOthers("pick")
         for view in self.view_list:
             view.setLeftButtonAction('rect')
-            #TODO need customized to enable data pick
+            view.enablePickMode = True
 
 
-class TrendViewBox(pg.ViewBox):
-    def wheelEvent(self, ev, axis=None):
-        ev.ignore()
-        return
+class StdfViewrViewBox(pg.ViewBox):
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        self.setMenuEnabled(False)
+        # scale mode is enabled by default
+        # wheel scale should be enabled as well
+        self.enableWheelScale = True
+        self.enablePickMode = False
     
-    def mouseClickEvent(self, ev):
-        print("clicked", ev.button())
-        return super().mouseClickEvent(ev)
+    def wheelEvent(self, ev, axis=None):
+        if self.enableWheelScale:
+            super().wheelEvent(ev, axis)
+        else:
+            ev.ignore()
+    
+    def mouseDragEvent(self, ev, axis=None):
+        # view box handle left button only, middlebutton?
+        if ev.button() not in [Qt.MouseButton.LeftButton, 
+                               Qt.MouseButton.MiddleButton]:
+            return
+        
+        ev.accept()
+        pos = ev.pos()
+        
+        if self.state['mouseMode'] == pg.ViewBox.RectMode and axis is None:
+            pixelBox = QRectF(Point(ev.buttonDownPos(ev.button())), Point(pos))
+            coordBox = self.childGroup.mapRectFromParent(pixelBox)
+            xrange = (coordBox.x(), coordBox.x() + coordBox.width())
+            yrange = (coordBox.y(), coordBox.y() + coordBox.height())
+            # Zoom mode or Pick mode
+            if ev.isFinish():
+                self.rbScaleBox.hide()
+                if self.enablePickMode:
+                    # select objects in the scale box
+                    self.selectItemsWithin(xrange, yrange)
+                else:
+                    # zoom in rect selection
+                    self.showAxRect(coordBox)
+                    self.axHistoryPointer += 1
+                    self.axHistory = self.axHistory[:self.axHistoryPointer] + [coordBox]
+            else:
+                ## update shape of scale box
+                self.updateScaleBox(coordBox)
+                if self.enablePickMode:
+                    # highlight shapes that are contained by scale box
+                    self.highlightitemsWithin(xrange, yrange)
+        else:
+            # Pan mode
+            lastPos = ev.lastPos()
+            dif = pos - lastPos
+            dif = dif * -1
+            ## Ignore axes if mouse is disabled
+            mouseEnabled = np.array(self.state['mouseEnabled'], dtype=np.float64)
+            mask = mouseEnabled.copy()
+            if axis is not None:
+                mask[1-axis] = 0.0
+
+            tr = self.childGroup.transform()
+            tr = fn.invertQTransform(tr)
+            tr = tr.map(dif*mask) - tr.map(Point(0,0))
+
+            x = tr.x() if mask[0] == 1 else None
+            y = tr.y() if mask[1] == 1 else None
+            
+            self._resetTarget()
+            if x is not None or y is not None:
+                self.translateBy(x=x, y=y)
+            self.sigRangeChangedManually.emit(self.state['mouseEnabled'])
+            
+    def updateScaleBox(self, coordBox):
+        self.rbScaleBox.setPos(coordBox.topLeft())
+        tr = QtGui.QTransform.fromScale(coordBox.width(), coordBox.height())
+        self.rbScaleBox.setTransform(tr)
+        self.rbScaleBox.show()    
+    
+    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+        print("`selectItemsWithin` should be overrided", xrange, yrange)
+    
+    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+        print("`highlightitemsWithin` should be overrided", xrange, yrange)
+
+
+class TrendViewBox(StdfViewrViewBox):
+    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Trend chart pick logic")
+    
+    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Trend chart highlight logic")
+
+
+class HistoViewBox(StdfViewrViewBox):
+    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Histo chart pick logic")
+    
+    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Hisot chart highlight logic")
+
+
+class BinViewBox(StdfViewrViewBox):
+    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Bin chart pick logic")
+    
+    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Bin chart highlight logic")
+
+
+class WaferViewBox(StdfViewrViewBox):
+    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Wafer pick logic")
+    
+    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+        print("Wafer highlight logic")
 
 
 class TrendChart(GraphicViewWithMenu):
-    def __init__(self, *arg, **kargs):
-        super().__init__(*arg, **kargs)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, 
-                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-        self.setMinimumWidth(800)
-        self.setMinimumHeight(400)
-        self.setStyleSheet("QToolTip {background: red;}")
-        self.plotlayout = pg.GraphicsLayout()
-        self.setCentralWidget(self.plotlayout)
+    def __init__(self):
+        super().__init__(800, 400)
         self.meanPen = pg.mkPen({"color": "orange", "width": 1})
         self.medianPen = pg.mkPen({"color": "k", "width": 1})
         self.lolimitPen = pg.mkPen({"color": "#0000ff", "width": 3.5})
         self.hilimitPen = pg.mkPen({"color": "#ff0000", "width": 3.5})
         self.lospecPen = pg.mkPen({"color": "#000080", "width": 3.5})
         self.hispecPen = pg.mkPen({"color": "#8b0000", "width": 3.5})
-        self.view_list = []
         self.trendData = {}
         self.validData = False
         
@@ -343,26 +443,7 @@ class TrendChart(GraphicViewWithMenu):
         self.connectActions()
 
 
-class HistoChart(pg.GraphicsView):
-    def __init__(self, *arg, **kargs):
-        super().__init__(*arg, **kargs)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, 
-                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-        self.setMinimumWidth(800)
-        self.setMinimumHeight(400)
-        self.setStyleSheet("QToolTip {background: red;}")
-        self.plotlayout = pg.GraphicsLayout()
-        self.setCentralWidget(self.plotlayout)
-        self.meanPen = pg.mkPen({"color": "orange", "width": 1})
-        self.medianPen = pg.mkPen({"color": "k", "width": 1})
-        self.lolimitPen = pg.mkPen({"color": "#0000ff", "width": 3.5})
-        self.hilimitPen = pg.mkPen({"color": "#ff0000", "width": 3.5})
-        self.lospecPen = pg.mkPen({"color": "#000080", "width": 3.5})
-        self.hispecPen = pg.mkPen({"color": "#8b0000", "width": 3.5})
-        self.view_list = []
-        self.trendData = {}
-        self.validData = False
-        
+class HistoChart(TrendChart):
     def setTrendData(self, trendData: dict):
         settings = ss.getSetting()
         self.trendData = trendData
@@ -415,7 +496,7 @@ class HistoChart(pg.GraphicsView):
         # create same number of viewboxes as file counts
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
-            view = pg.ViewBox()
+            view = HistoViewBox()
             view.setMouseMode(view.RectMode)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
@@ -512,17 +593,12 @@ class HistoChart(pg.GraphicsView):
         # to fix the issue that y axis not synced
         for v in self.view_list:
             v.enableAutoRange(enable=True)
+        self.connectActions()
 
 
-class BinChart(pg.GraphicsView):
-    def __init__(self, *arg, **kargs):
-        super().__init__(*arg, **kargs)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
-                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-        self.setMinimumWidth(800)
-        self.setMinimumHeight(800)
-        self.plotlayout = pg.GraphicsLayout()
-        self.setCentralWidget(self.plotlayout)
+class BinChart(GraphicViewWithMenu):
+    def __init__(self):
+        super().__init__(800, 800)
         self.validData = False
         
     def setBinData(self, binData: dict):
@@ -541,8 +617,10 @@ class BinChart(pg.GraphicsView):
             hsbin = binData[binType]
             binTicks = binData[binType+"_Ticks"]
             num_files = len(hsbin)
-            # use a list to track viewbox count
-            vbList = []
+            # use a list to track viewbox count in
+            # a single plot, used for Y-link and 
+            # hide axis
+            tmpVbList = []
             binColorDict = settings.hbinColor if binType == "HBIN" else settings.sbinColor
             # add title
             binTypeName = "Hardware Bin" if binType == "HBIN" else "Software Bin"
@@ -553,8 +631,8 @@ class BinChart(pg.GraphicsView):
             row += 1
             # iterate thru all files
             for fid in sorted(hsbin.keys()):
-                isFirstPlot = len(vbList) == 0
-                view_bin = pg.ViewBox()
+                isFirstPlot = len(tmpVbList) == 0
+                view_bin = BinViewBox()
                 view_bin.invertY(True)
                 pitem = pg.PlotItem(viewBox=view_bin)
                 binStats = hsbin[fid]
@@ -585,9 +663,13 @@ class BinChart(pg.GraphicsView):
                 # for 2nd+ plots
                 if not isFirstPlot:
                     pitem.getAxis("left").hide()
-                    view_bin.setYLink(vbList[0])
-                vbList.append(view_bin)
+                    view_bin.setYLink(tmpVbList[0])
+                tmpVbList.append(view_bin)
+                # this list is for storing all
+                # view boxes from HBIN/SBIN plot
+                self.view_list.append(view_bin)
             row += 1
+        self.connectActions()
 
 
 class WaferBlock(pg.ItemSample):
@@ -610,15 +692,9 @@ class WaferBlock(pg.ItemSample):
                        fn.mkBrush(opts['brush']))
     
 
-class WaferMap(pg.GraphicsView):
-    def __init__(self, *arg, **kargs):
-        super().__init__(*arg, **kargs)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
-                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(500)
-        self.plotlayout = pg.GraphicsLayout()
-        self.setCentralWidget(self.plotlayout)
+class WaferMap(GraphicViewWithMenu):
+    def __init__(self):
+        super().__init__(600, 500)
         self.validData = False
         
     def setWaferData(self, waferData: dict):
@@ -627,8 +703,8 @@ class WaferMap(pg.GraphicsView):
         
         settings = ss.getSetting()
         self.validData = True
-        view = pg.ViewBox()
-        pitem = pg.PlotItem(viewBox=view)
+        waferView = WaferViewBox()
+        pitem = pg.PlotItem(viewBox=waferView)
         # put legend in another view
         view_legend = pg.ViewBox()
         pitem_legend = pg.PlotItem(viewBox=view_legend, enableMenu=False)
@@ -672,20 +748,20 @@ class WaferMap(pg.GraphicsView):
         
         (ratio, die_size, invertX, invertY, waferID, sites) = waferData["Info"]
         x_max, x_min, y_max, y_min = waferData["Bounds"]
-        view.setLimits(xMin=x_min-50, xMax=x_max+50, 
-                       yMin=y_min-50, yMax=y_max+50, 
-                       maxXRange=(x_max-x_min+100), 
-                       maxYRange=(y_max-y_min+100),
-                       minXRange=2, minYRange=2)
-        view.setRange(xRange=(x_min-5, x_max+5), 
-                      yRange=(y_min-5, y_max+5),
-                      disableAutoRange=False)
-        view.setAspectLocked(lock=True, ratio=ratio)
+        waferView.setLimits(xMin=x_min-50, xMax=x_max+50, 
+                            yMin=y_min-50, yMax=y_max+50, 
+                            maxXRange=(x_max-x_min+100), 
+                            maxYRange=(y_max-y_min+100),
+                            minXRange=2, minYRange=2)
+        waferView.setRange(xRange=(x_min-5, x_max+5), 
+                            yRange=(y_min-5, y_max+5),
+                            disableAutoRange=False)
+        waferView.setAspectLocked(lock=True, ratio=ratio)
         
         if invertX:
-            view.invertX(True)
+            waferView.invertX(True)
         if invertY:
-            view.invertY(True)
+            waferView.invertY(True)
         view_legend.autoRange()
         # title
         site_info = "All Site" if -1 in sites else f"Site {','.join(map(str, sites))}"
@@ -701,6 +777,8 @@ class WaferMap(pg.GraphicsView):
         self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)
         # add legend
         self.plotlayout.addItem(pitem_legend, row=1, col=2, rowspan=1, colspan=1)
+        self.view_list.append(waferView)
+        self.connectActions()
 
 
 __all__ = ["TrendChart", 
