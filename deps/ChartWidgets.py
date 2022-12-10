@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sat Dec 10 2022
+# Last Modified: Sun Dec 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -42,6 +42,33 @@ def addFileLabel(parent, fid: int, yoffset = -50):
     file_text = pg.LabelItem(f"File {fid}", size="15pt", color="#000000", anchor=(1, 0))
     file_text.setParentItem(parent)
     file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
+
+
+def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, rectL: int):
+    '''
+    returns hist, bin left edges, bin width, [(rect, duts)]
+    '''
+    hist, edges = np.histogram(dataList, bins=binCount)
+    bin_width = edges[1]-edges[0]
+    # get left edges
+    edges = edges[:hist.size]
+    # np.histogram is left-close-right-open, except the last bin
+    # np.digitize should be right=False, use left edges to force close the rightmost bin
+    bin_ind = np.digitize(dataList, edges, right=False)
+    # bin index -> dut index list
+    bin_dut_dict = {}
+    for ind, dut in zip(bin_ind, dutList):
+        # bin_ind start from 1
+        bin_dut_dict.setdefault(ind-1, []).append(dut)
+    # list of (rect, duts) for data picking
+    rectDutList = []
+    for ind, (h, e) in enumerate(zip(hist, edges)):
+        if h == 0:
+            continue
+        duts = bin_dut_dict[ind]
+        rect = QRectF(rectL, e, h, bin_width)
+        rectDutList.append( (rect, duts) )
+    return hist, edges, bin_width, rectDutList
 
 
 class PlotMenu(QMenu):
@@ -190,6 +217,11 @@ class StdfViewrViewBox(pg.ViewBox):
         self.enableWheelScale = True
         self.state['mouseMode'] = pg.ViewBox.RectMode
         self.enablePickMode = False
+        # file id is for showing dut data only
+        self.fileID = 0
+    
+    def setFileID(self, fid: int):
+        self.fileID = fid
     
     def wheelEvent(self, ev, axis=None):
         if self.enableWheelScale:
@@ -209,14 +241,12 @@ class StdfViewrViewBox(pg.ViewBox):
         if self.state['mouseMode'] == pg.ViewBox.RectMode and axis is None:
             pixelBox = QRectF(Point(ev.buttonDownPos(ev.button())), Point(pos))
             coordBox = self.childGroup.mapRectFromParent(pixelBox)
-            xrange = (coordBox.x(), coordBox.x() + coordBox.width())
-            yrange = (coordBox.y(), coordBox.y() + coordBox.height())
             # Zoom mode or Pick mode
             if ev.isFinish():
                 self.rbScaleBox.hide()
                 if self.enablePickMode:
                     # select objects in the scale box
-                    self.selectItemsWithin(xrange, yrange)
+                    self.selectItemsWithin(coordBox)
                 else:
                     # zoom in rect selection
                     self.showAxRect(coordBox)
@@ -227,7 +257,7 @@ class StdfViewrViewBox(pg.ViewBox):
                 self.updateScaleBox(coordBox)
                 if self.enablePickMode:
                     # highlight shapes that are contained by scale box
-                    self.highlightitemsWithin(xrange, yrange)
+                    self.highlightitemsWithin(coordBox)
         else:
             # Pan mode
             lastPos = ev.lastPos()
@@ -257,11 +287,11 @@ class StdfViewrViewBox(pg.ViewBox):
         self.rbScaleBox.setTransform(tr)
         self.rbScaleBox.show()    
     
-    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
-        print("`selectItemsWithin` should be overrided", xrange, yrange)
+    def selectItemsWithin(self, coordBox: QRectF):
+        print("`selectItemsWithin` should be overrided", coordBox)
     
-    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
-        print("`highlightitemsWithin` should be overrided", xrange, yrange)
+    def highlightitemsWithin(self, coordBox: QRectF):
+        print("`highlightitemsWithin` should be overrided", coordBox)
         
     def clearSelections(self):
         print("`clearSelections` should be overrided")
@@ -287,13 +317,8 @@ class TrendViewBox(StdfViewrViewBox):
         self.slpoints.setZValue(999)
         self.addItem(self.hlpoints)
         self.addItem(self.slpoints)
-        # file id is for showing dut data only
-        self.fileID = 0
     
-    def setFileID(self, fid: int):
-        self.fileID = fid
-    
-    def _getSelectedPoints(self, xrange: tuple, yrange: tuple) -> set:
+    def _getSelectedPoints(self, coordBox: QRectF) -> set:
         pointSet = set()
         for item in self.addedItems:
             if isinstance(item, pg.PlotDataItem):
@@ -309,24 +334,26 @@ class TrendViewBox(StdfViewrViewBox):
                                                                "_highlight"]):
                 xData, yData = scatter.getData()
                 # get mask from xy selection range
+                xl, xr = (coordBox.x(), coordBox.x() + coordBox.width())
+                yd, yu = (coordBox.y(), coordBox.y() + coordBox.height())
                 mask = np.full(xData.size, True)
-                mask &= xData > xrange[0]
-                mask &= xData < xrange[1]
-                mask &= yData > yrange[0]
-                mask &= yData < yrange[1]
+                mask &= xData > xl
+                mask &= xData < xr
+                mask &= yData > yd
+                mask &= yData < yu
                 # add points to set
                 for x, y in zip(xData[mask], yData[mask]):
                     pointSet.add( (x, y) )
         return pointSet
     
-    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+    def selectItemsWithin(self, coordBox: QRectF):
         # clear highlight points when drag event is finished
         self.hlpoints.clear()
-        pointSet = self._getSelectedPoints(xrange, yrange)
+        pointSet = self._getSelectedPoints(coordBox)
         self.slpoints.addPoints(pos=pointSet)
     
-    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
-        pointSet = self._getSelectedPoints(xrange, yrange)
+    def highlightitemsWithin(self, coordBox: QRectF):
+        pointSet = self._getSelectedPoints(coordBox)
         # remove previous and add new points
         self.hlpoints.clear()
         self.hlpoints.addPoints(pos=pointSet)
@@ -342,19 +369,127 @@ class TrendViewBox(StdfViewrViewBox):
         return list(dataSet)
 
 
-class HistoViewBox(StdfViewrViewBox):
-    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Histo chart pick logic")
+class RectItem(pg.GraphicsObject):
+    '''
+    For showing highlight bars in histo/bin chart
+    '''
+    def __init__(self, **opts):
+        super().__init__(None)
+        self.opts = dict(
+            name=None,
+            pen=None,
+            brush=None,
+        )
+        self._rects = []
+        self.picture = QtGui.QPicture()
+        self._generate_picture()
+        self.setOpts(**opts)
+
+    def setOpts(self, **opts):
+        self.opts.update(opts)
+
+    def name(self):
+        return self.opts["name"]
     
-    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
-        print("Hisot chart highlight logic")
+    def addRects(self, rects: list):
+        for r in rects:
+            if r not in self._rects:
+                self._rects.append(r)
+        self._generate_picture()
+        self.informViewBoundsChanged()
+    
+    def getRects(self):
+        return self._rects
+    
+    def clear(self):
+        self.picture = QtGui.QPicture()
+        self._rects = []
+        self._generate_picture()
+        self.informViewBoundsChanged()
+    
+    def _generate_picture(self):
+        if self.opts["pen"] is None:
+            pen = pg.mkPen(None)
+        else:
+            pen = pg.mkPen(self.opts["pen"])
+        
+        if self.opts["brush"] is None:
+            brush = pg.mkBrush(None)
+        else:
+            brush = pg.mkBrush(self.opts["brush"])
+            
+        painter = QtGui.QPainter(self.picture)
+        painter.setPen(pen)
+        painter.setBrush(brush)
+        for rectTup in self._rects:
+            painter.drawRect(rectTup[0])
+        painter.end()
+
+    def paint(self, painter, option, widget=None):
+        painter.drawPicture(0, 0, self.picture)
+
+    def boundingRect(self):
+        return QRectF(self.picture.boundingRect())
+
+
+class HistoViewBox(StdfViewrViewBox):
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        self.hlbars = RectItem(pen="#111111",
+                               brush="#111111",
+                               name="_highlight")
+        self.slbars = RectItem(pen="#CC0000",
+                               brush="#CC0000",
+                               name="_selection")
+        self.hlbars.setZValue(1000)
+        self.slbars.setZValue(999)
+        self.addItem(self.hlbars)
+        self.addItem(self.slbars)
+        
+    def _getSelectedRects(self, coordBox: QRectF) -> list:
+        '''
+        returns [(QRectF, duts)]
+        '''
+        rects = []
+        for item in self.addedItems:
+            if item.isVisible() and item.name() not in ["_selection", 
+                                                        "_highlight"]:
+                if isinstance(item, HistoGraphItem):
+                    rectList = item.getRectDutList()
+                else:
+                    continue
+                
+                for rectTup in rectList:
+                    if coordBox.intersects(rectTup[0]):
+                        rects.append(rectTup)
+        return rects
+    
+    def selectItemsWithin(self, coordBox: QRectF):
+        self.hlbars.clear()
+        newRects = self._getSelectedRects(coordBox)
+        self.slbars.addRects(newRects)
+    
+    def highlightitemsWithin(self, coordBox: QRectF):
+        newRects = self._getSelectedRects(coordBox)
+        self.hlbars.clear()
+        self.hlbars.addRects(newRects)
+    
+    def clearSelections(self):
+        self.slbars.clear()
+    
+    def getSelectedDataForDutTable(self) -> list:
+        selectedRectTups = self.slbars.getRects()
+        dataSet = set()
+        for _, duts in selectedRectTups:
+            _ = [dataSet.add( (self.fileID, dut) ) for dut in duts]
+        return list(dataSet)
 
 
 class BinViewBox(StdfViewrViewBox):
-    def selectItemsWithin(self, xrange: tuple, yrange: tuple):
+    def selectItemsWithin(self, coordBox: QRectF):
         print("Bin chart pick logic")
     
-    def highlightitemsWithin(self, xrange: tuple, yrange: tuple):
+    def highlightitemsWithin(self, coordBox: QRectF):
         print("Bin chart highlight logic")
 
 
@@ -389,7 +524,6 @@ class WaferViewBox(TrendViewBox):
         self.addItem(self.slpoints)
         # file id and waferIndex is 
         # for showing dut data
-        self.fileID = -1
         self.waferInd = -1
         
     def setWaferIndex(self, ind: int):
@@ -579,6 +713,18 @@ class TrendChart(GraphicViewWithMenu):
             v.enableAutoRange(enable=True)
 
 
+class HistoGraphItem(pg.BarGraphItem):
+    def __init__(self, **opts):
+        super().__init__(**opts)
+        self.rectDutList = []
+        
+    def setRectDutList(self, rdl: list):
+        self.rectDutList = rdl
+        
+    def getRectDutList(self):
+        return self.rectDutList
+
+
 class HistoChart(TrendChart):
     def setTrendData(self, trendData: dict):
         settings = ss.getSetting()
@@ -633,6 +779,7 @@ class HistoChart(TrendChart):
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = HistoViewBox()
+            view.setFileID(fid)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
             pitem.addLegend((0, 1), labelTextSize="12pt")
@@ -657,25 +804,20 @@ class HistoChart(TrendChart):
                     # no data
                     continue
                 siteColor = settings.siteColor[site]
-                # calculate bin edges and histo counts
-                hist, bin_edges = np.histogram(y, bins=settings.binCount)
-                bin_width = bin_edges[1]-bin_edges[0]
-                #TODO get histo bin index (start from 1) of each dut
-                # np.histogram is left-close-right-open, except the last bin
-                # np.digitize should be right=False, but must remove the last bin edge to force close the rightmost bin
-                bin_ind = np.digitize(y, bin_edges[:-1], right=False)
-                bin_dut_dict = {}
-                for ind, dut in zip(bin_ind, x):
-                    bin_dut_dict.setdefault(ind, []).append(dut)
+                # calculate bin edges and histo counts                
+                hist, edges, bin_width, rectDutList = prepareHistoData(x, y, 
+                                                                       settings.binCount, 
+                                                                       bar_base)
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
-                hist = hist / hist.max()
-                bar = pg.BarGraphItem(x0=bar_base, y0=bin_edges[:len(hist)], 
+                # hist = hist / hist.max()
+                item = HistoGraphItem(x0=bar_base, y0=edges, 
                                       width=hist, height=bin_width, 
                                       brush=siteColor, name=site_info)
-                pitem.addItem(bar)
+                item.setRectDutList(rectDutList)
+                pitem.addItem(item)
                 # set the bar base of histogram of next site
-                inc = 1.2
+                inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 bar_base += inc
                 # #TODO mean
@@ -727,7 +869,6 @@ class HistoChart(TrendChart):
         # to fix the issue that y axis not synced
         for v in self.view_list:
             v.enableAutoRange(enable=True)
-        self.connectActions()
 
 
 class BinChart(GraphicViewWithMenu):
@@ -803,7 +944,6 @@ class BinChart(GraphicViewWithMenu):
                 # view boxes from HBIN/SBIN plot
                 self.view_list.append(view_bin)
             row += 1
-        self.connectActions()
 
 
 class WaferBlock(pg.ItemSample):
