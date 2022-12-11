@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -825,6 +825,8 @@ class stdfExporter(QtWidgets.QDialog):
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+        # disable not implemented
+        self.exportUI.file_selection.setDisabled(True)
         
                 
     def showUI(self):

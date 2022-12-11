@@ -206,6 +206,14 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.histoBtn.setIcon(getIcon("tab_hist"))
         self.settingsUI.ppqqBtn.setIcon(getIcon("tab_ppqq"))
         self.settingsUI.colorBtn.setIcon(getIcon("ColorPalette"))
+        # hide not implemented functions
+        self.settingsUI.ppqqBtn.setHidden(True)
+        self.settingsUI.showMean_histo.setHidden(True)
+        self.settingsUI.showMedian_histo.setHidden(True)
+        self.settingsUI.showBoxp_histo.setHidden(True)
+        self.settingsUI.showBpOutlier_histo.setHidden(True)
+        self.settingsUI.showBar_histo.setDisabled(True)
+        self.settingsUI.sigmaCombobox.setHidden(True)
                 
         
     def initWithParentParams(self):
