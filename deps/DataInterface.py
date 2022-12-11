@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Sun Dec 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -798,7 +798,7 @@ class DataInterface:
         
         return a dictionary contains:
         `Bounds`: a tuple contains wafer boundaries (`xmax`, `xmin`, `ymax`, `ymin`)
-        `Stack`: bool, `True` -> stacked wafer fail counts, `False` -> wafer map of SBIN
+        `ID`: (waferInd, fid), waferInd == -1 means stacked wafer fail counts, otherwise it's wafer map of SBIN
         `Info`: a tuple, (`ratio`, `die_size`, `invertX`, `invertY`, `wafer ID`, `sites`)
         `Data`: a dict, key: sbin, value: {"x" -> x_array, "y" -> y_array}
         `Statistic`: for wafermap, a dict of sbin -> (sbinName, sbinCnt, percent)
@@ -812,13 +812,11 @@ class DataInterface:
             return {}
         statistic = {}
         if waferInd == -1:
-            stack = True
             data = self.DatabaseFetcher.getStackedWaferData(selectSites)
             for count in data.keys():
                 # for bypass validation check only
                 statistic[count] = count
         else:
-            stack = False
             data = self.DatabaseFetcher.getWaferCoordsDict(waferInd, selectSites, fid)
             totalDies = sum([len(xyDict["x"]) for xyDict in data.values()])
             # key: sbin, value: {"x", "y"}
@@ -846,7 +844,7 @@ class DataInterface:
             invertY = False
         
         return {"Bounds": bounds, 
-                "Stack": stack, 
+                "ID": (waferInd, fid), 
                 "Info": (ratio, die_size, 
                          invertX, invertY, 
                          waferID, selectSites), 

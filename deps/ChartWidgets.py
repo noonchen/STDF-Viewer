@@ -219,8 +219,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
         selectedData = []
         for view in self.view_list:
             selectedData.extend(view.getSelectedDataForDutTable())
-        #TODO send data to main UI
-        print(selectedData)
+        # send data to main UI
         if self.showDutSignal:
             self.showDutSignal.emit(selectedData)
 
@@ -382,7 +381,9 @@ class TrendViewBox(StdfViewrViewBox):
         dataSet = set()
         dutIndexArray, _ = self.slpoints.getData()
         # remove duplicates
-        _ = [dataSet.add((self.fileID, i)) for i in dutIndexArray]
+        # array is float type, must convert to int
+        # otherwise will cause crash in `TestDataTable`
+        _ = [dataSet.add((self.fileID, int(i))) for i in dutIndexArray]
         return list(dataSet)
 
 
@@ -505,14 +506,14 @@ class SVBarViewBox(StdfViewrViewBox):
 class BinViewBox(SVBarViewBox):
     def getSelectedDataForDutTable(self) -> list:
         '''
-        For BinChart, return [(fid, isHBIN, duts)]
+        For BinChart, return [(fid, isHBIN, bins)]
         '''
         tmp = {}
         for _, binTup in self.slbars.getRects():
             isHBIN, bin_num = binTup
             tmp.setdefault( (self.fileID, isHBIN), []).append(bin_num)
-        return [(fid, isHBIN, duts) 
-                for (fid, isHBIN), duts 
+        return [(fid, isHBIN, bins) 
+                for (fid, isHBIN), bins 
                 in tmp.items()]
 
 
@@ -559,7 +560,7 @@ class WaferViewBox(TrendViewBox):
         # remove duplicates
         _ = [dataSet.add((self.waferInd, 
                           self.fileID, 
-                          (x, y))) 
+                          (int(x), int(y)))) 
              for x, y 
              in zip(xData, yData)]
         return list(dataSet)
@@ -1009,7 +1010,10 @@ class WaferMap(GraphicViewWithMenu):
         
         settings = ss.getSetting()
         self.validData = True
+        waferInd, fid = waferData["ID"]
         waferView = WaferViewBox()
+        waferView.setWaferIndex(waferInd)
+        waferView.setFileID(fid)
         pitem = pg.PlotItem(viewBox=waferView)
         # put legend in another view
         view_legend = pg.ViewBox()
@@ -1020,7 +1024,6 @@ class WaferMap(GraphicViewWithMenu):
                                         verSpacing=5, 
                                         labelTextSize="15pt")
         xyData = waferData["Data"]
-        isStackMap = waferData["Stack"]
         stackColorMap = pg.ColorMap(pos=None, color=["#00EE00", "#EEEE00", "#EE0000"])
         sortedKeys = sorted(xyData.keys())
         
@@ -1028,7 +1031,7 @@ class WaferMap(GraphicViewWithMenu):
             xyDict = xyData[num]
             # for stack map, num = fail counts
             # for wafer map, num = sbin number
-            if isStackMap:
+            if waferInd == -1:
                 color = stackColorMap.mapToQColor(num/sortedKeys[-1])
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
                 legendString = f"Fail Count: {num}"
