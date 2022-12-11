@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -322,8 +322,12 @@ class MyWindow(QtWidgets.QMainWindow):
                                            directory=getSetting().recentFolder, 
                                            filter=self.tr("Database (*.db)"))
         if p:
-            #TODO validation
-            self.loadDatabase(p)
+            isvalid, msg = validateSession(p)
+            if isvalid:
+                self.loadDatabase(p)
+            else:
+                QMessageBox.warning(self, self.tr("Warning"), 
+                                    self.tr("This session cannot be loaded: \n{}\n\n{}").format(p, msg))
     
     
     def onSaveSession(self):

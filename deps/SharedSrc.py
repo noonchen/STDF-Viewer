@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -12,7 +12,7 @@
 #
 
 import io, os, sys, logging, datetime
-import toml, subprocess, platform
+import toml, subprocess, platform, sqlite3
 import rust_stdf_helper
 import numpy as np
 from enum import IntEnum
@@ -761,6 +761,29 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
         openFileInOS(outPath)
     
 
+def validateSession(dbPath: str):
+    tableSet = set(["File_List", "File_Info", "Wafer_Info", "Dut_Info", "Dut_Counts", 
+                    "Test_Info", "PTR_Data", "MPR_Data", "FTR_Data", "Bin_Info", 
+                    "Pin_Map", "Pin_Info", "TestPin_Map", "Dynamic_Limits", "Datalog"])
+    try:
+        con = sqlite3.connect(dbPath)
+        cur = con.cursor()
+        currentTable = set([name 
+                            for name,
+                            in cur.execute('''SELECT 
+                                                    name 
+                                                FROM 
+                                                    sqlite_master 
+                                                WHERE 
+                                                    type="table"''')])
+        diff = currentTable.difference(tableSet)
+        if diff:
+            return False, f"Mismatched tables {','.join(diff)}"
+        else:
+            return True, ""
+    except Exception as e:
+        return False, repr(e)
+
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
@@ -773,7 +796,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
-           "showCompleteMessage", "rHEX", "get_file_size",
+           "showCompleteMessage", "rHEX", "get_file_size", "validateSession", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",
