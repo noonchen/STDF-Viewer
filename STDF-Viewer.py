@@ -418,7 +418,19 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def onAddFont(self):
-        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+        p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a .ttf font file"), 
+                                           directory=getSetting().recentFolder, 
+                                           filter=self.tr("TTF Font (*.ttf)"))        
+        if QtGui.QFontDatabase.addApplicationFont(p) < 0:
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("This font cannot be loaded:\n{}").format(p))
+        else:
+            shutil.copy(src=p, 
+                        dst=os.path.join(sys.rootFolder, "fonts"), 
+                        follow_symlinks=True)
+            # manually refresh font list
+            loadFonts()
+            self.settingUI.refreshFontList()
+            QMessageBox.information(self, self.tr("Completed"), self.tr("Load successfully, change font in settings to take effect"))
     
     
     def onToXLSX(self):

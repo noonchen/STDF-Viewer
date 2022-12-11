@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Dec 02 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -421,6 +421,11 @@ class stdfSettings(QtWidgets.QDialog):
             row = i//3
             col = i % 3
             symbolLayout.addWidget(cB, row, col)
+    
+    
+    def refreshFontList(self):
+        self.settingsUI.fontComboBox.clear()
+        self.settingsUI.fontComboBox.addItems(getLoadedFontNames())
     
     
     def showUI(self):

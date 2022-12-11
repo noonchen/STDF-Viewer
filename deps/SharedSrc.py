@@ -244,15 +244,15 @@ def getLoadedFontNames() -> list:
     '''
     get top 100 font names from qt font db
     '''
-    names = []
+    names = set()
     for i in range(100):
         # get 100 fonts at most
         ffamilies = QtGui.QFontDatabase.applicationFontFamilies(i)
         if ffamilies:
-            names.append(ffamilies[0])
+            names.add(ffamilies[0])
         else:
             break
-    return names
+    return sorted(names)
 
 
 isMac = platform.system() == 'Darwin'
