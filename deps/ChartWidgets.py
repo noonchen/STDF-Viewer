@@ -71,6 +71,23 @@ def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, r
     return hist, edges, bin_width, rectDutList
 
 
+def prepareBinRectList(y: np.ndarray, binCnt: np.ndarray, height: float, isHBIN: bool, binNumList: np.ndarray):
+    '''
+    return [(rect, (isHBIN, bin_num))]
+    '''
+    rectList = []
+    
+    # y is the center of the rects in BinChart
+    for center, width, bin_num in zip(y, binCnt, binNumList):
+        if width == 0:
+            continue
+        edge = center - height/2
+        rect = QRectF(0, edge, width, height)
+        rectList.append( (rect, (isHBIN, bin_num)) )
+    
+    return rectList
+
+
 class PlotMenu(QMenu):
     def __init__(self):
         QMenu.__init__(self)
@@ -432,14 +449,15 @@ class RectItem(pg.GraphicsObject):
         return QRectF(self.picture.boundingRect())
 
 
-class HistoViewBox(StdfViewrViewBox):
+class SVBarViewBox(StdfViewrViewBox):
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
         self.hlbars = RectItem(pen="#111111",
                                brush="#111111",
                                name="_highlight")
-        self.slbars = RectItem(pen="#CC0000",
-                               brush="#CC0000",
+        self.slbars = RectItem(pen={"color": "#CC0000", 
+                                    "width": 5},
+                               brush=None,
                                name="_selection")
         self.hlbars.setZValue(1000)
         self.slbars.setZValue(999)
@@ -454,7 +472,7 @@ class HistoViewBox(StdfViewrViewBox):
         for item in self.addedItems:
             if item.isVisible() and item.name() not in ["_selection", 
                                                         "_highlight"]:
-                if isinstance(item, HistoGraphItem):
+                if isinstance(item, SVBarGraphItem):
                     rectList = item.getRectDutList()
                 else:
                     continue
@@ -478,19 +496,24 @@ class HistoViewBox(StdfViewrViewBox):
         self.slbars.clear()
     
     def getSelectedDataForDutTable(self) -> list:
-        selectedRectTups = self.slbars.getRects()
         dataSet = set()
-        for _, duts in selectedRectTups:
+        for _, duts in self.slbars.getRects():
             _ = [dataSet.add( (self.fileID, dut) ) for dut in duts]
         return list(dataSet)
 
 
-class BinViewBox(StdfViewrViewBox):
-    def selectItemsWithin(self, coordBox: QRectF):
-        print("Bin chart pick logic")
-    
-    def highlightitemsWithin(self, coordBox: QRectF):
-        print("Bin chart highlight logic")
+class BinViewBox(SVBarViewBox):
+    def getSelectedDataForDutTable(self) -> list:
+        '''
+        For BinChart, return [(fid, isHBIN, duts)]
+        '''
+        tmp = {}
+        for _, binTup in self.slbars.getRects():
+            isHBIN, bin_num = binTup
+            tmp.setdefault( (self.fileID, isHBIN), []).append(bin_num)
+        return [(fid, isHBIN, duts) 
+                for (fid, isHBIN), duts 
+                in tmp.items()]
 
 
 class WaferViewBox(TrendViewBox):
@@ -713,7 +736,10 @@ class TrendChart(GraphicViewWithMenu):
             v.enableAutoRange(enable=True)
 
 
-class HistoGraphItem(pg.BarGraphItem):
+class SVBarGraphItem(pg.BarGraphItem):
+    '''
+    STDF Viewer customize BarGraphItem
+    '''
     def __init__(self, **opts):
         super().__init__(**opts)
         self.rectDutList = []
@@ -778,7 +804,7 @@ class HistoChart(TrendChart):
         # create same number of viewboxes as file counts
         for fid in sorted(testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
-            view = HistoViewBox()
+            view = SVBarViewBox()
             view.setFileID(fid)
             # plotitem setup
             pitem = pg.PlotItem(viewBox=view)
@@ -811,7 +837,7 @@ class HistoChart(TrendChart):
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
                 # hist = hist / hist.max()
-                item = HistoGraphItem(x0=bar_base, y0=edges, 
+                item = SVBarGraphItem(x0=bar_base, y0=edges, 
                                       width=hist, height=bin_width, 
                                       brush=siteColor, name=site_info)
                 item.setRectDutList(rectDutList)
@@ -891,14 +917,15 @@ class BinChart(GraphicViewWithMenu):
         for binType in ["HBIN", "SBIN"]:
             hsbin = binData[binType]
             binTicks = binData[binType+"_Ticks"]
+            isHBIN = True if binType == "HBIN" else False
             num_files = len(hsbin)
             # use a list to track viewbox count in
             # a single plot, used for Y-link and 
             # hide axis
             tmpVbList = []
-            binColorDict = settings.hbinColor if binType == "HBIN" else settings.sbinColor
+            binColorDict = settings.hbinColor if isHBIN else settings.sbinColor
             # add title
-            binTypeName = "Hardware Bin" if binType == "HBIN" else "Software Bin"
+            binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
             self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
                                      row=row, col=0, 
                                      rowspan=1, colspan=num_files, 
@@ -908,15 +935,20 @@ class BinChart(GraphicViewWithMenu):
             for fid in sorted(hsbin.keys()):
                 isFirstPlot = len(tmpVbList) == 0
                 view_bin = BinViewBox()
+                view_bin.setFileID(fid)
                 view_bin.invertY(True)
                 pitem = pg.PlotItem(viewBox=view_bin)
                 binStats = hsbin[fid]
                 # get data for barGraph
                 numList = sorted(binTicks.keys())
-                cntList = [binStats.get(n, 0) for n in numList]
+                cntList = np.array([binStats.get(n, 0) for n in numList])
                 colorList = [binColorDict[n] for n in numList]
                 # draw horizontal bars, use `ind` instead of `bin_num` as y
-                bar = pg.BarGraphItem(x0=0, y=np.arange(len(numList)), width=cntList, height=0.8, brushes=colorList)
+                y = np.arange(len(numList))
+                height = 0.8
+                bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
+                rectList = prepareBinRectList(y, cntList, height, isHBIN, numList)
+                bar.setRectDutList(rectList)
                 pitem.addItem(bar)
                 # set ticks to y
                 ticks = [[binTicks[n] for n in numList]]
