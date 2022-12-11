@@ -27,6 +27,9 @@ import numpy as np
 from deps.SharedSrc import REC, record_name_dict, DUT_SUMMARY_QUERY, DATALOG_QUERY
 
 
+commaJoin = lambda numList: ",".join(map(str, numList))
+
+
 def tryDecode(b: bytes) -> str:
     '''Try to decode bytes into string using limited codesets'''
     # try decode with utf-8, compatible with ascii
@@ -520,11 +523,11 @@ class DatabaseFetcher:
         if testID is None or recHeader is None:
             return {}
         
-        head_condition = f" AND HEAD_NUM IN ({','.join(map(str, heads))})"
+        head_condition = f" AND HEAD_NUM IN ({commaJoin(heads)})"
         if -1 in sites:
             site_condition = " AND SITE_NUM >= 0"
         else:
-            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+            site_condition = f" AND SITE_NUM IN ({commaJoin(sites)})"
         # only retrieve data from valid duts (not superseded)
         dut_condition = f''' AND DUTIndex IN (SELECT 
                                                 DUTIndex 
@@ -625,7 +628,7 @@ class DatabaseFetcher:
             # select all
             dut_condition = " AND DUTIndex > 0"
         else:
-            dut_condition = f''' AND DUTIndex IN ({','.join(map(str, duts))})'''
+            dut_condition = f''' AND DUTIndex IN ({commaJoin(duts)})'''
         
         dutList = np.array(sorted(duts), dtype=np.uint32)
         dutMap = dict(zip(dutList, range(dutsCount)))
@@ -772,7 +775,7 @@ class DatabaseFetcher:
         if -1 in sites:
             site_condition = " AND SITE_NUM >= 0"
         else:
-            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+            site_condition = f" AND SITE_NUM IN ({commaJoin(sites)})"
         
         sql = f"""
                 SELECT 
@@ -812,7 +815,7 @@ class DatabaseFetcher:
         if -1 in sites:
             site_condition = " AND SITE_NUM >= 0"
         else:
-            site_condition = f" AND SITE_NUM IN ({','.join(map(str, sites))})"
+            site_condition = f" AND SITE_NUM IN ({commaJoin(sites)})"
         
         sql = f"""
             SELECT 
@@ -858,7 +861,7 @@ class DatabaseFetcher:
         
         for fid, isHBIN, binList in selectedBin:
             binType = "HBIN" if isHBIN else "SBIN"
-            bin_condition = f"{binType} in ({','.join(map(str, binList))})"
+            bin_condition = f"{binType} in ({(binList)})"
             file_condition = f" AND Fid={fid}"
             sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {bin_condition}{file_condition}"
             
@@ -894,40 +897,52 @@ class DatabaseFetcher:
         return dutIndexList
     
     
-    #TODO
-    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, LLimit:float, HLimit:float, limitScale:int):
+    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, LLimit:float, HLimit:float):
+        '''
+        return (dynamic llim dict, dynamic hlim dict)
+        '''
         if self.cursor is None: raise RuntimeError("No database is connected")
-        hasValidLow = False
-        hasValidHigh = False
+        hasValidLow = ~np.isnan(LLimit)
+        hasValidHigh = ~np.isnan(HLimit)
         hasDynamicLow = False
         hasDynamicHigh = False
-        if LLimit is not None: hasValidLow = True
-        if HLimit is not None: hasValidHigh = True
         
         if hasValidLow or hasValidHigh:
-            dut_index_dict = dict(zip(dutList, range(dutList.size)))
-            if hasValidLow:
-                dyLLimits = np.full(dutList.size, LLimit, np.float32)
-            if hasValidHigh:
-                dyHLimits = np.full(dutList.size, HLimit, np.float32)
-            sql = "SELECT DUTIndex, LLimit, HLimit FROM Dynamic_Limits \
-                WHERE TEST_ID in (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?) \
-                    AND DUTIndex in (%s) ORDER by DUTIndex" % (",".join([str(i) for i in dutList]))
+            # dutIndex -> dynamic limit
+            dyLLimitsDict = dict(zip(dutList, np.full(dutList.size, LLimit, np.float32)))
+            dyHLimitsDict = dict(zip(dutList, np.full(dutList.size, HLimit, np.float32)))
+            sql = f'''SELECT 
+                        DUTIndex, LLimit, HLimit 
+                    FROM 
+                        Dynamic_Limits 
+                    WHERE 
+                        TEST_ID in (SELECT 
+                                        TEST_ID 
+                                    FROM 
+                                        Test_Info 
+                                    WHERE 
+                                        TEST_NUM=? AND TEST_NAME=?) 
+                        AND DUTIndex in ({commaJoin(dutList)}) 
+                    ORDER by 
+                        DUTIndex'''
             sql_param = [test_num, test_name]
                 
             for dutIndex, dyLL, dyHL in self.cursor.execute(sql, sql_param):
                 # replace the limit in the list of the same index as the dutIndex in dutList
                 if hasValidLow and (dyLL is not None):
                     hasDynamicLow = True
-                    dyLLimits[dut_index_dict[dutIndex]] = dyLL * 10 ** limitScale
+                    dyLLimitsDict[dutIndex] = dyLL
                 if hasValidHigh and (dyHL is not None):
                     hasDynamicHigh = True
-                    dyHLimits[dut_index_dict[dutIndex]] = dyHL * 10 ** limitScale
+                    dyHLimitsDict[dutIndex] = dyHL
                     
-            return hasDynamicLow, dyLLimits, hasDynamicHigh, dyHLimits
+            # replace with empty dict if no dynamic limit
+            dyLLimitsDict = dyLLimitsDict if hasDynamicLow else {}
+            dyHLimitsDict = dyHLimitsDict if hasDynamicHigh else {}
+            return dyLLimitsDict, dyHLimitsDict
         else:
-            # return empty array if all limits are None
-            return hasDynamicLow, np.array([]), hasDynamicHigh, np.array([])
+            # return empty dict if there's no dynamic limits
+            return {}, {}
     
     
     def getDTR_GDRs(self) -> list[tuple]:
@@ -950,8 +965,8 @@ class DatabaseFetcher:
         if len(heads) == 0 or len(sites) == 0:
             return {}
         
-        head_condition = f" AND HEAD_NUM in ({','.join(map(str, heads))})"
-        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({','.join(map(str, sites))})"
+        head_condition = f" AND HEAD_NUM in ({commaJoin(heads)})"
+        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({commaJoin(sites)})"
         
         sql = f'''SELECT
                     DUTIndex,
@@ -1000,9 +1015,9 @@ class DatabaseFetcher:
         if len(heads) == 0 or len(sites) == 0:
             return dutIndexDict
 
-        file_condition = f" Fid in ({','.join(map(str, fileIds))})"
-        head_condition = f" AND HEAD_NUM in ({','.join(map(str, heads))})"
-        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({','.join(map(str, sites))})"
+        file_condition = f" Fid in ({commaJoin(fileIds)})"
+        head_condition = f" AND HEAD_NUM in ({commaJoin(heads)})"
+        site_condition = " AND SITE_NUM >= 0" if -1 in sites else f" AND SITE_NUM in ({commaJoin(sites)})"
         
         sql = f'''SELECT 
                     Fid, DUTIndex 

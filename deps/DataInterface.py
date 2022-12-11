@@ -357,9 +357,12 @@ class DataInterface:
             return {}        
         # add (head, site) list to testInfo for MPR
         # it will be used for indexing channel name dict
-        # TODO
+        # 
+        # but channel name is only displayed in statistic table
+        # this function is used only in `getDutSummaryWithTestDataCore`
+        # we can simply skip this logic
         if testInfo["recHeader"] == REC.MPR:
-            testInfo["HeadSite"] = set() # set(itertools.product(selectHeads, [-1] if -1 in selectSites else selectSites))
+            testInfo["HeadSite"] = set()
         testData = self.DatabaseFetcher.getTestDataFromDutIndex(testID, 
                                                                 selectedDutIndex,
                                                                 FileID)
@@ -742,8 +745,14 @@ class DataInterface:
             if test_site_fid["recHeader"] == REC.MPR:
                 nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
             elif test_site_fid["recHeader"] == REC.PTR:
-                #TODO dynamic limit
-                pass
+                # dynamic limit
+                dyL, dyH = self.DatabaseFetcher.getDynamicLimits(test_site_fid["TEST_NUM"],
+                                                                 test_site_fid["TEST_NAME"],
+                                                                 nestSiteData["dutList"],
+                                                                 test_site_fid["LLimit"],
+                                                                 test_site_fid["HLimit"])
+                nestSiteData["dyLLimit"] = dyL
+                nestSiteData["dyHLimit"] = dyH
             # info that are same for all sites 
             # will be stored in testInfo
             infoDict.update(test_site_fid)

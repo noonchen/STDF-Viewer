@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -603,7 +603,11 @@ class TrendChart(GraphicViewWithMenu):
             y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
-                # TODO dynamic limits
+                # dynamic limits
+                if d_site.get("dyLLimit", {}):
+                    y_min_list.append(min(d_site["dyLLimit"].values()))
+                if d_site.get("dyHLimit", {}):
+                    y_max_list.append(max(d_site["dyHLimit"].values()))
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
                 # at least one site data should be valid
@@ -613,10 +617,6 @@ class TrendChart(GraphicViewWithMenu):
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
-        # # if these two list is empty, means no test value
-        # # is found in all files. this is is rare but I've encountered
-        # if len(y_min_list) == 0 or len(y_max_list) == 0:
-        #     return
         y_min = np.nanmin(y_min_list)
         y_max = np.nanmax(y_max_list)
         # add 15% as overhead
@@ -628,10 +628,6 @@ class TrendChart(GraphicViewWithMenu):
         if y_min == y_max:
             y_min -= 1
             y_max += 1
-        # # there is a possibility that y_min or y_max
-        # # is nan, in this case we cannot draw anything
-        # if np.isnan(y_min) or np.isnan(y_max):
-        #     return
         # add title
         self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
                                  rowspan=1, colspan=len(testInfo),
@@ -656,6 +652,8 @@ class TrendChart(GraphicViewWithMenu):
                 continue
             x_min_list = []
             x_max_list = []
+            dyL = {}
+            dyH = {}
             for site, data_per_site in sitesData.items():
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
@@ -665,6 +663,8 @@ class TrendChart(GraphicViewWithMenu):
                     continue
                 x_min_list.append(np.nanmin(x))
                 x_max_list.append(np.nanmax(x))
+                dyL.update(data_per_site.get("dyLLimit", {}))
+                dyH.update(data_per_site.get("dyHLimit", {}))
                 fsymbol = settings.fileSymbol[fid]
                 siteColor = settings.siteColor[site]
                 # test value
@@ -702,6 +702,13 @@ class TrendChart(GraphicViewWithMenu):
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
+            # dynamic limits
+            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.showLL_trend), 
+                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.showHL_trend)]:
+                if enabled and len(dyDict) > 0:
+                    x = np.array(sorted(dyDict.keys()))
+                    dylims = np.array([dyDict[i] for i in x])
+                    pitem.addItem(pg.PlotDataItem(x=x, y=dylims, pen=pen, name=name, color=pen.color()))
             # labels and file id
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")
