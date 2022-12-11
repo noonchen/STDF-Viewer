@@ -505,10 +505,11 @@ class MyWindow(QtWidgets.QMainWindow):
     @Slot(list)
     def onReadDutData_Bin(self, selectedBin: list):
         '''
-        selectedBin: a list of (fid, isHBIN, [dutIndex])
+        selectedBin: a list of (fid, isHBIN, [bin_num])
         '''
-        if selectedBin:
-            print(selectedBin)
+        selectedDutIndex = self.data_interface.DatabaseFetcher.getDUTIndexFromBin(selectedBin)
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
     
     
     @Slot(list)
@@ -516,8 +517,9 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         selectedDie: a list of (waferInd, fid, (x, y))
         '''
-        if selectedDie:
-            print(selectedDie)
+        selectedDutIndex = self.data_interface.DatabaseFetcher.getDUTIndexFromXY(selectedDie)
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
     
     
     def enableDragDrop(self):

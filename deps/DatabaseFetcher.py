@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Sun Dec 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -846,44 +846,50 @@ class DatabaseFetcher:
         return failDict
     
     
-    def getDUTIndexFromBin(self, head: int, site: int, binNum: int, isHBIN: bool = True, fileId: int = -1) -> list:
+    def getDUTIndexFromBin(self, selectedBin: list) -> list:
         '''
+        `selectedBin`: a list of (fid, isHBIN, [bin_num])
+        
         returns list[ (File ID, DutIndex) ] that is in BIN{bin}
         '''        
         if self.cursor is None: raise RuntimeError("No database is connected")
         
-        ext_condition = ""
-        if site != -1:
-            ext_condition += f" AND SITE_NUM={site}"
-        if fileId != -1:
-            ext_condition += f" AND Fid={fileId}"
-        binType = "HBIN" if isHBIN else "SBIN"
-        
         dutIndexList = []
-        sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {binType}={binNum} AND HEAD_NUM={head}{ext_condition}"
+        
+        for fid, isHBIN, binList in selectedBin:
+            binType = "HBIN" if isHBIN else "SBIN"
+            bin_condition = f"{binType} in ({','.join(map(str, binList))})"
+            file_condition = f" AND Fid={fid}"
+            sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {bin_condition}{file_condition}"
             
-        for fid, dutIndex, in self.cursor.execute(sql):
-            dutIndexList.append( (fid, dutIndex) )
+            for fid, dutIndex, in self.cursor.execute(sql):
+                d = (fid, dutIndex)
+                if d not in dutIndexList:
+                    dutIndexList.append(d)
         
         return dutIndexList
     
     
-    def getDUTIndexFromXY(self, x: int, y: int, wafer_num: int, fileId: int) -> list[tuple]:
+    def getDUTIndexFromXY(self, selectedDie: list) -> list[tuple]:
         '''
+        `selectedDie`: a list of (waferInd, fid, (x, y))
+        
         returns list[ (File ID, DutIndex) ] that in (X, Y)
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
         dutIndexList = []
-        if wafer_num == -1:
-            # for stacked wafermap, ignore `fileId`
-            # since we need to get dut index from all files
-            sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y}"
-        else:
-            sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y} AND WaferIndex={wafer_num} AND Fid={fileId}"
-            
-        for fid, dutIndex, in self.cursor.execute(sql):
-            dutIndexList.append((fid, dutIndex))
+        
+        for waferInd, fid, (x, y) in selectedDie:
+            if waferInd == -1:
+                # for stacked wafermap, ignore `fid`
+                # since we need to get dut index from all files
+                sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y}"
+            else:
+                sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD={x} AND YCOORD={y} AND WaferIndex={waferInd} AND Fid={fid}"
+                
+            for fid, dutIndex, in self.cursor.execute(sql):
+                dutIndexList.append( (fid, dutIndex) )
         
         return dutIndexList
     
