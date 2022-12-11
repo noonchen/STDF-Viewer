@@ -140,6 +140,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionAbout.triggered.connect(self.onAbout)
         self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
         self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
+        self.ui.actionFetchDuts.triggered.connect(lambda: self.onFetchAllRows(self.ui.dutInfoTable))
+        self.ui.actionFetchDatalog.triggered.connect(lambda: self.onFetchAllRows(self.ui.datalogTable))
         self.ui.actionAddFont.triggered.connect(self.onAddFont)
         self.ui.actionToXLSX.triggered.connect(self.onToXLSX)
         # init search-related UI
@@ -497,6 +499,18 @@ class MyWindow(QtWidgets.QMainWindow):
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
       
     
+    def onFetchAllRows(self, activeTable: QtWidgets.QTableView):
+        model = activeTable.model()
+        if isinstance(model, DutSortFilter):
+            # dut summary uses proxy model
+            model = model.sourceModel()
+        if isinstance(model, QtSql.QSqlQueryModel):
+            self.signals.statusSignal.emit(self.tr("Fetching all..."), False, False, False)
+            while model.canFetchMore():
+                model.fetchMore()
+            self.signals.statusSignal.emit(self.tr("Fetch Done!"), False, False, False)
+    
+    
     @Slot(list)
     def onReadDutData_TrendHisto(self, selectedDutIndex: list):
         '''
@@ -592,7 +606,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # datalog info table
         self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
         self.ui.datalogTable.setModel(self.tmodel_datalog)
+        self.ui.datalogTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
+        self.ui.datalogTable.addAction(self.ui.actionFetchDatalog)
         # test data table
         self.tmodel_data = TestDataTableModel()
         self.ui.rawDataTable.setModel(self.tmodel_data)
@@ -607,6 +623,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dutInfoTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.dutInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dutInfoTable))
         self.ui.dutInfoTable.addAction(self.ui.actionReadDutData_DS)   # add context menu for reading dut data
+        self.ui.dutInfoTable.addAction(self.ui.actionFetchDuts)
         # file header table
         self.tmodel_info = QtGui.QStandardItemModel()
         self.ui.fileInfoTable.setModel(self.tmodel_info)
@@ -623,6 +640,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.fileInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
         
     def init_Head_SiteCheckbox(self):
