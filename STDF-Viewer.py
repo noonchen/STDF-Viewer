@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Sun Dec 11 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -79,6 +79,9 @@ logger = logging.getLogger("STDF-Viewer")
 class signals4MainUI(QtCore.QObject):
     dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
+    showDutDataSignal_TrendHisto = Signal(list)     # trend & histo
+    showDutDataSignal_Bin = Signal(list)            # bin chart
+    showDutDataSignal_Wafer = Signal(list)          # wafer
 
 
 class MyWindow(QtWidgets.QMainWindow):
@@ -108,6 +111,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
         self.signals.statusSignal.connect(self.updateStatus)
+        self.signals.showDutDataSignal_TrendHisto.connect(self.onReadDutData_TrendHisto)
+        self.signals.showDutDataSignal_Bin.connect(self.onReadDutData_Bin)
+        self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
         self.mergePanel = MergePanel(self)
@@ -486,6 +492,33 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
       
+    
+    @Slot(list)
+    def onReadDutData_TrendHisto(self, selectedDutIndex: list):
+        '''
+        selectedDutIndex: a list of (fid, dutIndex)
+        '''
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
+    
+        
+    @Slot(list)
+    def onReadDutData_Bin(self, selectedBin: list):
+        '''
+        selectedBin: a list of (fid, isHBIN, [dutIndex])
+        '''
+        if selectedBin:
+            print(selectedBin)
+    
+    
+    @Slot(list)
+    def onReadDutData_Wafer(self, selectedDie: list):
+        '''
+        selectedDie: a list of (waferInd, fid, (x, y))
+        '''
+        if selectedDie:
+            print(selectedDie)
+    
     
     def enableDragDrop(self):
         for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
@@ -986,6 +1019,7 @@ class MyWindow(QtWidgets.QMainWindow):
             tchart = TrendChart()
             tchart.setTrendData(tdata)
             if tchart.validData:
+                tchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)
                 return tchart
         
         elif tabType == tab.Histo:
@@ -993,6 +1027,7 @@ class MyWindow(QtWidgets.QMainWindow):
             hchart = HistoChart()
             hchart.setTrendData(tdata)
             if hchart.validData:
+                hchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)
                 return hchart
         
         elif tabType == tab.Wafer:
@@ -1000,6 +1035,7 @@ class MyWindow(QtWidgets.QMainWindow):
             wchart = WaferMap()
             wchart.setWaferData(wdata)
             if wchart.validData:
+                wchart.setShowDutSignal(self.signals.showDutDataSignal_Wafer)
                 return wchart
         
         elif tabType == tab.Bin:
@@ -1010,6 +1046,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 bchart = BinChart()
                 bchart.setBinData(bdata)
                 if bchart.validData:
+                    bchart.setShowDutSignal(self.signals.showDutDataSignal_Bin)
                     bcharts.append(bchart)
             return bcharts
         
