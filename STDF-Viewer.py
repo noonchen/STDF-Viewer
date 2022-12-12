@@ -41,7 +41,8 @@ from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataDisplayer
 from deps.uic_stdDebug import stdDebugPanel
-
+from deps.uic_stdConverter import StdfConverter
+import rust_stdf_helper
 # pyqt5
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
@@ -420,7 +421,10 @@ class MyWindow(QtWidgets.QMainWindow):
     def onAddFont(self):
         p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a .ttf font file"), 
                                            directory=getSetting().recentFolder, 
-                                           filter=self.tr("TTF Font (*.ttf)"))        
+                                           filter=self.tr("TTF Font (*.ttf)"))
+        if not p:
+            return
+        
         if QtGui.QFontDatabase.addApplicationFont(p) < 0:
             QMessageBox.warning(self, self.tr("Warning"), self.tr("This font cannot be loaded:\n{}").format(p))
         else:
@@ -434,7 +438,12 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def onToXLSX(self):
-        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+        cv = StdfConverter(self)
+        cv.setupConverter(self.tr("STDF to XLSX Converter"), 
+                          self.tr("XLSX Path Selection"), 
+                          ".xlsx", 
+                          rust_stdf_helper.stdf_to_xlsx)
+        cv.showUI()
     
     
     def onExit(self):
