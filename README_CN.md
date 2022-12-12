@@ -13,6 +13,7 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
 ## 目录
 - [使用方法](#使用方法)
   - [**打开STDF文件**](#打开stdf文件)
+  - [**合并STDF文件**](#合并stdf文件)
   - [**寻找失效测项**](#寻找失效测项)
   - [**查看DUT测试信息**](#查看dut测试信息)
   - [**显示GDR和DTR信息**](#显示gdr和dtr信息)
@@ -23,15 +24,10 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
   - [**Bin桶分布**](#bin桶分布)
   - [**查看晶圆图**](#查看晶圆图)
   - [**读取特定DUT的所有测试数据**](#读取特定dut的所有测试数据)
-    - [**在`DUT详情`中**](#在dut详情中)
-    - [**在`数据详情`中**](#在数据详情中)
-    - [**在`趋势图`中**](#在趋势图中)
-    - [**在`直方图`中**](#在直方图中)
-    - [**在`Bin桶分布`中**](#在bin桶分布中)
-    - [**在`晶圆图`中**](#在晶圆图中)
+    - [**在图像里中**](#在图像里中)
   - [**生成Excel报告**](#生成excel报告)
   - [**设置**](#设置)
-    - [**更改字体**](#更改字体)
+  - [**实用工具**](#实用工具)
 - [遇到问题？](#遇到问题)
 - [鸣谢](#鸣谢)
 - [软件许可证](#软件许可证)
@@ -42,7 +38,7 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
 
 ### **打开STDF文件**
 
-STDF Viewer可处理的文件为[第4套标准的STDF](http://www.kanwoda.com/wp-content/uploads/2015/05/std-spec.pdf)，ZIP*、GZ以及BZIP压缩的STDF文件可以不用解压直接打开。
+STDF Viewer可处理的文件为V4、V4-2007标准的STDF，ZIP*、GZ以及BZIP压缩的STDF文件可以不用解压直接打开。
 
 打开的方式有三种:
 
@@ -50,10 +46,24 @@ STDF Viewer可处理的文件为[第4套标准的STDF](http://www.kanwoda.com/wp
 2. 文件右键选择用STDF Viewer打开（macOS由于pyinstaller的原因暂时不支持）。
 3. 将文件直接拖到程序界面上。
 
+如果一次选择了多个文件，那么比对模式自动开启。
+
 ***注意**: ZIP格式的STDF文件支持有限，需要满足以下条件:*
 - *没有密码*
 - *一个ZIP只包含一个文件*
-- *ZIP的压缩方法为`DEFLATE`，这是各个平台的主流的压缩方式*
+- ~~*ZIP的压缩方法为`DEFLATE`，这是各个平台的主流的压缩方式*~~ (V4.0.0)
+
+<br>
+
+### **合并STDF文件**
+
+(V4.0.0) 点击工具栏的`合并`按钮打开合并面板, 同一个组里的多个文件最终会合并，且序号为0的文件为第一个文件。
+
+<img src="screenshots/merge panel.png">
+
+支持添加多个合并组，组和组之间会进行对比。
+
+<img src="screenshots/merge result.png">
 
 <br>
 
@@ -69,13 +79,13 @@ STDF Viewer可处理的文件为[第4套标准的STDF](http://www.kanwoda.com/wp
 
 DUT测试信息位于`STDF信息` -> `DUT详情`。表格中每行代表一个DUT，失效的DUT会被标为<span style="color:red">红色</span>。
 
-<img src="screenshots/dut summary.png">
+(V4.0.0) 被顶替的DUT会被标为灰色。通常的STDF文件会包含几K+ DUT，为了性能考虑，`DUT详情` 不会一次性把数据都加载到表格中，不过如果你想加载的话，表格右键选择`加载所有行`即可。
 
 如果STDF包含多head/site测试数据，显示的DUT会根据`选择Site/Head`进行过滤。
 
 DUT信息可以按照每列进行排列，点击对应列即可。
 
-<img src="screenshots/dut summary sorting.png">
+<img src="screenshots/dut summary.png">
 
 <br>
 
@@ -84,6 +94,8 @@ DUT信息可以按照每列进行排列，点击对应列即可。
 所有GDR (Generic Data Record)和DTR (Datalog Text Record) 数据列在`STDF信息` -> `GDR & DTR汇总`中。这两种Record的精确位置不好确定，表中给出了相对于PIR/PRR的位置。
 
 GDR的`值`的每一行代表一个V1数据，按照`{V1序列} {V1数据类型}: {V1数据}`的格式进行打印。
+
+和DUT详情一样，想全部加载数据右键点击`加载所有行`。
 
 *注意：`Bn`和`Dn`格式的数据使用十六进制进行表示*
 
@@ -114,7 +126,7 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 <img src="screenshots/trend dynamic limit.png">
 
 #### **直方图**
-显示测项的数据分布，横轴为测试值，纵轴为每个区间的DUT个数。鼠标停留到区间上可以查看具体计数。
+显示测项的数据分布，纵轴为测试值。~~鼠标停留到区间上可以查看具体计数。~~
 
 <img src="screenshots/histo.png">
 
@@ -140,6 +152,10 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <img src="screenshots/wafer.png">
 
+点击图例的图标可以隐藏对应的SBIN。
+
+<img src="screenshots/wafer hide.png">
+
 <br>
 
 ### **读取特定DUT的所有测试数据**
@@ -157,23 +173,14 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <img src="screenshots/test summary read dut data.png">
 
-#### **在`趋势图`中**
-点击图中数据点进行选择（或者按住`Shift`进行多选），选择的点会标为*`S`*，按`Enter`即可。
+#### **在图像里中**
+图中右键点击`数据选择模式`，圈出感兴趣的地方后，再点击右键选择`读取DUT详细数据`，记得善用图例隐藏功能。
 
 <img src="screenshots/trend interactive 2.png">
 
-#### **在`直方图`中**
-点击图中的长条进行选择（或者按住`Shift`进行多选），选中的长条显示为<span style="color:red">红色</span>，按`Enter`后显示所有测试值在所选范围内的DUT。
-
 <img src="screenshots/histo interactive.png">
 
-#### **在`Bin桶分布`中**
-点击对应的Bin图形（按住`Shift`多选），按`Enter`显示所有分在所选Bin的DUT。
-
 <img src="screenshots/bin interactive.png">
-
-#### **在`晶圆图`中**
-点击对应坐标的正方形后按`Enter`调出。
 
 <img src="screenshots/wafer interactive.png">
 
@@ -206,23 +213,20 @@ STDF Viewer提供了全局设置界面，可以用来更改程序界面中或导
 
 <img src="screenshots/setting.png">
 
-#### **更改字体**
-用户可以自定义界面和图像中的字体。
+### **实用工具**
+4.0.0在工具栏增加了`实用工具`按钮。
 
-首先需要重命名 .ttf 字体文件：
-- 中文字体: 加前缀 `cn_`
-- 英文字体: 加前缀 `en_`
+<img src="screenshots/utilities.png">
 
-例如，某个字体文件名为`testfontforchinese.ttf`作为中文的默认字体，要将文件名改为`cn_testfontforchinese.ttf`，其他语言的字体不受影响。
+#### **加载/保存缓存**
 
-把重命名后的文件复制到`/fonts`文件夹中，位置如下：
-- Windows：程序旁边
-- macOS：`STDF Viewer.app/Contents/Resources/fonts`
-- Ubuntu：`/usr/local/bin/STDF-Viewer/fonts`
+你可以把当间缓存保存下来，避免重复读去STDF文件。
 
-重启软件后生效。
+#### **添加字体**
+和之前版本相比，现只需选择一个.ttf格式的字体文件，在`设置`中选择即可。
 
-<img src="screenshots/change fonts.png">
+#### **STDF转换**
+此工具可以把STDF的所有record存到xlsx文件，便于分析和调试文件。
 
 <br>
 
@@ -237,12 +241,17 @@ STDF Viewer提供了全局设置界面，可以用来更改程序界面中或导
 ## 鸣谢
 
 STDF Viewer使用了下列开源项目的代码，感谢作者们：
- - [zlib](https://zlib.net/)
- - [minizip](https://www.winimage.com/zLibDll/minizip.html)
- - [bzip2](https://www.sourceware.org/bzip2/)
- - [sqlite3](https://www.sqlite.org/)
- - [hashmap](https://gist.github.com/warmwaffles/6fb6786be7c86ed51fce)
- - [message_queue](https://github.com/LnxPrgr3/message_queue)
+
+ - [rust-stdf](https://github.com/noonchen/rust-stdf) <- 我是作者
+ - [pyqtgraph](https://github.com/pyqtgraph/pyqtgraph)
+ - [flate2](https://crates.io/crates/flate2)
+ - [bzip2](https://crates.io/crates/bzip2)
+ - [rusqlite](https://crates.io/crates/rusqlite)
+
+ 4.0.0及新版本不再使用：
+ - ~~[minizip](https://www.winimage.com/zLibDll/minizip.html)~~
+ - ~~[hashmap](https://gist.github.com/warmwaffles/6fb6786be7c86ed51fce)~~
+ - ~~[message_queue](https://github.com/LnxPrgr3/message_queue)~~
 
  3.0.5及新版本不再使用：
  - ~~[pystdf](https://github.com/cmars/pystdf)~~
