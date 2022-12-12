@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Nov 23 2022
+// Last Modified: Mon Dec 12 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -1129,7 +1129,7 @@ fn on_ptr_rec(
     db_ctx.insert_ptr_data(rusqlite::params![
         dut_index,
         test_id,
-        ptr_rec.result * 10f32.powi(scale),
+        replace_inf(ptr_rec.result * 10f32.powi(scale)),
         ptr_rec.test_flg[0]
     ])?;
 
@@ -1212,7 +1212,7 @@ fn on_mpr_rec(
     mpr_rec
         .rtn_rslt
         .iter_mut()
-        .for_each(|x| *x *= 10f32.powi(scale));
+        .for_each(|x| *x = replace_inf(*x * 10f32.powi(scale)));
     // serialize result array and stat array using hex
     let rslt_hex = hex::encode_upper({
         unsafe {
@@ -1980,5 +1980,18 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
     } else {
         // binary file
         Ok(fp.metadata()?.len())
+    }
+}
+
+#[inline(always)]
+pub fn replace_inf(num: f32) -> f32 {
+    if num.is_finite() {
+        num
+    } else if num < 0.0 {
+        f32::MIN
+    } else if num > 0.0 {
+        f32::MAX
+    } else {
+        f32::NAN
     }
 }
