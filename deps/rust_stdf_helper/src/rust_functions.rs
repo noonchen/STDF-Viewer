@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Nov 23 2022
+// Last Modified: Mon Dec 12 2022
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -13,6 +13,7 @@ use crate::{database_context::DataBaseCtx, StdfHelperError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use lazy_static::lazy_static;
 use rust_stdf::*;
+use rust_xlsxwriter::{Worksheet, XlsxError};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::{fs, io};
@@ -1129,7 +1130,7 @@ fn on_ptr_rec(
     db_ctx.insert_ptr_data(rusqlite::params![
         dut_index,
         test_id,
-        ptr_rec.result * 10f32.powi(scale),
+        replace_inf(ptr_rec.result * 10f32.powi(scale)),
         ptr_rec.test_flg[0]
     ])?;
 
@@ -1212,7 +1213,7 @@ fn on_mpr_rec(
     mpr_rec
         .rtn_rslt
         .iter_mut()
-        .for_each(|x| *x *= 10f32.powi(scale));
+        .for_each(|x| *x = replace_inf(*x * 10f32.powi(scale)));
     // serialize result array and stat array using hex
     let rslt_hex = hex::encode_upper({
         unsafe {
@@ -1981,4 +1982,92 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
         // binary file
         Ok(fp.metadata()?.len())
     }
+}
+
+#[inline(always)]
+pub fn replace_inf(num: f32) -> f32 {
+    if num.is_finite() {
+        num
+    } else if num < 0.0 {
+        f32::MIN
+    } else if num > 0.0 {
+        f32::MAX
+    } else {
+        f32::NAN
+    }
+}
+
+// stdf to excel converter function
+#[inline(always)]
+pub fn get_fields_from_code(type_code: u64) -> &'static [&'static str] {
+    use stdf_record_type::*;
+    match type_code {
+        // rec type 15
+        REC_PTR => rust_stdf::PTR::FIELD_NAMES_AS_ARRAY,
+        REC_MPR => rust_stdf::MPR::FIELD_NAMES_AS_ARRAY,
+        REC_FTR => rust_stdf::FTR::FIELD_NAMES_AS_ARRAY,
+        REC_STR => rust_stdf::STR::FIELD_NAMES_AS_ARRAY,
+        // rec type 5
+        REC_PIR => rust_stdf::PIR::FIELD_NAMES_AS_ARRAY,
+        REC_PRR => rust_stdf::PRR::FIELD_NAMES_AS_ARRAY,
+        // rec type 2
+        REC_WIR => rust_stdf::WIR::FIELD_NAMES_AS_ARRAY,
+        REC_WRR => rust_stdf::WRR::FIELD_NAMES_AS_ARRAY,
+        REC_WCR => rust_stdf::WCR::FIELD_NAMES_AS_ARRAY,
+        // rec type 50
+        REC_GDR => rust_stdf::GDR::FIELD_NAMES_AS_ARRAY,
+        REC_DTR => rust_stdf::DTR::FIELD_NAMES_AS_ARRAY,
+        // rec type 0
+        REC_FAR => rust_stdf::FAR::FIELD_NAMES_AS_ARRAY,
+        REC_ATR => rust_stdf::ATR::FIELD_NAMES_AS_ARRAY,
+        REC_VUR => rust_stdf::VUR::FIELD_NAMES_AS_ARRAY,
+        // rec type 1
+        REC_MIR => rust_stdf::MIR::FIELD_NAMES_AS_ARRAY,
+        REC_MRR => rust_stdf::MRR::FIELD_NAMES_AS_ARRAY,
+        REC_PCR => rust_stdf::PCR::FIELD_NAMES_AS_ARRAY,
+        REC_HBR => rust_stdf::HBR::FIELD_NAMES_AS_ARRAY,
+        REC_SBR => rust_stdf::SBR::FIELD_NAMES_AS_ARRAY,
+        REC_PMR => rust_stdf::PMR::FIELD_NAMES_AS_ARRAY,
+        REC_PGR => rust_stdf::PGR::FIELD_NAMES_AS_ARRAY,
+        REC_PLR => rust_stdf::PLR::FIELD_NAMES_AS_ARRAY,
+        REC_RDR => rust_stdf::RDR::FIELD_NAMES_AS_ARRAY,
+        REC_SDR => rust_stdf::SDR::FIELD_NAMES_AS_ARRAY,
+        REC_PSR => rust_stdf::PSR::FIELD_NAMES_AS_ARRAY,
+        REC_NMR => rust_stdf::NMR::FIELD_NAMES_AS_ARRAY,
+        REC_CNR => rust_stdf::CNR::FIELD_NAMES_AS_ARRAY,
+        REC_SSR => rust_stdf::SSR::FIELD_NAMES_AS_ARRAY,
+        REC_CDR => rust_stdf::CDR::FIELD_NAMES_AS_ARRAY,
+        // rec type 10
+        REC_TSR => rust_stdf::TSR::FIELD_NAMES_AS_ARRAY,
+        // rec type 20
+        REC_BPS => rust_stdf::BPS::FIELD_NAMES_AS_ARRAY,
+        REC_EPS => rust_stdf::EPS::FIELD_NAMES_AS_ARRAY,
+        // rec type 180: Reserved
+        // rec type 181: Reserved
+        REC_RESERVE => rust_stdf::ReservedRec::FIELD_NAMES_AS_ARRAY,
+        // not matched
+        _ => &[""; 0],
+    }
+}
+
+#[inline(always)]
+pub fn write_json_to_sheet(
+    json: serde_json::Value,
+    field_names: &[&str],
+    sheet: &mut Worksheet,
+    row: u32,
+) -> Result<(), XlsxError> {
+    for (col, &field) in field_names.iter().enumerate() {
+        let col = col as u16;
+        let v = &json[field];
+        match v {
+            serde_json::Value::Number(n) => {
+                sheet.write_number_only(row, col, n.as_f64().unwrap_or(f64::NAN))?
+            }
+            serde_json::Value::Null => sheet.write_string_only(row, col, "N/A")?,
+            serde_json::Value::String(s) => sheet.write_string_only(row, col, s)?,
+            _ => sheet.write_string_only(row, col, &v.to_string())?,
+        };
+    }
+    Ok(())
 }

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -219,8 +219,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
         selectedData = []
         for view in self.view_list:
             selectedData.extend(view.getSelectedDataForDutTable())
-        #TODO send data to main UI
-        print(selectedData)
+        # send data to main UI
         if self.showDutSignal:
             self.showDutSignal.emit(selectedData)
 
@@ -382,7 +381,9 @@ class TrendViewBox(StdfViewrViewBox):
         dataSet = set()
         dutIndexArray, _ = self.slpoints.getData()
         # remove duplicates
-        _ = [dataSet.add((self.fileID, i)) for i in dutIndexArray]
+        # array is float type, must convert to int
+        # otherwise will cause crash in `TestDataTable`
+        _ = [dataSet.add((self.fileID, int(i))) for i in dutIndexArray]
         return list(dataSet)
 
 
@@ -505,14 +506,14 @@ class SVBarViewBox(StdfViewrViewBox):
 class BinViewBox(SVBarViewBox):
     def getSelectedDataForDutTable(self) -> list:
         '''
-        For BinChart, return [(fid, isHBIN, duts)]
+        For BinChart, return [(fid, isHBIN, bins)]
         '''
         tmp = {}
         for _, binTup in self.slbars.getRects():
             isHBIN, bin_num = binTup
             tmp.setdefault( (self.fileID, isHBIN), []).append(bin_num)
-        return [(fid, isHBIN, duts) 
-                for (fid, isHBIN), duts 
+        return [(fid, isHBIN, bins) 
+                for (fid, isHBIN), bins 
                 in tmp.items()]
 
 
@@ -559,7 +560,7 @@ class WaferViewBox(TrendViewBox):
         # remove duplicates
         _ = [dataSet.add((self.waferInd, 
                           self.fileID, 
-                          (x, y))) 
+                          (int(x), int(y)))) 
              for x, y 
              in zip(xData, yData)]
         return list(dataSet)
@@ -602,7 +603,11 @@ class TrendChart(GraphicViewWithMenu):
             y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
-                # TODO dynamic limits
+                # dynamic limits
+                if d_site.get("dyLLimit", {}):
+                    y_min_list.append(min(d_site["dyLLimit"].values()))
+                if d_site.get("dyHLimit", {}):
+                    y_max_list.append(max(d_site["dyHLimit"].values()))
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
                 # at least one site data should be valid
@@ -612,10 +617,6 @@ class TrendChart(GraphicViewWithMenu):
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
-        # # if these two list is empty, means no test value
-        # # is found in all files. this is is rare but I've encountered
-        # if len(y_min_list) == 0 or len(y_max_list) == 0:
-        #     return
         y_min = np.nanmin(y_min_list)
         y_max = np.nanmax(y_max_list)
         # add 15% as overhead
@@ -627,10 +628,6 @@ class TrendChart(GraphicViewWithMenu):
         if y_min == y_max:
             y_min -= 1
             y_max += 1
-        # # there is a possibility that y_min or y_max
-        # # is nan, in this case we cannot draw anything
-        # if np.isnan(y_min) or np.isnan(y_max):
-        #     return
         # add title
         self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
                                  rowspan=1, colspan=len(testInfo),
@@ -655,6 +652,8 @@ class TrendChart(GraphicViewWithMenu):
                 continue
             x_min_list = []
             x_max_list = []
+            dyL = {}
+            dyH = {}
             for site, data_per_site in sitesData.items():
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
@@ -664,6 +663,8 @@ class TrendChart(GraphicViewWithMenu):
                     continue
                 x_min_list.append(np.nanmin(x))
                 x_max_list.append(np.nanmax(x))
+                dyL.update(data_per_site.get("dyLLimit", {}))
+                dyH.update(data_per_site.get("dyHLimit", {}))
                 fsymbol = settings.fileSymbol[fid]
                 siteColor = settings.siteColor[site]
                 # test value
@@ -701,6 +702,13 @@ class TrendChart(GraphicViewWithMenu):
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
+            # dynamic limits
+            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.showLL_trend), 
+                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.showHL_trend)]:
+                if enabled and len(dyDict) > 0:
+                    x = np.array(sorted(dyDict.keys()))
+                    dylims = np.array([dyDict[i] for i in x])
+                    pitem.addItem(pg.PlotDataItem(x=x, y=dylims, pen=pen, name=name, color=pen.color()))
             # labels and file id
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")
@@ -1009,7 +1017,10 @@ class WaferMap(GraphicViewWithMenu):
         
         settings = ss.getSetting()
         self.validData = True
+        waferInd, fid = waferData["ID"]
         waferView = WaferViewBox()
+        waferView.setWaferIndex(waferInd)
+        waferView.setFileID(fid)
         pitem = pg.PlotItem(viewBox=waferView)
         # put legend in another view
         view_legend = pg.ViewBox()
@@ -1020,7 +1031,6 @@ class WaferMap(GraphicViewWithMenu):
                                         verSpacing=5, 
                                         labelTextSize="15pt")
         xyData = waferData["Data"]
-        isStackMap = waferData["Stack"]
         stackColorMap = pg.ColorMap(pos=None, color=["#00EE00", "#EEEE00", "#EE0000"])
         sortedKeys = sorted(xyData.keys())
         
@@ -1028,7 +1038,7 @@ class WaferMap(GraphicViewWithMenu):
             xyDict = xyData[num]
             # for stack map, num = fail counts
             # for wafer map, num = sbin number
-            if isStackMap:
+            if waferInd == -1:
                 color = stackColorMap.mapToQColor(num/sortedKeys[-1])
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
                 legendString = f"Fail Count: {num}"

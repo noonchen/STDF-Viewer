@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Mon Dec 12 2022
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -41,7 +41,8 @@ from deps.uic_stdExporter import stdfExporter
 from deps.uic_stdSettings import stdfSettings
 from deps.uic_stdDutData import DutDataDisplayer
 from deps.uic_stdDebug import stdDebugPanel
-
+from deps.uic_stdConverter import StdfConverter
+import rust_stdf_helper
 # pyqt5
 from deps.ui.stdfViewer_MainWindows import Ui_MainWindow
 from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
@@ -79,6 +80,9 @@ logger = logging.getLogger("STDF-Viewer")
 class signals4MainUI(QtCore.QObject):
     dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
+    showDutDataSignal_TrendHisto = Signal(list)     # trend & histo
+    showDutDataSignal_Bin = Signal(list)            # bin chart
+    showDutDataSignal_Wafer = Signal(list)          # wafer
 
 
 class MyWindow(QtWidgets.QMainWindow):
@@ -108,6 +112,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
         self.signals.statusSignal.connect(self.updateStatus)
+        self.signals.showDutDataSignal_TrendHisto.connect(self.onReadDutData_TrendHisto)
+        self.signals.showDutDataSignal_Bin.connect(self.onReadDutData_Bin)
+        self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
         self.mergePanel = MergePanel(self)
@@ -134,6 +141,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.actionAbout.triggered.connect(self.onAbout)
         self.ui.actionReadDutData_DS.triggered.connect(self.onReadDutData_DS)
         self.ui.actionReadDutData_TS.triggered.connect(self.onReadDutData_TS)
+        self.ui.actionFetchDuts.triggered.connect(lambda: self.onFetchAllRows(self.ui.dutInfoTable))
+        self.ui.actionFetchDatalog.triggered.connect(lambda: self.onFetchAllRows(self.ui.datalogTable))
         self.ui.actionAddFont.triggered.connect(self.onAddFont)
         self.ui.actionToXLSX.triggered.connect(self.onToXLSX)
         # init search-related UI
@@ -316,8 +325,12 @@ class MyWindow(QtWidgets.QMainWindow):
                                            directory=getSetting().recentFolder, 
                                            filter=self.tr("Database (*.db)"))
         if p:
-            #TODO validation
-            self.loadDatabase(p)
+            isvalid, msg = validateSession(p)
+            if isvalid:
+                self.loadDatabase(p)
+            else:
+                QMessageBox.warning(self, self.tr("Warning"), 
+                                    self.tr("This session cannot be loaded: \n{}\n\n{}").format(p, msg))
     
     
     def onSaveSession(self):
@@ -406,11 +419,31 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def onAddFont(self):
-        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+        p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a .ttf font file"), 
+                                           directory=getSetting().recentFolder, 
+                                           filter=self.tr("TTF Font (*.ttf)"))
+        if not p:
+            return
+        
+        if QtGui.QFontDatabase.addApplicationFont(p) < 0:
+            QMessageBox.warning(self, self.tr("Warning"), self.tr("This font cannot be loaded:\n{}").format(p))
+        else:
+            shutil.copy(src=p, 
+                        dst=os.path.join(sys.rootFolder, "fonts"), 
+                        follow_symlinks=True)
+            # manually refresh font list
+            loadFonts()
+            self.settingUI.refreshFontList()
+            QMessageBox.information(self, self.tr("Completed"), self.tr("Load successfully, change font in settings to take effect"))
     
     
     def onToXLSX(self):
-        QMessageBox.information(self, self.tr("Notice"), self.tr("Not implemented yet..."))
+        cv = StdfConverter(self)
+        cv.setupConverter(self.tr("STDF to XLSX Converter"), 
+                          self.tr("XLSX Path Selection"), 
+                          ".xlsx", 
+                          rust_stdf_helper.stdf_to_xlsx)
+        cv.showUI()
     
     
     def onExit(self):
@@ -487,6 +520,47 @@ class MyWindow(QtWidgets.QMainWindow):
                 QMessageBox.information(None, self.tr("No DUTs selected"), self.tr("You need to select DUT row(s) first"), buttons=QMessageBox.Ok)
       
     
+    def onFetchAllRows(self, activeTable: QtWidgets.QTableView):
+        model = activeTable.model()
+        if isinstance(model, DutSortFilter):
+            # dut summary uses proxy model
+            model = model.sourceModel()
+        if isinstance(model, QtSql.QSqlQueryModel):
+            self.signals.statusSignal.emit(self.tr("Fetching all..."), False, False, False)
+            while model.canFetchMore():
+                model.fetchMore()
+            self.signals.statusSignal.emit(self.tr("Fetch Done!"), False, False, False)
+    
+    
+    @Slot(list)
+    def onReadDutData_TrendHisto(self, selectedDutIndex: list):
+        '''
+        selectedDutIndex: a list of (fid, dutIndex)
+        '''
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
+    
+        
+    @Slot(list)
+    def onReadDutData_Bin(self, selectedBin: list):
+        '''
+        selectedBin: a list of (fid, isHBIN, [bin_num])
+        '''
+        selectedDutIndex = self.data_interface.DatabaseFetcher.getDUTIndexFromBin(selectedBin)
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
+    
+    
+    @Slot(list)
+    def onReadDutData_Wafer(self, selectedDie: list):
+        '''
+        selectedDie: a list of (waferInd, fid, (x, y))
+        '''
+        selectedDutIndex = self.data_interface.DatabaseFetcher.getDUTIndexFromXY(selectedDie)
+        if selectedDutIndex:
+            self.showDutDataTable(selectedDutIndex)
+    
+    
     def enableDragDrop(self):
         for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
             obj.setAcceptDrops(True)
@@ -553,7 +627,9 @@ class MyWindow(QtWidgets.QMainWindow):
         # datalog info table
         self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
         self.ui.datalogTable.setModel(self.tmodel_datalog)
+        self.ui.datalogTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
+        self.ui.datalogTable.addAction(self.ui.actionFetchDatalog)
         # test data table
         self.tmodel_data = TestDataTableModel()
         self.ui.rawDataTable.setModel(self.tmodel_data)
@@ -568,6 +644,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dutInfoTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.dutInfoTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dutInfoTable))
         self.ui.dutInfoTable.addAction(self.ui.actionReadDutData_DS)   # add context menu for reading dut data
+        self.ui.dutInfoTable.addAction(self.ui.actionFetchDuts)
         # file header table
         self.tmodel_info = QtGui.QStandardItemModel()
         self.ui.fileInfoTable.setModel(self.tmodel_info)
@@ -584,6 +661,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dutInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.dutInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.ui.fileInfoTable.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.ui.fileInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
         
     def init_Head_SiteCheckbox(self):
@@ -986,6 +1064,7 @@ class MyWindow(QtWidgets.QMainWindow):
             tchart = TrendChart()
             tchart.setTrendData(tdata)
             if tchart.validData:
+                tchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)
                 return tchart
         
         elif tabType == tab.Histo:
@@ -993,6 +1072,7 @@ class MyWindow(QtWidgets.QMainWindow):
             hchart = HistoChart()
             hchart.setTrendData(tdata)
             if hchart.validData:
+                hchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)
                 return hchart
         
         elif tabType == tab.Wafer:
@@ -1000,6 +1080,7 @@ class MyWindow(QtWidgets.QMainWindow):
             wchart = WaferMap()
             wchart.setWaferData(wdata)
             if wchart.validData:
+                wchart.setShowDutSignal(self.signals.showDutDataSignal_Wafer)
                 return wchart
         
         elif tabType == tab.Bin:
@@ -1010,6 +1091,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 bchart = BinChart()
                 bchart.setBinData(bdata)
                 if bchart.validData:
+                    bchart.setShowDutSignal(self.signals.showDutDataSignal_Bin)
                     bcharts.append(bchart)
             return bcharts
         
