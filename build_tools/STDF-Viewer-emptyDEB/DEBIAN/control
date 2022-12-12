@@ -1,5 +1,5 @@
 Package: stdf-viewer
-Version: 3.3.1
+Version: 4.0.0
 Section: utils
 Priority: optional
 Architecture: amd64
