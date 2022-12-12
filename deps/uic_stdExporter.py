@@ -827,6 +827,8 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         # disable not implemented
         self.exportUI.file_selection.setDisabled(True)
+        self.exportUI.PPQQ_cb.setHidden(True)
+        self.exportUI.Correlation_cb.setHidden(True)
         
                 
     def showUI(self):
