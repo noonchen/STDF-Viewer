@@ -12,7 +12,8 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 
 ## Table of Content
 - [**Usage**](#usage)
-  - [Open a STDF file](#open-a-stdf-file)
+  - [Open STDF files](#open-stdf-files)
+  - [Merge STDF files](#merge-stdf-files)
   - [Find failed test items](#find-failed-test-items)
   - [Looking for DUTs' info](#looking-for-duts-info)
   - [Display GDRs & DTRs info](#display-gdrs--dtrs-info)
@@ -25,13 +26,13 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
   - [Read complete test data of specific DUTs](#read-complete-test-data-of-specific-duts)
       - [From `DUT Summary`](#from-dut-summary)
       - [From `Test Summary`](#from-test-summary)
-      - [From `Trend Chart`](#from-trend-chart)
-      - [From `Histogram`](#from-histogram)
-      - [From `Bin Summary`](#from-bin-summary)
-      - [From `Wafer Map`](#from-wafer-map)
+      - [From Plots](#from-plots)
   - [Generating an Excel report](#generating-an-excel-report)
   - [Settings](#settings)
-      - [Change fonts](#change-fonts)
+  - [Utilities](#utilities)
+      - [Load / Save Session](#load--save-session)
+      - [Add Font](#add-font)
+      - [Converter](#converter)
 - [**Having issues?**](#having-issues)
 - [**Acknowledgements**](#acknowledgements)
 - [**License**](#license)
@@ -41,20 +42,35 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 
 ## Usage
 
-### **Open a STDF file**
+### **Open STDF files**
 
-STDF Viewer supports files under [STDF Version 4 Specification](http://www.kanwoda.com/wp-content/uploads/2015/05/std-spec.pdf), ZIP*, GZ and BZIP compressed STDF files can also be opened without decompression.
+STDF Viewer supports files under STDF V4 and V4-2007 Specification, ZIP*, GZ and BZIP compressed STDF files can also be opened without decompression.
 
 STDF files can be opened in 3 ways:
 
-1. Select a STDF file in a file dialog by clicking `open` button on the toolbar.
+1. Select STDF files in a file dialog by clicking `open` button on the toolbar.
 2. Right click on a STDF file and select STDF Viewer to open.
-3. Drag a STDF file into the GUI to open.
+3. Drag STDF files into the GUI to open.
+
+If multiple STDF files are selected, compare mode is automatically enabled, you will see multiple sections in a single plot
 
 ***Note**: ZIP format support is limited, works only if:*
 - *ZIP file is not password protected.*
 - *Contains only 1 file per ZIP.*
-- *ZIP file is created using `DEFLATE` compression method, which is the default on popular OSs' native zip tool.*
+- ~~*ZIP file is created using `DEFLATE` compression method, which is the default on popular OSs' native zip tool.*~~ (V4.0.0)
+
+<br>
+
+### **Merge STDF files**
+
+(Introduced in V4.0.0) Open the merge panel by clicking `Merge` button on the toolbar, user can add multiple files in merge groups,
+files in a same group will be merged into a single file and index 0 is regarded as the first file in a group.
+
+<img src="screenshots/merge panel.png">
+
+Adding multiple merge groups is also supported, in case you'd like to compare merge groups.
+
+<img src="screenshots/merge result.png">
 
 <br>
 
@@ -70,13 +86,13 @@ By clicking the `Fail Marker` button on the toolbar can paint all failed test it
 
 DUTs' info can be viewed in `Detailed Info` -> `DUT Summary`. Each line in the table represents a single DUT, and it will be marked in <span style="color:red">red</span> if this DUT is failed.
 
-<img src="screenshots/dut summary.png">
+(Introduced in V4.0.0) Superseded DUTs will be marked in grey. A normal stdf file will contains several K DUTs, in order to improve performance, DUT Summary will not load all DUTs to the table, but if you want to load all, right click on the table and select `Fetch All Rows`.
 
 If STDF files contain multiple heads and/or sites, you may also filter out the DUTs of non-interest by selecting specific heads and/or sites in `Site/Head Selection`.
 
-DUTs' info can be sorted by any columns. For instance, the screenshot below showing the result of sorting the DUTs by flags.
+DUTs' info can be sorted by any columns. For instance, the screenshot below showing the result of sorting the DUTs by Part ID.
 
-<img src="screenshots/dut summary sorting.png">
+<img src="screenshots/dut summary.png">
 
 <br>
 
@@ -85,6 +101,8 @@ DUTs' info can be sorted by any columns. For instance, the screenshot below show
 All the GDR (Generic Data Record) and DTR (Datalog Text Record) will be listed in `Detailed Info` -> `GDR & DTR Summary`. The precise location of GDR & DTR is hard to trace, the relative location compared to PIR/PRR is given instead.
 
 For GDR, each line in the `Value` column represents a V1 data, which is displayed in the format of `{V1 index} {V1 data type}: {V1 data}`.
+
+Same as DUT Summary table, use `Fetch All Rows` to load all data into the table.
 
 *Note: Data of `Bn` & `Dn` type is shown in HEX string.*
 
@@ -115,7 +133,7 @@ If the test have PAT enabled, e.g. high/low limits in PTRs are changing over dut
 <img src="screenshots/trend dynamic limit.png">
 
 #### **Histogram**
-Display interactive histograms of test item(s), x axis is the test value distribution, y axis is the DUT counts of each bin. you can hover over the rectangle to display its data range and dut counts.
+Display interactive histograms of test item(s), y axis is the test value distribution. ~~you can hover over the rectangle to display its data range and dut counts.~~
 
 <img src="screenshots/histo.png">
 
@@ -124,7 +142,7 @@ Display interactive histograms of test item(s), x axis is the test value distrib
 ### **Analyzing bin distribution**
 Display histograms of dut counts of each hardware bin and software bin in selected heads and sites. 
 
-`Test Statistic` table displays the bin name, bin number and precentage, bins with DUT counts of 0 will be hidden.
+`Test Statistic` table displays the dut counts, bin name, bin number and precentage, bins with DUT counts of 0 will be hidden.
 
 <img src="screenshots/bin.png">
 
@@ -140,6 +158,10 @@ There is a stacked wafer map at the top of `Wafer Selection` that summarizes the
 Other entries in `Wafer Selection` represents the wafer maps in the file, color of each die is determined by its software bin.
 
 <img src="screenshots/wafer.png">
+
+You can hide some software bins by clicking icons in the legend.
+
+<img src="screenshots/wafer hide.png">
 
 <br>
 
@@ -158,23 +180,14 @@ Select cell(s) of interest and right click, click `Read selected DUT data` in th
 
 <img src="screenshots/test summary read dut data.png">
 
-#### **From `Trend Chart`**
-Click on the data point (or press `Shift` to select multiple), when the point(s) are marked by *`S`*, press `Enter` on the keyboard.
+#### **From Plots**
+Right click on a plot and select `Data Pick Mode`, select a region of interest then right click and select `Show Selected DUT Data`. Remember you can use legend icon to hide some data to help you select.
 
 <img src="screenshots/trend interactive 2.png">
 
-#### **From `Histogram`**
-Click on the histogram rectangle (or press `Shift` to select multiple), selected rectangles will be marked in <span style="color:red">red</span> stroke, press `Enter` will list all duts whose test values lie in select range(s).
-
 <img src="screenshots/histo interactive.png">
 
-#### **From `Bin Summary`**
-Click on the bins of interest (or press `Shift` to select multiple), press `Enter` will show all duts in these bins.
-
 <img src="screenshots/bin interactive.png">
-
-#### **From `Wafer Map`**
-Click on the die(s), press `Enter` will show you duts in the selected (X, Y).
 
 <img src="screenshots/wafer interactive.png">
 
@@ -209,23 +222,20 @@ The description should be self-explanatory, feel free to play it around.
 
 <img src="screenshots/setting.png">
 
-#### **Change fonts**
-Users can change the default fonts for UI display and data plots.
+### **Utilities**
+There is a `Utilities` button on toolbar from V4.0.0.
 
-Rename a TrueType Font (.ttf) file to apply the font for a certain language:
-- Chinese: prefix `cn_`
-- English: prefix `en_`
+<img src="screenshots/utilities.png">
 
-For example, we want to use a font file named `testfontforchinese.ttf` as the default Chinese font, it should be renamed to `cn_testfontforchinese.ttf`, it will be the default font for Chinese language, other languages will not be affected.
+#### **Load & Save Session**
 
-Copy the renamed font file to `/fonts` folder, it is located at:
-- Windows: next to the `.EXE`
-- macOS: `STDF Viewer.app/Contents/Resources/fonts`
-- Ubuntu: `/usr/local/bin/STDF-Viewer/fonts`
+You can save current parse cache as a session so that you don't have to reload STDF files again, it can be helpful if you need to access some STDF multiple times.
 
-Relaunch STDF Viewer to apply the changes.
+#### **Add Font**
+This process is much simpler then previous releases. All you need to do is select a `.ttf` font and select it in `Settings`!
 
-<img src="screenshots/change fonts.png">
+#### **Converter**
+This tool can dump STDF records into a xlsx file, it can be used for debugging.
 
 <br>
 
@@ -240,12 +250,16 @@ If you have encountered any error, follow these steps to create a report:
 ## Acknowledgements
 
 STDF Viewer uses code from the following open sources, much thanks to their authors.
- - [zlib](https://zlib.net/)
- - [minizip](https://www.winimage.com/zLibDll/minizip.html)
- - [bzip2](https://www.sourceware.org/bzip2/)
- - [sqlite3](https://www.sqlite.org/)
- - [hashmap](https://gist.github.com/warmwaffles/6fb6786be7c86ed51fce)
- - [message_queue](https://github.com/LnxPrgr3/message_queue)
+ - [rust-stdf](https://github.com/noonchen/rust-stdf) <- I'm the author
+ - [pyqtgraph](https://github.com/pyqtgraph/pyqtgraph)
+ - [flate2](https://crates.io/crates/flate2)
+ - [bzip2](https://crates.io/crates/bzip2)
+ - [rusqlite](https://crates.io/crates/rusqlite)
+
+Not used in version 4.0.0 and above:
+ - ~~[minizip](https://www.winimage.com/zLibDll/minizip.html)~~
+ - ~~[hashmap](https://gist.github.com/warmwaffles/6fb6786be7c86ed51fce)~~
+ - ~~[message_queue](https://github.com/LnxPrgr3/message_queue)~~
 
  Not used in version 3.0.5 and above:
  - ~~[pystdf](https://github.com/cmars/pystdf)~~
