@@ -1,5 +1,5 @@
 numpy
 PyQt5>=5.15.2
-pyqtgraph
+pyqtgraph @ git+https://github.com/pyqtgraph/pyqtgraph@master
 toml==0.10.2
 XlsxWriter==3.0.3
