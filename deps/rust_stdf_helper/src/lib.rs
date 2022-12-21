@@ -1,5 +1,5 @@
-// use numpy::ndarray::{Array1, Array2, Zip};
-// use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::ndarray::{Array1, Zip};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::types::PyBytes;
 use pyo3::{
@@ -20,6 +20,7 @@ use std::{thread, time};
 mod database_context;
 mod resources;
 mod rust_functions;
+mod statistic_functions;
 use database_context::DataBaseCtx;
 use rust_functions::{
     get_fields_from_code, get_file_size, process_incoming_record, process_summary_data,
@@ -1113,6 +1114,30 @@ fn stdf_to_xlsx(
     Ok(())
 }
 
+/// Normal distribution function.
+#[pyfunction]
+#[pyo3(name = "norm_cdf")]
+fn norm_cdf<'py>(py: Python<'py>, data: PyReadonlyArray1<f64>) -> PyResult<&'py PyArray1<f64>> {
+    let data = data.as_array();
+    let mut p = Array1::from_elem(data.len(), f64::NAN);
+    Zip::from(&data)
+        .and(&mut p)
+        .par_for_each(|d, percent| *percent = statistic_functions::ndtr(*d));
+    Ok(p.into_pyarray(py))
+}
+
+/// Inverse of Normal distribution function
+#[pyfunction]
+#[pyo3(name = "norm_ppf")]
+fn norm_ppf<'py>(py: Python<'py>, p: PyReadonlyArray1<f64>) -> PyResult<&'py PyArray1<f64>> {
+    let p = p.as_array();
+    let mut q = Array1::from_elem(p.len(), f64::NAN);
+    Zip::from(&p)
+        .and(&mut q)
+        .par_for_each(|percent, quantile| *quantile = statistic_functions::ndtri(*percent));
+    Ok(q.into_pyarray(py))
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -1124,5 +1149,7 @@ fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_mir, m)?)?;
     m.add_function(wrap_pyfunction!(get_icon_src, m)?)?;
     m.add_function(wrap_pyfunction!(stdf_to_xlsx, m)?)?;
+    m.add_function(wrap_pyfunction!(norm_cdf, m)?)?;
+    m.add_function(wrap_pyfunction!(norm_ppf, m)?)?;
     Ok(())
 }
