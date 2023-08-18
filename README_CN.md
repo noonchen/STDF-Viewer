@@ -11,6 +11,7 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
 <img src="screenshots/mainUI.png">
 
 ## 目录
+- [**编译**](#编译)
 - [使用方法](#使用方法)
   - [**打开STDF文件**](#打开stdf文件)
   - [**合并STDF文件**](#合并stdf文件)
@@ -33,6 +34,32 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
 - [软件许可证](#软件许可证)
 - [下载](#下载)
 - [合作](#合作)
+
+
+## 编译
+
+1. 安装Python 3.9+以及[Rust](https://www.rust-lang.org/tools/install)。
+2. 安装Python轮子，其中`maturin`是编译`rust_stdf_helper`的必须项。
+
+```
+pip install -r requirements.txt
+pip install maturin
+```
+
+3. 编译`rust_stdf_helper`。
+
+```
+cd ./deps/rust_stdf_helper
+maturin build -f -r
+```
+
+4. 安装`rust_stdf_helper`，编译出来的轮子位于`target/wheels/`。
+```
+pip install /path/to/whl/file
+```
+
+5. 至此你可以直接运行`STDF-Viewer.py`，也可以用你顺手的工具打包成一个可执行程序。
+
 
 ## 使用方法
 

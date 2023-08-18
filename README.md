@@ -11,6 +11,7 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 <img src="screenshots/mainUI.png">
 
 ## Table of Content
+- [**Build**](#build)
 - [**Usage**](#usage)
   - [Open STDF files](#open-stdf-files)
   - [Merge STDF files](#merge-stdf-files)
@@ -38,6 +39,31 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 - [**License**](#license)
 - [**Download**](#download)
 - [**Contributions**](#contributions)
+
+
+## Build
+
+1. Install Python 3.9+ and [Rust](https://www.rust-lang.org/tools/install)
+2. Install python modules, `maturin` is required to build `rust_stdf_helper`.
+
+```
+pip install -r requirements.txt
+pip install maturin
+```
+
+3. Build `rust_stdf_helper`
+
+```
+cd ./deps/rust_stdf_helper
+maturin build -f -r
+```
+
+4. Install `rust_stdf_helper`, the wheel is located in `target/wheels/`.
+```
+pip install /path/to/whl/file
+```
+
+5. You can run `STDF-Viewer.py` directly, or using your favorite tool to bundle it to an executable.
 
 
 ## Usage
