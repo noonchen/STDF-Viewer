@@ -326,6 +326,15 @@ impl RecordTracker {
         Ok((dut_index, test_id))
     }
 
+    /// return `true` if test_id is already in both limit hashmaps
+    #[inline(always)]
+    pub fn default_limits_contains_id(&mut self, test_id: usize) -> bool {
+        let llimit_exist = self.default_llimit.contains_key(&test_id);
+        let hlimit_exist = self.default_hlimit.contains_key(&test_id);
+
+        llimit_exist && hlimit_exist
+    }
+
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
     pub fn update_default_limits(&mut self, test_id: usize, llimit: f32, hlimit: f32) -> bool {
@@ -362,14 +371,14 @@ impl RecordTracker {
                 Ok((llimit - *dft_ll).abs() > f32::EPSILON)
             }
             None => Err(StdfHelperError {
-                msg: "Default low limit can not be read...this should never happen".to_string(),
+                msg: format!("Default low limit of Test ID [{}] cannot be read...this should never happen", test_id),
             }),
         }?;
         // hlimit
         let hlimit_changed = match self.default_hlimit.get(&test_id) {
             Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
             None => Err(StdfHelperError {
-                msg: "Default high limit can not be read...this should never happen".to_string(),
+                msg: format!("Default high limit of Test ID [{}] cannot be read...this should never happen", test_id),
             }),
         }?;
         Ok((llimit_changed, hlimit_changed))
@@ -1140,6 +1149,11 @@ fn on_ptr_rec(
     )?;
     // get or update result scale
     let (exist, scale) = tracker.update_scale(test_id, &ptr_rec.res_scal);
+    // some users experienced corner cases where scale_map has seen the test_id
+    // but limit_map is not, a quick fix is always check limit_map contains the test_id.
+    // The schema to update TestInfo table is set to ignore if exists, so we do not afraid of 
+    // overwrite existing TestInfo entry.
+    let lim_exist = tracker.default_limits_contains_id(test_id);
     // insert ptr result
     db_ctx.insert_ptr_data(rusqlite::params![
         dut_index,
@@ -1148,7 +1162,7 @@ fn on_ptr_rec(
         ptr_rec.test_flg[0]
     ])?;
 
-    if !exist {
+    if !exist || !lim_exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         // need to apply result scale to limits and units
         let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);

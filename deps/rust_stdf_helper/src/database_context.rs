@@ -263,7 +263,7 @@ static INSERT_FTR_DATA: &str = "INSERT OR REPLACE INTO
                                 VALUES 
                                     (:DUTIndex, :TEST_ID, :TEST_FLAG);";
 
-static INSERT_TEST_INFO: &str = "INSERT INTO 
+static INSERT_TEST_INFO: &str = "INSERT OR IGNORE INTO 
                                     Test_Info 
                                 VALUES 
                                     (:Fid, :TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
