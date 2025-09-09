@@ -597,7 +597,8 @@ pub fn u32_to_localtime(timestamp: u32) -> String {
     let utc_time = Utc.from_local_datetime(&utc_native).unwrap();
     // convert UTC datetime to Local datetime
     let local_time: DateTime<Local> = DateTime::from(utc_time);
-    format!("{}", local_time.format("%Y-%m-%d %H:%M:%S"))
+
+    format!("{} (UTC{})", local_time.format("%Y-%m-%d %H:%M:%S"), local_time.format("%:z"))
 }
 
 #[inline(always)]
