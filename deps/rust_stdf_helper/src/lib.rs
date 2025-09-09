@@ -11,10 +11,11 @@ use pyo3::{
 use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
 use rust_xlsxwriter::{Workbook, XlsxError};
+use crossbeam_channel;
 use std::collections::HashMap;
 use std::convert::{From, Infallible};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::{thread, time};
 
 mod database_context;
@@ -341,7 +342,9 @@ fn generate_database(
     let stop_flag: Py<PyAny> = stop_flag.into();
 
     // prepare channel for multithreading communication
-    let (tx, rx) = mpsc::channel();
+    const CHANNEL_CAP: usize = 16_384;
+    let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
+    
     let mut thread_handles = vec![];
     let mut thread_txes = Vec::with_capacity(num_groups);
     // clone {num_groups-1} sender, and push the `tx` to last
