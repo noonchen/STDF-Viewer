@@ -1,6 +1,6 @@
 # STDF Viewer <img src="screenshots/stdfViewer.png" height=50>
 
-[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/noonchen/STDF-Viewer.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/noonchen/STDF-Viewer/context:python)  [![Codacy Badge](https://api.codacy.com/project/badge/Grade/d773b27672d34686bee9631f393d2ea6)](https://app.codacy.com/gh/noonchen/STDF-Viewer?utm_source=github.com&utm_medium=referral&utm_content=noonchen/STDF-Viewer&utm_campaign=Badge_Grade_Settings)  [![version](https://img.shields.io/github/v/release/noonchen/STDF-Viewer?include_prereleases)](https://github.com/noonchen/STDF-Viewer/releases/latest)  [![downloads](https://img.shields.io/github/downloads/noonchen/STDF-Viewer/total?label=total%20downloads)](https://github.com/noonchen/STDF-Viewer/releases)  [![license](https://img.shields.io/github/license/noonchen/STDF-Viewer)](https://github.com/noonchen/STDF-Viewer/blob/main/LICENSE)
+[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Codacy Badge](https://api.codacy.com/project/badge/Grade/d773b27672d34686bee9631f393d2ea6)](https://app.codacy.com/gh/noonchen/STDF-Viewer?utm_source=github.com&utm_medium=referral&utm_content=noonchen/STDF-Viewer&utm_campaign=Badge_Grade_Settings)  [![version](https://img.shields.io/github/v/release/noonchen/STDF-Viewer?include_prereleases)](https://github.com/noonchen/STDF-Viewer/releases/latest)  [![downloads](https://img.shields.io/github/downloads/noonchen/STDF-Viewer/total?label=total%20downloads)](https://github.com/noonchen/STDF-Viewer/releases)  [![license](https://img.shields.io/github/license/noonchen/STDF-Viewer)](https://github.com/noonchen/STDF-Viewer/blob/main/LICENSE)
 
 STDF Viewer is a free, fast and powerful GUI tool to visualize STDF (semiconductor Standard Test Data Format) data files.
 
@@ -48,7 +48,7 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 
 ```
 pip install -r requirements.txt
-pip install maturin
+pip install maturin==1.9.4
 ```
 
 3. Build `rust_stdf_helper`
