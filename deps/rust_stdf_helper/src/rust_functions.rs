@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Mon Dec 12 2022
+// Last Modified: Wed Sep 10 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -61,7 +61,17 @@ fn scale_option_value(value: &Option<f32>, flag: &Option<[u8; 1]>, scale: i32, m
     }
 }
 
+#[repr(u32)] 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestIDType { 
+    TestNumberAndName = 0,
+    TestNumberOnly = 1, 
+}
+
 pub struct RecordTracker {
+    // determines how the unique test id is constructed
+    id_type: TestIDType,
+
     // file id, test num, test name -> unique test id (map size)
     id_map: HashMap<(usize, u32, String), usize>,
 
@@ -101,8 +111,9 @@ pub struct RecordTracker {
 }
 
 impl RecordTracker {
-    pub fn new() -> Self {
+    pub fn new(id_type: TestIDType) -> Self {
         RecordTracker {
+            id_type,
             id_map: HashMap::with_capacity(1024),
             scale_map: HashMap::with_capacity(1024),
             default_llimit: HashMap::with_capacity(1024),
@@ -300,7 +311,10 @@ impl RecordTracker {
             None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", file_id, test_num, head_num, site_num) }),
         }?;
         // get test_id
-        let key = (file_id, test_num, test_txt.to_string());
+        let key = match self.id_type {
+            TestIDType::TestNumberAndName => (file_id, test_num, test_txt.to_string()),
+            TestIDType::TestNumberOnly => (file_id, test_num, "".to_string()),  // Test Name is not used, use empty string for placeholder
+        };
         let test_id = match self.id_map.get(&key) {
             Some(id) => *id,
             None => {
@@ -385,11 +399,11 @@ impl RecordTracker {
     #[inline(always)]
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
-        let test_id = match self.id_map.get(&(
-            file_id,
-            tsr_rec.test_num,
-            tsr_rec.test_nam.to_string(),
-        )) {
+        let key = match self.id_type {
+            TestIDType::TestNumberAndName => (file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string()),
+            TestIDType::TestNumberOnly => (file_id, tsr_rec.test_num, "".to_string()),
+        };
+        let test_id = match self.id_map.get(&key) {
             Some(id) => Ok(*id),
             None => {
                 // in some stdf files, the test name in TSR might be different

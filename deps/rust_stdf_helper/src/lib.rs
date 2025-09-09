@@ -1,7 +1,7 @@
 use numpy::ndarray::{Array1, Zip};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyInt};
 use pyo3::{
     exceptions::{PyException, PyLookupError, PyOSError},
     intern,
@@ -12,7 +12,7 @@ use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
 use rust_xlsxwriter::{Workbook, XlsxError};
 use std::collections::HashMap;
-use std::convert::From;
+use std::convert::{From, Infallible};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc};
 use std::{thread, time};
@@ -24,7 +24,7 @@ mod statistic_functions;
 use database_context::DataBaseCtx;
 use rust_functions::{
     get_fields_from_code, get_file_size, process_incoming_record, process_summary_data,
-    write_json_to_sheet, RecordTracker,
+    write_json_to_sheet, TestIDType, RecordTracker,
 };
 
 #[derive(Debug)]
@@ -70,15 +70,37 @@ impl From<StdfHelperError> for PyErr {
     }
 }
 
+// convert TestIDType to/from python object
+impl<'src> FromPyObject<'src> for TestIDType {
+    fn extract_bound(obj: &Bound<'src, PyAny>) -> PyResult<Self> {
+        let val: u32 = obj.extract()?;
+        match val {
+            0 => Ok(TestIDType::TestNumberAndName),
+            1 => Ok(TestIDType::TestNumberOnly),
+            _ => Err(PyValueError::new_err(format!("Invalid TestIDType value: {}", val))),
+        }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for TestIDType {
+    type Target = PyInt;
+    type Output = Bound<'py, Self::Target>;
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyInt::new(py, self as u32))
+    }
+}
+
 /// Analyze record types in a STDF file
 #[pyfunction]
 #[pyo3(name = "analyzeSTDF")]
 fn analyze_stdf_file(
     py: Python,
     filepath: &str,
-    data_signal: &PyAny,
-    progress_signal: &PyAny,
-    stop_flag: &PyAny,
+    data_signal: Bound<'_, PyAny>,
+    progress_signal: Bound<'_, PyAny>,
+    stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
     // get file size
     let file_size = get_file_size(filepath)?;
@@ -86,26 +108,22 @@ fn analyze_stdf_file(
         return Err(PyOSError::new_err("empty file detected"));
     }
 
-    let data_signal: Py<PyAny> = data_signal.into();
-    let progress_signal: Py<PyAny> = progress_signal.into();
-    let stop_flag: Py<PyAny> = stop_flag.into();
-    //
-    let is_valid_data_signal = match data_signal.getattr(py, intern!(py, "emit")) {
-        Ok(p) => p.as_ref(py).is_callable(),
+    let is_valid_data_signal = match data_signal.getattr(intern!(py, "emit")) {
+        Ok(p) => p.is_callable(),
         Err(_) => {
             println!("data_signal does not have a method `emit`");
             false
         }
     };
-    let is_valid_progress_signal = match progress_signal.getattr(py, intern!(py, "emit")) {
-        Ok(p) => p.as_ref(py).is_callable(),
+    let is_valid_progress_signal = match progress_signal.getattr(intern!(py, "emit")) {
+        Ok(p) => p.is_callable(),
         Err(_) => {
             println!("progress_signal does not have a method `emit`");
             false
         }
     };
-    let is_valid_stop = match stop_flag.getattr(py, intern!(py, "stop")) {
-        Ok(p) => p.as_ref(py).is_instance_of::<PyBool>()?,
+    let is_valid_stop = match stop_flag.getattr(intern!(py, "stop")) {
+        Ok(p) => p.is_instance_of::<PyBool>(),
         Err(_) => {
             println!("stop_flag does not have an bool attr `stop`");
             false
@@ -123,7 +141,12 @@ fn analyze_stdf_file(
     let mut dut_cnt = 0;
     let mut wafer_cnt = 0;
 
-    py.allow_threads(|| {
+    // signals without gil
+    let data_signal: Py<PyAny> = data_signal.into();
+    let progress_signal: Py<PyAny> = progress_signal.into();
+    let stop_flag: Py<PyAny> = stop_flag.into();
+
+    py.detach(|| {
         let mut reader = match StdfReader::new(filepath) {
             Ok(r) => r,
             Err(e) => return Err(PyOSError::new_err(e.to_string())),
@@ -184,25 +207,24 @@ fn analyze_stdf_file(
                         // println!("{}", result_log);
                         // send via qt signal..
                         if is_valid_data_signal || is_valid_stop {
-                            Python::with_gil(|py| -> PyResult<()> {
+                            Python::attach(|py| -> PyResult<()> {
                                 if is_valid_data_signal {
-                                    data_signal.call_method1(
-                                        py,
+                                    data_signal.bind(py).call_method1(
                                         intern!(py, "emit"),
                                         (result_log,),
                                     )?;
                                 }
                                 if is_valid_progress_signal {
-                                    progress_signal.call_method1(
-                                        py,
+                                    progress_signal.bind(py).call_method1(
                                         intern!(py, "emit"),
                                         (parse_progess,),
                                     )?;
                                 }
                                 if is_valid_stop {
                                     stop_flag_rust = stop_flag
-                                        .getattr(py, intern!(py, "stop"))?
-                                        .extract::<bool>(py)?;
+                                        .bind(py)
+                                        .getattr(intern!(py, "stop"))?
+                                        .extract::<bool>()?;
                                 }
                                 Ok(())
                             })?;
@@ -256,264 +278,18 @@ fn analyze_stdf_file(
         }
         // println!("{}", result_log);
         // send via qt signal..
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             if is_valid_data_signal {
-                let _ = data_signal.call_method1(py, intern!(py, "emit"), (result_log,))?;
+                data_signal.bind(py).call_method1(intern!(py, "emit"), (result_log,))?;
             }
             if is_valid_progress_signal {
-                progress_signal.call_method1(py, intern!(py, "emit"), (100u64,))?;
+                progress_signal.bind(py).call_method1(intern!(py, "emit"), (100u64,))?;
             }
             Ok(())
         })?;
         Ok(())
     })
 }
-
-// /// read data from python file object
-// #[pyfunction]
-// #[pyo3(name = "read_rawList")]
-// fn read_raw_from_fileobj<'py>(
-//     py: Python<'py>,
-//     fileobj: PyObject,
-//     offset: PyReadonlyArray1<i64>,
-//     lens: PyReadonlyArray1<i32>,
-// ) -> PyResult<&'py PyArray2<u8>> {
-//     // validate `fileobj`
-//     let no_read = match fileobj.getattr(py, intern!(py, "read")) {
-//         Ok(p) => !p.as_ref(py).is_callable(),
-//         Err(_) => true,
-//     };
-//     let no_seek = match fileobj.getattr(py, intern!(py, "seek")) {
-//         Ok(p) => !p.as_ref(py).is_callable(),
-//         Err(_) => true,
-//     };
-//     if no_read || no_seek {
-//         return Err(PyErr::new::<PyValueError, _>(
-//             "Object doesn't have `read` or `seek` method",
-//         ));
-//     };
-
-//     let offset = offset.as_array();
-//     let lens = lens.as_array();
-//     let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x)) as usize;
-//     // initiate a 2D array for storing file data
-//     // row count = len(offset)
-//     // column count = max(len)
-//     let mut data_list = Array2::from_elem((offset.dim(), max_len), 0u8);
-//     if max_len > 0 {
-//         for ((&oft, &len), mut data_row) in offset.iter().zip(lens.iter()).zip(data_list.rows_mut())
-//         {
-//             if oft >= 0 && len > 0 {
-//                 // seek to `offset`
-//                 fileobj.call_method1(py, intern!(py, "seek"), (oft,))?;
-//                 // read `len`
-//                 let rslt = fileobj.call_method1(py, intern!(py, "read"), (len,))?;
-//                 let pybytes: &PyBytes = rslt.cast_as(py)?;
-//                 let read_data = pybytes.as_bytes();
-//                 let dst = &mut data_row
-//                     .as_slice_mut()
-//                     .expect("cannot get slice from ndarray row")[..len as usize];
-//                 dst.copy_from_slice(read_data);
-//             }
-//         }
-//     }
-//     Ok(data_list.into_pyarray(py))
-// }
-
-// /// get PTR/FTR results and flags from raw bytes
-// #[pyfunction]
-// #[pyo3(name = "parse_PTR_FTR_rawList")]
-// fn parse_ptr_ftr_from_raw<'py>(
-//     py: Python<'py>,
-//     is_ptr: bool,
-//     is_le: bool,
-//     raw: PyReadonlyArray2<u8>,
-//     lens: PyReadonlyArray1<i32>,
-// ) -> PyResult<&'py PyDict> {
-//     let endian = if is_le {
-//         ByteOrder::LittleEndian
-//     } else {
-//         ByteOrder::BigEndian
-//     };
-//     let raw = raw.as_array();
-//     let lens = lens.as_array();
-//     let rec_cnt = lens.dim();
-//     let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x));
-//     // create Array for storing results
-//     let mut data_list = Array1::from_elem(rec_cnt, f32::NAN);
-//     let mut flag_list = Array1::from_elem(rec_cnt, -1i32);
-
-//     fn inner_parse(
-//         is_ptr: bool,
-//         order: &ByteOrder,
-//         raw_data: &[u8],
-//         &length: &i32,
-//         result: &mut f32,
-//         flag: &mut i32,
-//     ) {
-//         if length < 0 {
-//             // represent an invalid raw data
-//             // do nothing, since the default data is invalid
-//             return;
-//         }
-
-//         let length = length as usize;
-//         let raw_data = &raw_data[..length];
-//         if is_ptr {
-//             // parse PTR
-//             let mut ptr_rec = rust_stdf::PTR::new();
-//             ptr_rec.read_from_bytes(raw_data, order);
-
-//             *result = if f32::is_finite(ptr_rec.result) {
-//                 ptr_rec.result
-//             } else if f32::is_sign_positive(ptr_rec.result) {
-//                 // +inf, replace with max f32
-//                 f32::MAX
-//             } else {
-//                 // -inf, replace with min f32
-//                 f32::MIN
-//             };
-//             *flag = ptr_rec.test_flg[0].into();
-//         } else {
-//             // parse FTR
-//             let mut ftr_rec = rust_stdf::FTR::new();
-//             ftr_rec.read_from_bytes(raw_data, order);
-//             *result = ftr_rec.test_flg[0].into();
-//             *flag = ftr_rec.test_flg[0].into();
-//         };
-//     }
-
-//     if max_len > 0 {
-//         py.allow_threads(|| {
-//             // parallel parse data
-//             Zip::from(raw.rows())
-//                 .and(&lens)
-//                 .and(&mut data_list)
-//                 .and(&mut flag_list)
-//                 .par_for_each(|r, l, d, f| {
-//                     inner_parse(
-//                         is_ptr,
-//                         &endian,
-//                         r.to_slice().expect("cannot get slice from numpy ndarray"),
-//                         l,
-//                         d,
-//                         f,
-//                     )
-//                 });
-//         });
-//     }
-//     let data_list = data_list.into_pyarray(py);
-//     let flag_list = flag_list.into_pyarray(py);
-//     let dict = PyDict::new(py);
-//     dict.set_item("dataList", data_list)?;
-//     dict.set_item("flagList", flag_list)?;
-//     Ok(dict)
-// }
-
-// /// get MPR results, states and flags from raw bytes
-// #[pyfunction]
-// #[pyo3(name = "parse_MPR_rawList")]
-// fn parse_mpr_from_raw<'py>(
-//     py: Python<'py>,
-//     is_le: bool,
-//     pin_cnt: u16,
-//     rslt_cnt: u16,
-//     raw: PyReadonlyArray2<u8>,
-//     lens: PyReadonlyArray1<i32>,
-// ) -> PyResult<&'py PyDict> {
-//     let endian = if is_le {
-//         ByteOrder::LittleEndian
-//     } else {
-//         ByteOrder::BigEndian
-//     };
-//     let rslt_cnt = rslt_cnt as usize;
-//     let pin_cnt = pin_cnt as usize;
-//     let raw = raw.as_array();
-//     let lens = lens.as_array();
-//     let rec_cnt = lens.dim();
-//     let max_len = lens.iter().fold(0, |m, &x| std::cmp::max(m, x));
-//     // create Array for storing results
-//     // contiguous is required in order to get slice from ndarray,
-//     // must iter by row...
-//     // row: dutIndex, col: pin
-//     let mut data_list = Array2::from_elem((rec_cnt, rslt_cnt), f32::NAN);
-//     let mut state_list = Array2::from_elem((rec_cnt, pin_cnt), 16i32);
-//     let mut flag_list = Array1::from_elem(rec_cnt, -1i32);
-
-//     #[allow(clippy::too_many_arguments)]
-//     fn inner_parse(
-//         order: &ByteOrder,
-//         pin_cnt: usize,
-//         rslt_cnt: usize,
-//         raw_data: &[u8],
-//         &length: &i32,
-//         result_slice: &mut [f32],
-//         state_slice: &mut [i32],
-//         flag: &mut i32,
-//     ) {
-//         if length < 0 {
-//             // represent an invalid raw data
-//             // do nothing, since the default data is invalid
-//             return;
-//         }
-
-//         let length = length as usize;
-//         let raw_data = &raw_data[..length];
-//         // parse MPR
-//         let mut mpr_rec = rust_stdf::MPR::new();
-//         mpr_rec.read_from_bytes(raw_data, order);
-//         // update result
-//         for (&rslt, ind) in mpr_rec.rtn_rslt.iter().zip(0..rslt_cnt) {
-//             result_slice[ind] = if f32::is_finite(rslt) {
-//                 rslt
-//             } else if f32::is_sign_positive(rslt) {
-//                 // +inf, replace with max f32
-//                 f32::MAX
-//             } else {
-//                 // -inf, replace with min f32
-//                 f32::MIN
-//             };
-//         }
-//         // update state
-//         for (&state, ind) in mpr_rec.rtn_stat.iter().zip(0..pin_cnt) {
-//             state_slice[ind] = state as i32;
-//         }
-//         *flag = mpr_rec.test_flg[0].into();
-//     }
-
-//     if max_len > 0 {
-//         py.allow_threads(|| {
-//             // parallel parse data
-//             Zip::from(raw.rows())
-//                 .and(&lens)
-//                 .and(data_list.rows_mut())
-//                 .and(state_list.rows_mut())
-//                 .and(&mut flag_list)
-//                 .par_for_each(|r, l, d, s, f| {
-//                     inner_parse(
-//                         &endian,
-//                         pin_cnt,
-//                         rslt_cnt,
-//                         r.to_slice().expect("cannot get slice from numpy ndarray"),
-//                         l,
-//                         d.into_slice().expect("ndarray is not contiguous"),
-//                         s.into_slice().expect("ndarray is not contiguous"),
-//                         f,
-//                     )
-//                 });
-//         });
-//     }
-//     // previous order: row: dutIndex, col: pin
-//     // python expected: row: pin, col: dutIndex
-//     let data_list = data_list.reversed_axes().into_pyarray(py);
-//     let state_list = state_list.reversed_axes().into_pyarray(py);
-//     let flag_list = flag_list.into_pyarray(py);
-//     let dict = PyDict::new(py);
-//     dict.set_item("dataList", data_list)?;
-//     dict.set_item("statesList", state_list)?;
-//     dict.set_item("flagList", flag_list)?;
-//     Ok(dict)
-// }
 
 /// create sqlite3 database for given stdf files
 #[pyfunction]
@@ -522,8 +298,9 @@ fn generate_database(
     py: Python,
     dbpath: String,
     stdf_paths: Vec<Vec<String>>,
-    progress_signal: &PyAny,
-    stop_flag: &PyAny,
+    test_id_type: TestIDType,
+    progress_signal: Bound<'_, PyAny>,
+    stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
     // stdf_paths is a Vec of Vec<String>, each sub vec
     // indicates a group of stdf files that needs to be merged.
@@ -543,24 +320,25 @@ fn generate_database(
         return Err(PyValueError::new_err("Empty STDF file group detected"));
     }
 
-    // convert and check python arguments
-    let progress_signal: Py<PyAny> = progress_signal.into();
-    let stop_flag: Py<PyAny> = stop_flag.into();
 
-    let is_valid_progress_signal = match progress_signal.getattr(py, intern!(py, "emit")) {
-        Ok(p) => p.as_ref(py).is_callable(),
+    let is_valid_progress_signal = match progress_signal.getattr(intern!(py, "emit")) {
+        Ok(p) => p.is_callable(),
         Err(_) => {
             println!("progress_signal does not have a method `emit`");
             false
         }
     };
-    let is_valid_stop = match stop_flag.getattr(py, intern!(py, "stop")) {
-        Ok(p) => p.as_ref(py).is_instance_of::<PyBool>()?,
+    let is_valid_stop = match stop_flag.getattr(intern!(py, "stop")) {
+        Ok(p) => p.is_instance_of::<PyBool>(),
         Err(_) => {
             println!("stop_flag does not have an bool attr `stop`");
             false
         }
     };
+
+    // signals without gil
+    let progress_signal: Py<PyAny> = progress_signal.into();
+    let stop_flag: Py<PyAny> = stop_flag.into();
 
     // prepare channel for multithreading communication
     let (tx, rx) = mpsc::channel();
@@ -647,10 +425,9 @@ fn generate_database(
                 // sleep for 100ms
                 thread::sleep(time::Duration::from_millis(100));
                 // access python object inside a gil block
-                if let Err(py_e) = Python::with_gil(|py| -> PyResult<()> {
+                if let Err(py_e) = Python::attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
-                        progress_signal.call_method1(
-                            py,
+                        progress_signal.bind(py).call_method1(
                             intern!(py, "emit"),
                             (current_progress,),
                         )?;
@@ -658,8 +435,9 @@ fn generate_database(
                     if is_valid_stop {
                         global_stop_copy.store(
                             stop_flag
-                                .getattr(py, intern!(py, "stop"))?
-                                .extract::<bool>(py)?,
+                                .bind(py)
+                                .getattr(intern!(py, "stop"))?
+                                .extract::<bool>()?,
                             Ordering::Relaxed,
                         );
                     };
@@ -679,7 +457,7 @@ fn generate_database(
         thread_handles.push(gil_th);
     }
 
-    py.allow_threads(|| -> Result<(), StdfHelperError> {
+    py.detach(|| -> Result<(), StdfHelperError> {
         // initiate sqlite3 database
         let conn = match Connection::open(&dbpath) {
             Ok(conn) => conn,
@@ -694,7 +472,7 @@ fn generate_database(
             }
         }
 
-        let mut record_tracker = RecordTracker::new();
+        let mut record_tracker = RecordTracker::new(test_id_type);
         let mut progress_tracker = vec![0.0f32; num_groups];
         let mut transaction_count_up = 0;
         // process and write database in main thread
@@ -755,7 +533,7 @@ fn generate_database(
 /// exit if found
 #[pyfunction]
 #[pyo3(name = "read_MIR")]
-fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
+fn read_mir<'py>(py: Python<'py>, fpath: String) -> PyResult<Bound<'py, PyDict>> {
     use rust_stdf::MIR;
     use serde_json::{self, Value};
 
@@ -817,7 +595,7 @@ fn read_mir(py: Python<'_>, fpath: String) -> PyResult<&'_ PyDict> {
 /// read data from python file object
 #[pyfunction]
 #[pyo3(name = "get_icon_src")]
-fn get_icon_src(py: Python, icon_name: String) -> PyResult<&PyBytes> {
+fn get_icon_src<'py>(py: Python<'py>, icon_name: String) -> PyResult<Bound<'py, PyBytes>> {
     use flate2::read::ZlibDecoder;
     use resources::*;
     use std::io::Read;
@@ -861,8 +639,8 @@ fn stdf_to_xlsx(
     py: Python,
     stdf_path: String,
     xlsx_path: String,
-    progress_signal: &PyAny,
-    stop_flag: &PyAny,
+    progress_signal: Bound<'_, PyAny>,
+    stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
     // get file size
     let file_size = get_file_size(&stdf_path)?;
@@ -870,28 +648,28 @@ fn stdf_to_xlsx(
         return Err(PyOSError::new_err("empty file detected"));
     }
 
-    let progress_signal: Py<PyAny> = progress_signal.into();
-    let stop_flag: Py<PyAny> = stop_flag.into();
-
-    let is_valid_progress_signal = match progress_signal.getattr(py, intern!(py, "emit")) {
-        Ok(p) => p.as_ref(py).is_callable(),
+    let is_valid_progress_signal = match progress_signal.getattr(intern!(py, "emit")) {
+        Ok(p) => p.is_callable(),
         Err(_) => {
             println!("progress_signal does not have a method `emit`");
             false
         }
     };
-    let is_valid_stop = match stop_flag.getattr(py, intern!(py, "stop")) {
-        Ok(p) => p.as_ref(py).is_instance_of::<PyBool>()?,
+    let is_valid_stop = match stop_flag.getattr(intern!(py, "stop")) {
+        Ok(p) => p.is_instance_of::<PyBool>(),
         Err(_) => {
             println!("stop_flag does not have an bool attr `stop`");
             false
         }
     };
 
+    let progress_signal: Py<PyAny> = progress_signal.into();
+    let stop_flag: Py<PyAny> = stop_flag.into();
+
     let mut stop_flag_rust = false;
     let mut parse_progess = 0;
 
-    py.allow_threads(|| -> Result<(), StdfHelperError> {
+    py.detach(|| -> Result<(), StdfHelperError> {
         // create a xlsx
         let mut xlsx = Workbook::new();
         let bold_format = rust_xlsxwriter::Format::new().set_bold();
@@ -966,18 +744,18 @@ fn stdf_to_xlsx(
                     write_json_to_sheet(json, field_names, sheet, row)?;
                     // check stop signal and send progress if we encountered PRR
                     if is_valid_progress_signal || is_valid_stop {
-                        if let Err(e) = Python::with_gil(|py| -> PyResult<()> {
+                        if let Err(e) = Python::attach(|py| -> PyResult<()> {
                             if is_valid_progress_signal {
-                                progress_signal.call_method1(
-                                    py,
+                                progress_signal.bind(py).call_method1(
                                     intern!(py, "emit"),
                                     (parse_progess,),
                                 )?;
                             }
                             if is_valid_stop {
                                 stop_flag_rust = stop_flag
-                                    .getattr(py, intern!(py, "stop"))?
-                                    .extract::<bool>(py)?;
+                                    .bind(py)
+                                    .getattr(intern!(py, "stop"))?
+                                    .extract::<bool>()?;
                             }
                             Ok(())
                         }) {
@@ -1117,7 +895,7 @@ fn stdf_to_xlsx(
 /// Normal distribution function.
 #[pyfunction]
 #[pyo3(name = "norm_cdf")]
-fn norm_cdf<'py>(py: Python<'py>, data: PyReadonlyArray1<f64>) -> PyResult<&'py PyArray1<f64>> {
+fn norm_cdf<'py>(py: Python<'py>, data: PyReadonlyArray1<f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let data = data.as_array();
     let mut p = Array1::from_elem(data.len(), f64::NAN);
     Zip::from(&data)
@@ -1129,7 +907,7 @@ fn norm_cdf<'py>(py: Python<'py>, data: PyReadonlyArray1<f64>) -> PyResult<&'py 
 /// Inverse of Normal distribution function
 #[pyfunction]
 #[pyo3(name = "norm_ppf")]
-fn norm_ppf<'py>(py: Python<'py>, p: PyReadonlyArray1<f64>) -> PyResult<&'py PyArray1<f64>> {
+fn norm_ppf<'py>(py: Python<'py>, p: PyReadonlyArray1<f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let p = p.as_array();
     let mut q = Array1::from_elem(p.len(), f64::NAN);
     Zip::from(&p)
@@ -1140,11 +918,12 @@ fn norm_ppf<'py>(py: Python<'py>, p: PyReadonlyArray1<f64>) -> PyResult<&'py PyA
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn rust_stdf_helper(_py: Python, m: &PyModule) -> PyResult<()> {
+fn rust_stdf_helper(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let test_id_type = PyModule::new(py, "TestIDType")?;
+    test_id_type.add("TestNumberAndName", TestIDType::TestNumberAndName)?;
+    test_id_type.add("TestNumberOnly", TestIDType::TestNumberOnly)?;
+
     m.add_function(wrap_pyfunction!(analyze_stdf_file, m)?)?;
-    // m.add_function(wrap_pyfunction!(read_raw_from_fileobj, m)?)?;
-    // m.add_function(wrap_pyfunction!(parse_ptr_ftr_from_raw, m)?)?;
-    // m.add_function(wrap_pyfunction!(parse_mpr_from_raw, m)?)?;
     m.add_function(wrap_pyfunction!(generate_database, m)?)?;
     m.add_function(wrap_pyfunction!(read_mir, m)?)?;
     m.add_function(wrap_pyfunction!(get_icon_src, m)?)?;
