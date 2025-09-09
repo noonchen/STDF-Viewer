@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Nov 23 2022
+// Last Modified: Wed Sep 10 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -117,7 +117,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         TEST_ID INTEGER, 
                                                         RESULT REAL,
                                                         TEST_FLAG INTEGER,
-                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
+                                                        PRIMARY KEY (TEST_ID, DUTIndex)) WITHOUT ROWID;
 
                                 CREATE TABLE IF NOT EXISTS MPR_Data (
                                                         DUTIndex INTEGER,
@@ -125,13 +125,13 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         RTN_RSLT TEXT,
                                                         RTN_STAT TEXT,
                                                         TEST_FLAG INTEGER,
-                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
+                                                        PRIMARY KEY (TEST_ID, DUTIndex)) WITHOUT ROWID;
                                                             
                                 CREATE TABLE IF NOT EXISTS FTR_Data (
                                                         DUTIndex INTEGER,
                                                         TEST_ID INTEGER, 
                                                         TEST_FLAG INTEGER,
-                                                        PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;                                                            
+                                                        PRIMARY KEY (TEST_ID, DUTIndex)) WITHOUT ROWID;                                                            
                                                         
                                 CREATE TABLE IF NOT EXISTS Bin_Info (
                                                         Fid INTEGER,
