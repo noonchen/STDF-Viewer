@@ -897,6 +897,7 @@ fn rust_stdf_helper(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     test_id_type.add("TestNumberAndName", TestIDType::TestNumberAndName)?;
     test_id_type.add("TestNumberOnly", TestIDType::TestNumberOnly)?;
 
+    m.add_submodule(&test_id_type)?;
     m.add_function(wrap_pyfunction!(analyze_stdf_file, m)?)?;
     m.add_function(wrap_pyfunction!(generate_database, m)?)?;
     m.add_function(wrap_pyfunction!(read_mir, m)?)?;

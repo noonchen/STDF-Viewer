@@ -16,7 +16,7 @@ name = "rust_stdf_helper"
 [dependencies]
 pyo3 = { version = "0.26.0", features = ["extension-module"] }
 rust-stdf = { version = "0.3.1", features = [ "zipfile", "serialize" ] }
-rusqlite = { version = "0.28.0", features = ["bundled"]}
+rusqlite = { version = "0.37.0", features = ["bundled"]}
 ndarray = { version = "0.15.6", features = ["rayon"] }
 zip = { version = "0.6.3", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 numpy = "0.26.0"
