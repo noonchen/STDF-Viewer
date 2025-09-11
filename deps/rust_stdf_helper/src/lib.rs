@@ -12,11 +12,12 @@ use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
 use rust_xlsxwriter::{Workbook, XlsxError};
 use crossbeam_channel;
+use core::f64;
 use std::collections::HashMap;
 use std::convert::{From, Infallible};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
-use std::{thread, time};
+use std::{thread, time, vec};
 
 mod database_context;
 mod resources;
@@ -895,27 +896,90 @@ fn stdf_to_xlsx(
     Ok(())
 }
 
-/// Normal distribution function.
+/// Cumulative Distribution Function, used in PP plot.
 #[pyfunction]
 #[pyo3(name = "norm_cdf")]
-fn norm_cdf<'py>(py: Python<'py>, data: PyReadonlyArray1<f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+fn norm_cdf<'py>(
+    py: Python<'py>, 
+    data: PyReadonlyArray1<f64>, 
+    mean: f64, 
+    stddev: f64
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let data = data.as_array();
     let mut p = Array1::from_elem(data.len(), f64::NAN);
-    Zip::from(&data)
-        .and(&mut p)
-        .par_for_each(|d, percent| *percent = statistic_functions::ndtr(*d));
+
+    if stddev != 0.0 && !stddev.is_nan() {
+        Zip::from(&data)
+            .and(&mut p)
+            .par_for_each(|d, prob| {
+                let d_norm = (*d - mean) / stddev;
+                *prob = statistic_functions::ndtr(d_norm)
+            });
+    }
     Ok(p.into_pyarray(py))
 }
 
-/// Inverse of Normal distribution function
+/// Empirical CDF, used in PP plot.
+#[pyfunction]
+#[pyo3(name = "empirical_cdf")]
+fn empirical_cdf<'py>(
+    py: Python<'py>,
+    data: PyReadonlyArray1<f64>
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    // equivalent to scipy.stats.rankdata() in 'max' mode
+    let data = data.as_array();
+    let dsz = data.len();
+    let mut p = Array1::from_elem(dsz, 0.0f64);
+    if dsz == 0 {
+        return Ok(p.into_pyarray(py));
+    }
+
+    let mut idx_sort: Vec<usize> = (0usize..dsz).collect();
+    idx_sort.sort_by(|&i, &j| data[i].total_cmp(&data[j]));
+
+    // for same values in data, returns same rank_max
+    // need to count repeated number
+    let mut i = 0;
+    while i < dsz {
+        let mut j = i + 1;
+        while j < dsz && data[idx_sort[i]] == data[idx_sort[j]] {
+            // found duplicates
+            j += 1;
+        }
+        // position of duplicates: [i, j-1]
+        // rank begins at 1, and we are in max mode, so:
+        let rank = (j - 1) as f64 + 1.0f64;
+        for k in i..j {
+            let orig_index = idx_sort[k];
+            p[orig_index] = rank / (dsz as f64);
+        }
+        i = j;
+    }
+
+    Ok(p.into_pyarray(py))
+}
+
+/// Inverse of Cumulative Distribution Function, used in QQ plot
 #[pyfunction]
 #[pyo3(name = "norm_ppf")]
-fn norm_ppf<'py>(py: Python<'py>, p: PyReadonlyArray1<f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+fn norm_ppf<'py>(
+    py: Python<'py>, 
+    p: PyReadonlyArray1<f64>,
+    mean: f64, 
+    stddev: f64
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let p = p.as_array();
-    let mut q = Array1::from_elem(p.len(), f64::NAN);
-    Zip::from(&p)
-        .and(&mut q)
-        .par_for_each(|percent, quantile| *quantile = statistic_functions::ndtri(*percent));
+    let init = if stddev == 0.0 { mean } else { f64::NAN };
+    let mut q = Array1::from_elem(p.len(), init);
+
+    if stddev != 0.0 && !stddev.is_nan() {
+        Zip::from(&p)
+            .and(&mut q)
+            .par_for_each(|prob, quantile| {
+                let q_norm = statistic_functions::ndtri(*prob);
+                *quantile = q_norm * stddev + mean
+            });
+    }
     Ok(q.into_pyarray(py))
 }
 
@@ -932,6 +996,7 @@ fn rust_stdf_helper(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_icon_src, m)?)?;
     m.add_function(wrap_pyfunction!(stdf_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(norm_cdf, m)?)?;
+    m.add_function(wrap_pyfunction!(empirical_cdf, m)?)?;
     m.add_function(wrap_pyfunction!(norm_ppf, m)?)?;
     Ok(())
 }

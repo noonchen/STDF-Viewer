@@ -12,7 +12,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: December 21st 2022
 // -----
-// Last Modified: Wed Dec 21 2022
+// Last Modified: Thu Sep 11 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -193,8 +193,8 @@ fn erfc(a: f64) -> f64 {
 
 /// DESCRIPTION:
 ///
-/// Returns the area under the Gaussian probability density
-/// function, integrated from minus infinity to x:
+/// Returns the area under the standard Gaussian probability density
+/// function (μ=0, σ=1), integrated from minus infinity to a:
 #[inline(always)]
 pub fn ndtr(a: f64) -> f64 {
     if f64::is_nan(a) {
@@ -298,9 +298,9 @@ static Q2: [f64; 8] = [
 static EXP_MINUS_2: f64 = 0.13533528323661269189;
 /// DESCRIPTION:
 ///
-/// Returns the argument, x, for which the area under the
+/// Returns the argument, x, for which the area under the standard
 /// Gaussian probability density function (integrated from
-/// minus infinity to x) is equal to y.
+/// minus infinity to x, where μ=0, σ=1) is equal to y.
 ///
 /// For small arguments:
 /// 0 < y < exp(-2), the program computes

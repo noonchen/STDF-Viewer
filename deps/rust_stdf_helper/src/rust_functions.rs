@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Sep 10 2025
+// Last Modified: Thu Sep 11 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -1936,36 +1936,16 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
     let mut rslt = String::with_capacity(256);
     for (i, v1_data) in gdr_rec.gen_data.iter().enumerate() {
         match v1_data {
-            V1::B0 => {
-                rslt.push_str(&format!("{} B0: NULL\n", i));
-            }
-            V1::U1(v) => {
-                rslt.push_str(&format!("{} U1: {}\n", i, v));
-            }
-            V1::U2(v) => {
-                rslt.push_str(&format!("{} U2: {}\n", i, v));
-            }
-            V1::U4(v) => {
-                rslt.push_str(&format!("{} U4: {}\n", i, v));
-            }
-            V1::I1(v) => {
-                rslt.push_str(&format!("{} I1: {}\n", i, v));
-            }
-            V1::I2(v) => {
-                rslt.push_str(&format!("{} I2: {}\n", i, v));
-            }
-            V1::I4(v) => {
-                rslt.push_str(&format!("{} I4: {}\n", i, v));
-            }
-            V1::R4(v) => {
-                rslt.push_str(&format!("{} R4: {}\n", i, v));
-            }
-            V1::R8(v) => {
-                rslt.push_str(&format!("{} R8: {}\n", i, v));
-            }
-            V1::Cn(v) => {
-                rslt.push_str(&format!("{} Cn: {}\n", i, v));
-            }
+            V1::B0 => { rslt.push_str(&format!("{} B0: NULL\n", i)); }
+            V1::U1(v) => { rslt.push_str(&format!("{} U1: {}\n", i, v)); }
+            V1::U2(v) => { rslt.push_str(&format!("{} U2: {}\n", i, v)); }
+            V1::U4(v) => { rslt.push_str(&format!("{} U4: {}\n", i, v)); }
+            V1::I1(v) => { rslt.push_str(&format!("{} I1: {}\n", i, v)); }
+            V1::I2(v) => { rslt.push_str(&format!("{} I2: {}\n", i, v)); }
+            V1::I4(v) => { rslt.push_str(&format!("{} I4: {}\n", i, v)); }
+            V1::R4(v) => { rslt.push_str(&format!("{} R4: {}\n", i, v)); }
+            V1::R8(v) => { rslt.push_str(&format!("{} R8: {}\n", i, v)); }
+            V1::Cn(v) => { rslt.push_str(&format!("{} Cn: {}\n", i, v)); }
             V1::Bn(v) => {
                 rslt.push_str(&match v.len() {
                     0 => format!("{} Bn: NULL\n", i),
@@ -1978,9 +1958,7 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
                     _ => format!("{} Dn: (HEX){}\n", i, hex::encode_upper(v)),
                 });
             }
-            V1::N1(v) => {
-                rslt.push_str(&format!("{} N1: {:X}\n", i, v));
-            }
+            V1::N1(v) => { rslt.push_str(&format!("{} N1: {:X}\n", i, v)); }
             V1::Invalid => (),
         };
     }
