@@ -720,173 +720,80 @@ fn stdf_to_xlsx(
                 .and_modify(|r| *r += 1)
                 .or_insert(1);
             // serialize inner record, then write to sheet in field order
-            match stdf_rec {
+            let mut check_signal = false;
+            let json = match stdf_rec {
                 // rec type 15
-                StdfRecord::PTR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::MPR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::FTR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::STR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::PTR(r) => serde_json::to_value(&r)?,
+                StdfRecord::MPR(r) => serde_json::to_value(&r)?,
+                StdfRecord::FTR(r) => serde_json::to_value(&r)?,
+                StdfRecord::STR(r) => serde_json::to_value(&r)?,
                 // rec type 5
-                StdfRecord::PIR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::PIR(r) => serde_json::to_value(&r)?,
                 StdfRecord::PRR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
                     // check stop signal and send progress if we encountered PRR
-                    if is_valid_progress_signal || is_valid_stop {
-                        if let Err(e) = Python::attach(|py| -> PyResult<()> {
-                            if is_valid_progress_signal {
-                                progress_signal.bind(py).call_method1(
-                                    intern!(py, "emit"),
-                                    (parse_progess,),
-                                )?;
-                            }
-                            if is_valid_stop {
-                                stop_flag_rust = stop_flag
-                                    .bind(py)
-                                    .getattr(intern!(py, "stop"))?
-                                    .extract::<bool>()?;
-                            }
-                            Ok(())
-                        }) {
-                            return Err(StdfHelperError { msg: e.to_string() });
-                        }
-                    }
+                    check_signal = true;
+                    serde_json::to_value(&r)?
                 }
                 // rec type 2
-                StdfRecord::WIR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::WRR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::WCR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::WIR(r) => serde_json::to_value(&r)?,
+                StdfRecord::WRR(r) => serde_json::to_value(&r)?,
+                StdfRecord::WCR(r) => serde_json::to_value(&r)?,
                 // rec type 50
-                StdfRecord::GDR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::DTR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::GDR(r) => serde_json::to_value(&r)?,
+                StdfRecord::DTR(r) => serde_json::to_value(&r)?,
                 // rec type 10
-                StdfRecord::TSR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::TSR(r) => serde_json::to_value(&r)?,
                 // rec type 1
-                StdfRecord::MIR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::MRR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::PCR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::HBR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::SBR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::PMR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::PGR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::PLR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::RDR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::SDR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::PSR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::NMR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::CNR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::SSR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::CDR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::MIR(r) => serde_json::to_value(&r)?,
+                StdfRecord::MRR(r) => serde_json::to_value(&r)?,
+                StdfRecord::PCR(r) => serde_json::to_value(&r)?,
+                StdfRecord::HBR(r) => serde_json::to_value(&r)?,
+                StdfRecord::SBR(r) => serde_json::to_value(&r)?,
+                StdfRecord::PMR(r) => serde_json::to_value(&r)?,
+                StdfRecord::PGR(r) => serde_json::to_value(&r)?,
+                StdfRecord::PLR(r) => serde_json::to_value(&r)?,
+                StdfRecord::RDR(r) => serde_json::to_value(&r)?,
+                StdfRecord::SDR(r) => serde_json::to_value(&r)?,
+                StdfRecord::PSR(r) => serde_json::to_value(&r)?,
+                StdfRecord::NMR(r) => serde_json::to_value(&r)?,
+                StdfRecord::CNR(r) => serde_json::to_value(&r)?,
+                StdfRecord::SSR(r) => serde_json::to_value(&r)?,
+                StdfRecord::CDR(r) => serde_json::to_value(&r)?,
                 // rec type 0
-                StdfRecord::FAR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::ATR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::VUR(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::FAR(r) => serde_json::to_value(&r)?,
+                StdfRecord::ATR(r) => serde_json::to_value(&r)?,
+                StdfRecord::VUR(r) => serde_json::to_value(&r)?,
                 // rec type 20
-                StdfRecord::BPS(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
-                StdfRecord::EPS(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::BPS(r) => serde_json::to_value(&r)?,
+                StdfRecord::EPS(r) => serde_json::to_value(&r)?,
                 // rec type 180: Reserved
                 // rec type 181: Reserved
-                StdfRecord::ReservedRec(r) => {
-                    let json = serde_json::to_value(&r)?;
-                    write_json_to_sheet(json, field_names, sheet, row)?;
-                }
+                StdfRecord::ReservedRec(r) => serde_json::to_value(&r)?,
                 StdfRecord::InvalidRec(h) => {
-                    panic!("Invalid record found! {h:?}")
+                    panic!("Invalid record found! {h:?}");
                 }
-            }
+            };
+            write_json_to_sheet(json, field_names, sheet, row)?;
+
+            if check_signal && (is_valid_progress_signal || is_valid_stop) {
+                if let Err(e) = Python::attach(|py| -> PyResult<()> {
+                    if is_valid_progress_signal {
+                        progress_signal.bind(py).call_method1(
+                            intern!(py, "emit"),
+                            (parse_progess,),
+                        )?;
+                    }
+                    if is_valid_stop {
+                        stop_flag_rust = stop_flag
+                            .bind(py)
+                            .getattr(intern!(py, "stop"))?
+                            .extract::<bool>()?;
+                    }
+                    Ok(())
+                }) {
+                    return Err(StdfHelperError { msg: e.to_string() });
+                }
+            }            
         }
         // save xlsx to path
         xlsx.save_to_path(std::path::Path::new(&xlsx_path))?;
