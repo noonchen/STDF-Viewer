@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Sep 13 2025
+# Last Modified: Sun Sep 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -26,30 +26,30 @@ from rust_stdf_helper import get_icon_src
 
 
 class TrendPlotConfig(BaseModel):
-    show_upper_limit: bool = Field(True, alias="Show Upper Limit (Trend)")
-    show_lower_limit: bool = Field(True, alias="Show Lower Limit (Trend)")
-    show_high_spec: bool = Field(True, alias="Show High Specification (Trend)")
-    show_low_spec: bool = Field(True, alias="Show Low Specification (Trend)")
+    show_hilim: bool = Field(True, alias="Show Upper Limit (Trend)")
+    show_lolim: bool = Field(True, alias="Show Lower Limit (Trend)")
+    show_hispec: bool = Field(True, alias="Show High Specification (Trend)")
+    show_lospec: bool = Field(True, alias="Show Low Specification (Trend)")
     show_median: bool = Field(True, alias="Show Median Line (Trend)")
     show_mean: bool = Field(True, alias="Show Mean Line (Trend)")
 
 
 class HistoPlotConfig(BaseModel):
-    show_upper_limit: bool = Field(True, alias="Show Upper Limit (Histo)")
-    show_lower_limit: bool = Field(True, alias="Show Lower Limit (Histo)")
-    show_high_spec: bool = Field(True, alias="Show High Specification (Histo)")
-    show_low_spec: bool = Field(True, alias="Show Low Specification (Histo)")
+    show_hilim: bool = Field(True, alias="Show Upper Limit (Histo)")
+    show_lolim: bool = Field(True, alias="Show Lower Limit (Histo)")
+    show_hispec: bool = Field(True, alias="Show High Specification (Histo)")
+    show_lospec: bool = Field(True, alias="Show Low Specification (Histo)")
     show_median: bool = Field(True, alias="Show Median Line (Histo)")
     show_mean: bool = Field(True, alias="Show Mean Line (Histo)")
-    show_boxplot: bool = Field(True, alias="Show Boxplot")
-    show_boxplot_outlier: bool = Field(True, alias="Show Boxplot Outlier")
-    show_histogram_bars: bool = Field(True, alias="Show Histogram Bars")
+    show_boxp: bool = Field(True, alias="Show Boxplot")
+    show_boxpol: bool = Field(True, alias="Show Boxplot Outlier")
+    show_histobars: bool = Field(True, alias="Show Histogram Bars")
     bin_count: int = Field(30, alias="Bin Count")
     sigma_lines: str = Field("3, 6, 9", alias="δ Lines")
 
 
 class PPQQPlotConfig(BaseModel):
-    show_ref_line: bool = Field(True, alias="Show Reference Line")
+    show_ref: bool = Field(True, alias="Show Reference Line")
     axis_mode: str = Field("X: Original; Y: Theoretical", alias="Axis Mode")
 
 
@@ -89,13 +89,13 @@ class ColorSettingConfig(BaseModel):
 class GeneralConfig(BaseModel):
     language: str = Field("English", alias="Language")
     font: str = Field("JetBrains Mono", alias="Font")
-    recent_folder: str = Field("", alias="Recent Folder")
+    recent_dir: str = Field("", alias="Recent Folder")
     data_notation: str = Field("G", alias="Data Notation")  # F E G stand for float, Scientific, automatic
     data_precision: int = Field(3, alias="Data Precison")
-    search_low_cpk: bool = Field(False, alias="Search Low Cpk")
-    cpk_threshold: float = Field(1.33, alias="Cpk Warning Threshold")
-    sort_testlist: str = Field("Original", alias="Sort TestList")
-    test_identifier: str = Field("Number + Name", alias="Test Item Identifier")
+    check_cpk: bool = Field(False, alias="Search Low Cpk")
+    cpk_thrsh: float = Field(1.33, alias="Cpk Warning Threshold")
+    sort_tlist: str = Field("Original", alias="Sort TestList")
+    id_type: str = Field("Number + Name", alias="Test Item Identifier")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"
@@ -124,11 +124,11 @@ class GeneralConfig(BaseModel):
 
 
 class SettingParams(BaseModel):
-    general: GeneralConfig = Field(default_factory=GeneralConfig, alias="General")
-    trend_plot: TrendPlotConfig = Field(default_factory=TrendPlotConfig, alias="Trend Plot")
-    histo_plot: HistoPlotConfig = Field(default_factory=HistoPlotConfig, alias="Histo Plot")
-    ppqq_plot: PPQQPlotConfig = Field(default_factory=PPQQPlotConfig, alias="PP/QQ Plot")
-    color_setting: ColorSettingConfig = Field(default_factory=ColorSettingConfig, alias="Color Setting")
+    gen: GeneralConfig = Field(default_factory=GeneralConfig, alias="General")
+    trend: TrendPlotConfig = Field(default_factory=TrendPlotConfig, alias="Trend Plot")
+    histo: HistoPlotConfig = Field(default_factory=HistoPlotConfig, alias="Histo Plot")
+    ppqq: PPQQPlotConfig = Field(default_factory=PPQQPlotConfig, alias="PP/QQ Plot")
+    color: ColorSettingConfig = Field(default_factory=ColorSettingConfig, alias="Color Setting")
 
     class Config:
         validate_by_name = True  # allow dumping with field names
@@ -145,7 +145,7 @@ class SettingParams(BaseModel):
             toml.dump(self.model_dump(by_alias=True), f)
 
     def getFloatFormat(self) -> str:
-        return f"%.{self.general.data_precision}{self.general.data_notation}"
+        return f"%.{self.gen.data_precision}{self.gen.data_notation}"
 
 
 # This is the setting that will
@@ -165,12 +165,12 @@ def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dic
     global GlobalSetting
     # generate site color if not exist
     for site in availableSites:
-        if site not in GlobalSetting.color_setting.site_colors:
-            GlobalSetting.color_setting.site_colors[site] = rHEX()
+        if site not in GlobalSetting.color.site_colors:
+            GlobalSetting.color.site_colors[site] = rHEX()
             
     # init bin color by bin info
-    for (binColorDict, bin_info) in [(GlobalSetting.color_setting.sbin_colors, SBIN_Info),
-                                     (GlobalSetting.color_setting.hbin_colors, HBIN_Info)]:
+    for (binColorDict, bin_info) in [(GlobalSetting.color.sbin_colors, SBIN_Info),
+                                     (GlobalSetting.color.hbin_colors, HBIN_Info)]:
         for bin_num in bin_info.keys():
             binType = bin_info[bin_num]["BIN_PF"]   # P, F or Unknown
             defaultColor = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
@@ -183,13 +183,13 @@ def setSettingDefaultSymbol(num_files: int):
     Update file symbols if multiple files loaded
     """    
     for fid in range(num_files):
-        if fid not in GlobalSetting.general.file_symbols:
-            GlobalSetting.general.file_symbols[fid] = rSymbol()
+        if fid not in GlobalSetting.gen.file_symbols:
+            GlobalSetting.gen.file_symbols[fid] = rSymbol()
 
 
 def updateRecentFolder(filepath: str):
     dirpath = os.path.dirname(filepath)
-    GlobalSetting.general.recent_folder = dirpath
+    GlobalSetting.gen.recent_dir = dirpath
 
 
 def loadConfigFile():
