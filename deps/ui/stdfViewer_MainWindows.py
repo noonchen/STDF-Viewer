@@ -654,7 +654,7 @@ class Ui_MainWindow(object):
         self.tabControl.setTabText(self.tabControl.indexOf(self.info_tab), _translate("MainWindow", "Detailed Info"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.trend_tab), _translate("MainWindow", "Trend Chart"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.histo_tab), _translate("MainWindow", "Histogram"))
-        self.tabControl.setTabText(self.tabControl.indexOf(self.ppqq_tab), _translate("MainWindow", "Normal Validation"))
+        self.tabControl.setTabText(self.tabControl.indexOf(self.ppqq_tab), _translate("MainWindow", "PP/QQ Plot"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.bin_tab), _translate("MainWindow", "Bin Summary"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.wafer_tab), _translate("MainWindow", "Wafer Map"))
         self.tabControl.setTabText(self.tabControl.indexOf(self.correlation_tab), _translate("MainWindow", "Correlation"))
