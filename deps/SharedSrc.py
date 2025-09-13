@@ -64,7 +64,7 @@ class ColorSettingConfig(BaseModel):
     sbin_colors: dict[int, str] = Field(default_factory=dict, alias="Software Bin Colors")
     hbin_colors: dict[int, str] = Field(default_factory=dict, alias="Hardware Bin Colors")
 
-    @field_validator("site_colors", "software_bin_colors", "hardware_bin_colors", mode="before")
+    @field_validator("site_colors", "sbin_colors", "hbin_colors", mode="before")
     @classmethod
     def validate_colors(cls, v: dict):
         new_v = {}
@@ -81,7 +81,7 @@ class ColorSettingConfig(BaseModel):
             new_v[i_num] = color
         return new_v
 
-    @field_serializer("site_colors", "software_bin_colors", "hardware_bin_colors")
+    @field_serializer("site_colors", "sbin_colors", "hbin_colors")
     def serialize_colors(self, v: dict[int, str], _info):
         return {str(k): v for k, v in v.items()}
 

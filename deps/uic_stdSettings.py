@@ -310,7 +310,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTab = True
             if (origSettings.histo != userSettings.histo) and (currentTab == tab.Histo): 
                 refreshTab = True
-            if (origSettings..fileSymbol != userSettings.fileSymbol) and (currentTab in [tab.Trend, tab.PPQQ]):
+            if (origSettings.gen.fileSymbol != userSettings.gen.fileSymbol) and (currentTab in [tab.Trend, tab.PPQQ]):
                 refreshTab = True
             if (origSettings.gen.language != userSettings.gen.language or 
                 origSettings.gen.font != userSettings.gen.font):
