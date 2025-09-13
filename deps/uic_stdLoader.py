@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Thu Dec 01 2022
+# Last Modified: Sat Sep 13 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -40,6 +40,7 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
+from deps.SharedSrc import getSetting
 
 
 logger = logging.getLogger("STDF Viewer")
@@ -61,6 +62,11 @@ class signal4Loader(QtCore.QObject):
     # status bar signal from parent
     msgSignal = None
 
+
+TestIDTypeDict = {
+                "Number + Name": rust_stdf_helper.TestIDType.TestNumberAndName,
+                "Number Only": rust_stdf_helper.TestIDType.TestNumberOnly
+                }
 
 
 class stdfLoader(QtWidgets.QDialog):
@@ -90,6 +96,11 @@ class stdfLoader(QtWidgets.QDialog):
         self.thread = QtCore.QThread(parent=self)
         self.reader = stdReader(self.signals)
         self.reader.readThis(stdPaths)
+        
+        # read test item identifier from setting
+        setting = getSetting()
+        if setting.general.test_identifier in TestIDTypeDict:
+            self.reader.setIDType(TestIDTypeDict[setting.general.test_identifier])
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
@@ -158,9 +169,13 @@ class stdReader(QtCore.QObject):
         self.dataInterfaceSignal = self.QSignals.dataInterfaceSignal_reader
         self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
+        self.idType = rust_stdf_helper.TestIDType.TestNumberAndName
         
     def readThis(self, stdPaths: list[list[str]]):
         self.stdPaths = stdPaths
+        
+    def setIDType(self, idType):
+        self.idType = idType
         
     @Slot()
     def readBegin(self):
@@ -174,7 +189,7 @@ class stdReader(QtCore.QObject):
             start = time.time()
             # auto generate a database name
             databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
-            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.progressBarSignal, self.flag)
+            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
             end = time.time()
             if self.flag.stop:
                 # user terminated...
