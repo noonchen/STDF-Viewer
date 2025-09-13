@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Sun Sep 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -25,6 +25,7 @@
 
 
 from deps.SharedSrc import *
+from rust_stdf_helper import TestIDType
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import QTranslator
@@ -59,11 +60,15 @@ indexDic_sortby = {0: "Original",
                    2: "Name"}
 indexDic_sortby_reverse = {v:k for k, v in indexDic_sortby.items()}
 
-indexDic_ppqq = {0: "Data Quantiles",
-                 1: "Data Percentiles",
-                 2: "Normal Quantiles",
-                 3: "Normal Percentiles"}
-indexDic_ppqq_reverse = {v:k for k, v in indexDic_ppqq.items()}
+indexDic_ppqqMode = {
+                0: "X: Original; Y: Theoretical",
+                1: "X: Theoretical; Y: Original"}
+indexDic_ppqqMode_reverse = {v:k for k, v in indexDic_ppqqMode.items()}
+
+indexDic_testIdfy = {
+                TestIDType.TestNumberAndName: "Number + Name",
+                TestIDType.TestNumberOnly: "Number Only"}
+indexDic_testIdfy_reverse = {v:k for k, v in indexDic_testIdfy.items()}
 
 
 class colorBtn(QtWidgets.QWidget):
@@ -151,35 +156,6 @@ class SymbolBtn(QtWidgets.QWidget):
         self.cb.setCurrentText(symbolChar[ind])
 
 
-def isTrendChanged(old, new):
-    return not all([getattr(old, attr) == getattr(new, attr) 
-                    for attr in ["showHL_trend", "showLL_trend", 
-                                 "showHSpec_trend", "showLSpec_trend", 
-                                 "showMed_trend", "showMean_trend"]])
-
-def isHistoChanged(old, new):
-    return not all([getattr(old, attr) == getattr(new, attr) 
-                    for attr in ["showHL_histo", "showLL_histo", 
-                                 "showHSpec_histo", "showLSpec_histo", 
-                                 "showMed_histo", "showMean_histo",
-                                 "showBoxp_histo", "showBoxpOl_histo", 
-                                 "showBars_histo", "binCount", "showSigma"]])
-
-def isPPQQChanged(old, new):
-    return not all([getattr(old, attr) == getattr(new, attr) 
-                    for attr in ["x_ppqq", "y_ppqq"]])
-
-def isGeneralChanged(old, new):
-    return not all([getattr(old, attr) == getattr(new, attr) 
-                    for attr in ["language", "font", "dataNotation", 
-                                 "dataPrecision", "checkCpk", 
-                                 "cpkThreshold", "sortTestList", "fileSymbol"]])
-
-def isColorChanged(old, new):
-    return not all([getattr(old, attr) == getattr(new, attr) 
-                    for attr in ["siteColor", "sbinColor", "hbinColor"]])
-
-
 class stdfSettings(QtWidgets.QDialog):
     
     def __init__(self, parent = None):
@@ -207,7 +183,6 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.ppqqBtn.setIcon(getIcon("tab_ppqq"))
         self.settingsUI.colorBtn.setIcon(getIcon("ColorPalette"))
         # hide not implemented functions
-        self.settingsUI.ppqqBtn.setHidden(True)
         self.settingsUI.showMean_histo.setHidden(True)
         self.settingsUI.showMedian_histo.setHidden(True)
         self.settingsUI.showBoxp_histo.setHidden(True)
@@ -219,44 +194,45 @@ class stdfSettings(QtWidgets.QDialog):
     def initWithParentParams(self):
         settings = getSetting()
         # trend
-        self.settingsUI.showHL_trend.setChecked(settings.showHL_trend)
-        self.settingsUI.showLL_trend.setChecked(settings.showLL_trend)
-        self.settingsUI.showHSpec_trend.setChecked(settings.showHSpec_trend)
-        self.settingsUI.showLSpec_trend.setChecked(settings.showLSpec_trend)
-        self.settingsUI.showMedian_trend.setChecked(settings.showMed_trend)
-        self.settingsUI.showMean_trend.setChecked(settings.showMean_trend)
+        self.settingsUI.showHL_trend.setChecked(settings.trend.show_hilim)
+        self.settingsUI.showLL_trend.setChecked(settings.trend.show_lolim)
+        self.settingsUI.showHSpec_trend.setChecked(settings.trend.show_hispec)
+        self.settingsUI.showLSpec_trend.setChecked(settings.trend.show_lospec)
+        self.settingsUI.showMedian_trend.setChecked(settings.trend.show_median)
+        self.settingsUI.showMean_trend.setChecked(settings.trend.show_mean)
         # histo
-        self.settingsUI.showHL_histo.setChecked(settings.showHL_histo)
-        self.settingsUI.showLL_histo.setChecked(settings.showLL_histo)
-        self.settingsUI.showHSpec_histo.setChecked(settings.showHSpec_histo)
-        self.settingsUI.showLSpec_histo.setChecked(settings.showLSpec_histo)
-        self.settingsUI.showMedian_histo.setChecked(settings.showMed_histo)
-        self.settingsUI.showMean_histo.setChecked(settings.showMean_histo)
-        self.settingsUI.showBoxp_histo.setChecked(settings.showBoxp_histo)
-        self.settingsUI.showBpOutlier_histo.setChecked(settings.showBoxpOl_histo)
-        self.settingsUI.showBar_histo.setChecked(settings.showBars_histo)
-        self.settingsUI.lineEdit_binCount.setText(str(settings.binCount))
-        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(settings.showSigma, 0))
+        self.settingsUI.showHL_histo.setChecked(settings.histo.show_hilim)
+        self.settingsUI.showLL_histo.setChecked(settings.histo.show_lolim)
+        self.settingsUI.showHSpec_histo.setChecked(settings.histo.show_hispec)
+        self.settingsUI.showLSpec_histo.setChecked(settings.histo.show_lospec)
+        self.settingsUI.showMedian_histo.setChecked(settings.histo.show_median)
+        self.settingsUI.showMean_histo.setChecked(settings.histo.show_mean)
+        self.settingsUI.showBoxp_histo.setChecked(settings.histo.show_boxp)
+        self.settingsUI.showBpOutlier_histo.setChecked(settings.histo.show_boxpol)
+        self.settingsUI.showBar_histo.setChecked(settings.histo.show_histobars)
+        self.settingsUI.lineEdit_binCount.setText(str(settings.histo.bin_count))
+        self.settingsUI.sigmaCombobox.setCurrentIndex(indexDic_sigma_reverse.get(settings.histo.sigma_lines, 0))
         # PPQQ
-        self.settingsUI.xDataCombobox.setCurrentIndex(indexDic_ppqq_reverse.get(settings.x_ppqq, 2))
-        self.settingsUI.yDataCombobox.setCurrentIndex(indexDic_ppqq_reverse.get(settings.y_ppqq, 0))
+        self.settingsUI.showRefLine.setChecked(settings.ppqq.show_ref)
+        self.settingsUI.axisModeCombobox.setCurrentIndex(indexDic_ppqqMode_reverse.get(settings.ppqq.axis_mode, 0))
         # general
-        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(settings.language, 0))
-        self.settingsUI.fontComboBox.setCurrentText(settings.font)
-        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse.get(settings.dataNotation, 0))
-        self.settingsUI.precisionSlider.setValue(settings.dataPrecision)
-        self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if settings.checkCpk else 1)
-        self.settingsUI.lineEdit_cpk.setText(str(settings.cpkThreshold))
-        self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.sortTestList, 0))
+        self.settingsUI.langCombobox.setCurrentIndex(indexDic_lang_reverse.get(settings.gen.language, 0))
+        self.settingsUI.fontComboBox.setCurrentText(settings.gen.font)
+        self.settingsUI.notationCombobox.setCurrentIndex(indexDic_notation_reverse.get(settings.gen.data_notation, 0))
+        self.settingsUI.precisionSlider.setValue(settings.gen.data_precision)
+        self.settingsUI.checkCpkcomboBox.setCurrentIndex(0 if settings.gen.check_cpk else 1)
+        self.settingsUI.lineEdit_cpk.setText(str(settings.gen.cpk_thrsh))
+        self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.gen.sort_tlist, 0))
+        self.settingsUI.testIDTypecomboBox.setCurrentIndex(indexDic_testIdfy_reverse.get(settings.gen.id_type, 0))
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
             fsBox: SymbolBtn = fsLayout.itemAt(i).widget()
-            fsBox.setSymbolName(settings.fileSymbol.get(i, rSymbol()))
+            fsBox.setSymbolName(settings.gen.file_symbols.get(i, rSymbol()))
         # color
-        for (orig_dict, layout) in [(settings.siteColor, self.settingsUI.gridLayout_site_color),
-                                    (settings.sbinColor, self.settingsUI.gridLayout_sbin_color),
-                                    (settings.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
+        for (orig_dict, layout) in [(settings.color.site_colors, self.settingsUI.gridLayout_site_color),
+                                    (settings.color.sbin_colors, self.settingsUI.gridLayout_sbin_color),
+                                    (settings.color.hbin_colors, self.settingsUI.gridLayout_hbin_color)]:
             for i in range(layout.count()):
                 cB = layout.itemAt(i).widget()
                 orig_color = orig_dict.get(cB.num, rHEX())
@@ -269,45 +245,46 @@ class stdfSettings(QtWidgets.QDialog):
         '''
         userSettings = SettingParams()
         # trend
-        userSettings.showHL_trend = self.settingsUI.showHL_trend.isChecked()
-        userSettings.showLL_trend = self.settingsUI.showLL_trend.isChecked()
-        userSettings.showHSpec_trend = self.settingsUI.showHSpec_trend.isChecked()
-        userSettings.showLSpec_trend = self.settingsUI.showLSpec_trend.isChecked()
-        userSettings.showMed_trend = self.settingsUI.showMedian_trend.isChecked()
-        userSettings.showMean_trend = self.settingsUI.showMean_trend.isChecked()
+        userSettings.trend.show_hilim = self.settingsUI.showHL_trend.isChecked()
+        userSettings.trend.show_lolim = self.settingsUI.showLL_trend.isChecked()
+        userSettings.trend.show_hispec = self.settingsUI.showHSpec_trend.isChecked()
+        userSettings.trend.show_lospec = self.settingsUI.showLSpec_trend.isChecked()
+        userSettings.trend.show_median = self.settingsUI.showMedian_trend.isChecked()
+        userSettings.trend.show_mean = self.settingsUI.showMean_trend.isChecked()
         # histo
-        userSettings.showHL_histo = self.settingsUI.showHL_histo.isChecked()
-        userSettings.showLL_histo = self.settingsUI.showLL_histo.isChecked()
-        userSettings.showHSpec_histo = self.settingsUI.showHSpec_histo.isChecked()
-        userSettings.showLSpec_histo = self.settingsUI.showLSpec_histo.isChecked()
-        userSettings.showMed_histo = self.settingsUI.showMedian_histo.isChecked()
-        userSettings.showMean_histo = self.settingsUI.showMean_histo.isChecked()
-        userSettings.showBoxp_histo = self.settingsUI.showBoxp_histo.isChecked()
-        userSettings.showBoxpOl_histo = self.settingsUI.showBpOutlier_histo.isChecked()
-        userSettings.showBars_histo = self.settingsUI.showBar_histo.isChecked()
-        userSettings.binCount = int(self.settingsUI.lineEdit_binCount.text())
-        userSettings.showSigma = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
+        userSettings.histo.show_hilim = self.settingsUI.showHL_histo.isChecked()
+        userSettings.histo.show_lolim = self.settingsUI.showLL_histo.isChecked()
+        userSettings.histo.show_hispec = self.settingsUI.showHSpec_histo.isChecked()
+        userSettings.histo.show_lospec = self.settingsUI.showLSpec_histo.isChecked()
+        userSettings.histo.show_median = self.settingsUI.showMedian_histo.isChecked()
+        userSettings.histo.show_mean = self.settingsUI.showMean_histo.isChecked()
+        userSettings.histo.show_boxp = self.settingsUI.showBoxp_histo.isChecked()
+        userSettings.histo.show_boxpol = self.settingsUI.showBpOutlier_histo.isChecked()
+        userSettings.histo.show_histobars = self.settingsUI.showBar_histo.isChecked()
+        userSettings.histo.bin_count = int(self.settingsUI.lineEdit_binCount.text())
+        userSettings.histo.sigma_lines = indexDic_sigma[self.settingsUI.sigmaCombobox.currentIndex()]
         # PPQQ
-        userSettings.x_ppqq = self.settingsUI.xDataCombobox.currentText()
-        userSettings.y_ppqq = self.settingsUI.yDataCombobox.currentText()
+        userSettings.ppqq.show_ref = self.settingsUI.showRefLine.isChecked()
+        userSettings.ppqq.axis_mode = indexDic_ppqqMode[self.settingsUI.axisModeCombobox.currentIndex()]
         # General
-        userSettings.language = indexDic_lang[self.settingsUI.langCombobox.currentIndex()]
-        userSettings.font = self.settingsUI.fontComboBox.currentText()
-        userSettings.dataNotation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
-        userSettings.dataPrecision = self.settingsUI.precisionSlider.value()
-        userSettings.checkCpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
-        userSettings.cpkThreshold = float(self.settingsUI.lineEdit_cpk.text())
-        userSettings.sortTestList = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
+        userSettings.gen.language = indexDic_lang[self.settingsUI.langCombobox.currentIndex()]
+        userSettings.gen.font = self.settingsUI.fontComboBox.currentText()
+        userSettings.gen.data_notation = indexDic_notation[self.settingsUI.notationCombobox.currentIndex()]
+        userSettings.gen.data_precision = self.settingsUI.precisionSlider.value()
+        userSettings.gen.check_cpk = (self.settingsUI.checkCpkcomboBox.currentIndex() == 0)
+        userSettings.gen.cpk_thrsh = float(self.settingsUI.lineEdit_cpk.text())
+        userSettings.gen.sort_tlist = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
+        userSettings.gen.id_type = indexDic_testIdfy[self.settingsUI.testIDTypecomboBox.currentIndex()]
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
             fsBox = fsLayout.itemAt(i).widget()
             fid = fsBox.fid
-            userSettings.fileSymbol[fid] = fsBox.getSymbolName()
+            userSettings.gen.file_symbols[fid] = fsBox.getSymbolName()
         # color
-        for (colorDict, layout) in [(userSettings.siteColor, self.settingsUI.gridLayout_site_color), 
-                                    (userSettings.sbinColor, self.settingsUI.gridLayout_sbin_color), 
-                                    (userSettings.hbinColor, self.settingsUI.gridLayout_hbin_color)]:
+        for (colorDict, layout) in [(userSettings.color.site_colors, self.settingsUI.gridLayout_site_color), 
+                                    (userSettings.color.sbin_colors, self.settingsUI.gridLayout_sbin_color), 
+                                    (userSettings.color.hbin_colors, self.settingsUI.gridLayout_hbin_color)]:
             if layout:
                 for i in range(layout.count()):
                     cB = layout.itemAt(i).widget()
@@ -329,24 +306,24 @@ class stdfSettings(QtWidgets.QDialog):
             refreshList = False
             clearListBG = False
             retranslate = False
-            if isTrendChanged(origSettings, userSettings) and (currentTab == tab.Trend): 
+            if (origSettings.trend != userSettings.trend) and (currentTab == tab.Trend): 
                 refreshTab = True
-            if isHistoChanged(origSettings, userSettings) and (currentTab == tab.Histo): 
+            if (origSettings.histo != userSettings.histo) and (currentTab == tab.Histo): 
                 refreshTab = True
-            if (origSettings.fileSymbol != userSettings.fileSymbol) and (currentTab in [tab.Trend, tab.PPQQ]):
+            if (origSettings..fileSymbol != userSettings.fileSymbol) and (currentTab in [tab.Trend, tab.PPQQ]):
                 refreshTab = True
-            if (origSettings.language != userSettings.language or 
-                origSettings.font != userSettings.font):
+            if (origSettings.gen.language != userSettings.gen.language or 
+                origSettings.gen.font != userSettings.gen.font):
                 retranslate = True
-            if origSettings.sortTestList != userSettings.sortTestList:
+            if origSettings.gen.sort_tlist != userSettings.gen.sort_tlist:
                 refreshList = True
             if currentTab != tab.Bin:
                 refreshTable = True
                 # if cpk threshold changed, clear listView backgrounds
-                if (origSettings.cpkThreshold != userSettings.cpkThreshold or 
-                    origSettings.checkCpk != userSettings.checkCpk):
+                if (origSettings.gen.check_cpk != userSettings.gen.check_cpk or 
+                    origSettings.gen.cpk_thrsh != userSettings.gen.cpk_thrsh):
                     clearListBG = True
-            if isColorChanged(origSettings, userSettings):
+            if (origSettings.color != userSettings.color):
                 refreshTab = True
                 refreshTable = True
                 
