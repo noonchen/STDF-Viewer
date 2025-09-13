@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Sun Sep 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -65,7 +65,7 @@ from PyQt5.QtCore import (Qt, QTranslator,
 # high dpi support
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
-Version = "V4.0.0"
+Version = "V4.1.0"
     
 # save config path to sys
 rootFolder = os.path.dirname(sys.argv[0])
@@ -237,8 +237,8 @@ class MyWindow(QtWidgets.QMainWindow):
         _app = QApplication.instance()
         # load language files based on the setting
         settings = getSetting()
-        curLang = settings.language
-        font = settings.font
+        curLang = settings.gen.language
+        font = settings.gen.font
         if curLang == "English":
             self.translatorUI.loadFromData(transDict["English"])
             self.translatorCode.loadFromData(transDict["English"])
@@ -304,7 +304,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def openNewFile(self, files: list[str]):
         if not files:
             files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select STDF Files To Open"), 
-                                                    directory=getSetting().recentFolder, 
+                                                    directory=getSetting().gen.recent_dir, 
                                                     filter=self.tr(FILE_FILTER),)
         else:
             files = [f for f in map(os.path.normpath, files) if os.path.isfile(f)]
@@ -322,7 +322,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def onLoadSession(self):
         p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a STDF-Viewer session"), 
-                                           directory=getSetting().recentFolder, 
+                                           directory=getSetting().gen.recent_dir, 
                                            filter=self.tr("Database (*.db)"))
         if p:
             isvalid, msg = validateSession(p)
@@ -420,7 +420,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
     def onAddFont(self):
         p, _ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a .ttf font file"), 
-                                           directory=getSetting().recentFolder, 
+                                           directory=getSetting().gen.recent_dir, 
                                            filter=self.tr("TTF Font (*.ttf)"))
         if not p:
             return
@@ -476,7 +476,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def showDutDataTable(self, selectedDutIndexes: list):
         # always update style in case user changed them in the setting
         settings = getSetting()
-        self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
         self.dutDataDisplayer.setFloatFormat(settings.getFloatFormat())
         self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
         self.dutDataDisplayer.showUI()
@@ -699,9 +699,9 @@ class MyWindow(QtWidgets.QMainWindow):
             for tmpRow in self.data_interface.getFileMetaData():
                 # translate the first element, which is the field names
                 qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
-                if getSetting().language != "English":
+                if getSetting().gen.language != "English":
                     # fix weird font when switch to chinese-s
-                    qfont = QtGui.QFont(getSetting().font)
+                    qfont = QtGui.QFont(getSetting().gen.font)
                     _ = [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
@@ -889,7 +889,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
         if testPass:
             # if user do not need to check Cpk, return to caller
-            if not settings.checkCpk:
+            if not settings.gen.check_cpk:
                 return "Pass"
         else:
             return "Fail"
@@ -899,7 +899,7 @@ class MyWindow(QtWidgets.QMainWindow):
         for cpk in cpkList:
             if not np.isnan(cpk):
                 # check cpk only if it's valid
-                if cpk < settings.cpkThreshold:
+                if cpk < settings.gen.cpk_thrsh:
                     return "cpkFail"
             
         return "Pass"
@@ -917,7 +917,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if self.data_interface is None:
             return
         
-        testSortMethod = getSetting().sortTestList
+        testSortMethod = getSetting().gen.sort_tlist
         if testSortMethod == "Number":
             self.updateModelContent(self.sim_list, sorted(self.completeTestList, key=lambda x: parseTestString(x)[0]))
         elif testSortMethod == "Name":
@@ -946,7 +946,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
-        self.tmodel_data.setFont(QtGui.QFont(settings.font, 13 if isMac else 10))
+        self.tmodel_data.setFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
         self.tmodel_data.setFloatFormat(settings.getFloatFormat())
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
@@ -1012,7 +1012,7 @@ class MyWindow(QtWidgets.QMainWindow):
             self.tmodel.setContent(d["Rows"])
             self.tmodel.setColumnCount(len(HHeader))
             self.tmodel.setFailCpkIndex(indexOfFail, indexOfCpk)
-            self.tmodel.setCpkThreshold(settings.cpkThreshold)
+            self.tmodel.setCpkThreshold(settings.gen.cpk_thrsh)
             self.tmodel.setHHeader(list(map(self.tr, HHeader)))
             self.tmodel.setVHeader(d["VHeader"])
             
@@ -1041,8 +1041,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.bwmodel.setColumnCount(d["maxLen"])
             self.bwmodel.setHHeader([])
             self.bwmodel.setVHeader(d["VHeader"])
-            self.bwmodel.setColorDict(settings.hbinColor, 
-                                      settings.sbinColor)
+            self.bwmodel.setColorDict(settings.color.hbin_colors, 
+                                      settings.color.sbin_colors)
         
             horizontalHeader.setVisible(False)
             verticalHeader.setVisible(True)
