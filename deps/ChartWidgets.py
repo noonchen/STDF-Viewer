@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Sun Sep 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -665,8 +665,8 @@ class TrendChart(GraphicViewWithMenu):
                 x_max_list.append(np.nanmax(x))
                 dyL.update(data_per_site.get("dyLLimit", {}))
                 dyH.update(data_per_site.get("dyHLimit", {}))
-                fsymbol = settings.fileSymbol[fid]
-                siteColor = settings.siteColor[site]
+                fsymbol = settings.gen.file_symbols[fid]
+                siteColor = settings.color.site_colors[site]
                 # test value
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
@@ -681,19 +681,19 @@ class TrendChart(GraphicViewWithMenu):
                 pitem.addItem(pdi)
                 # mean
                 mean = data_per_site["Mean"]
-                if settings.showMean_trend and ~np.isnan(mean):
+                if settings.trend.show_mean and ~np.isnan(mean):
                     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
                                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
                 # median
                 median = data_per_site["Median"]
-                if settings.showMed_trend and ~np.isnan(median):
+                if settings.trend.show_median and ~np.isnan(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.showHL_trend), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.showLSpec_trend), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.showHSpec_trend)]:
+            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+                                              ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
+                                              ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec), 
+                                              ("HSpec", "High Spec", self.hispecPen, settings.trend.show_hispec)]:
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
@@ -703,8 +703,8 @@ class TrendChart(GraphicViewWithMenu):
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
             # dynamic limits
-            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.showHL_trend)]:
+            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.trend.show_hilim)]:
                 if enabled and len(dyDict) > 0:
                     x = np.array(sorted(dyDict.keys()))
                     dylims = np.array([dyDict[i] for i in x])
@@ -837,10 +837,10 @@ class HistoChart(TrendChart):
                     # skip this site that contains 
                     # no data
                     continue
-                siteColor = settings.siteColor[site]
+                siteColor = settings.color.site_colors[site]
                 # calculate bin edges and histo counts                
                 hist, edges, bin_width, rectDutList = prepareHistoData(x, y, 
-                                                                       settings.binCount, 
+                                                                       settings.histo.bin_count, 
                                                                        bar_base)
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
@@ -854,21 +854,11 @@ class HistoChart(TrendChart):
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 bar_base += inc
-                # #TODO mean
-                # mean = data_per_site["Mean"]
-                # if settings.showMean_trend and ~np.isnan(mean):
-                #     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
-                #                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
-                # # median
-                # median = data_per_site["Median"]
-                # if settings.showMed_trend and ~np.isnan(median):
-                #     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
-                #                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.showHL_trend), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.showLSpec_trend), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.showHSpec_trend)]:
+            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.histo.show_lolim), 
+                                              ("HLimit", "High Limit", self.hilimitPen, settings.histo.show_hilim), 
+                                              ("LSpec", "Low Spec", self.lospecPen, settings.histo.show_lospec), 
+                                              ("HSpec", "High Spec", self.hispecPen, settings.histo.show_hispec)]:
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
@@ -931,7 +921,7 @@ class BinChart(GraphicViewWithMenu):
             # a single plot, used for Y-link and 
             # hide axis
             tmpVbList = []
-            binColorDict = settings.hbinColor if isHBIN else settings.sbinColor
+            binColorDict = settings.color.hbin_colors if isHBIN else settings.color.sbin_colors
             # add title
             binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
             self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
@@ -1043,7 +1033,7 @@ class WaferMap(GraphicViewWithMenu):
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
                 legendString = f"Fail Count: {num}"
             else:
-                color = settings.sbinColor[num]
+                color = settings.color.sbin_colors[num]
                 (sbinName, sbinCnt, percent) = waferData["Statistic"][num]
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nSBIN {num}\nBin Name: {sbinName}".format
                 legendString = f"SBIN {num} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
