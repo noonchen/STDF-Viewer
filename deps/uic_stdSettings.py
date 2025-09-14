@@ -310,7 +310,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTab = True
             if (origSettings.histo != userSettings.histo) and (currentTab == tab.Histo): 
                 refreshTab = True
-            if (origSettings.gen.fileSymbol != userSettings.gen.fileSymbol) and (currentTab in [tab.Trend, tab.PPQQ]):
+            if (origSettings.gen.file_symbols != userSettings.gen.file_symbols) and (currentTab in [tab.Trend, tab.PPQQ]):
                 refreshTab = True
             if (origSettings.gen.language != userSettings.gen.language or 
                 origSettings.gen.font != userSettings.gen.font):
@@ -328,7 +328,12 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTable = True
                 
             # update global settings before updating UI
-            updateSetting(**userSettings.__dict__)
+            origSettings.gen = userSettings.gen
+            origSettings.trend = userSettings.trend
+            origSettings.histo = userSettings.histo
+            origSettings.ppqq = userSettings.ppqq
+            origSettings.color = userSettings.color
+            
             # TODO replace with signals
             if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()
