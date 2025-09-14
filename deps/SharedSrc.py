@@ -133,11 +133,16 @@ class SettingParams(BaseModel):
     class Config:
         validate_by_name = True  # allow dumping with field names
         populate_by_name = True
-
-    @classmethod
-    def loadConfig(cls, path: str) -> "SettingParams":
-        data = toml.load(path)
-        return cls.model_validate(data)
+        
+    def updateConfig(self, new: "SettingParams"):
+        self.gen = new.gen
+        self.trend = new.trend
+        self.histo = new.histo
+        self.ppqq = new.ppqq
+        # need to merge instead of replacing
+        self.color.site_colors.update(new.color.site_colors)
+        self.color.sbin_colors.update(new.color.sbin_colors)
+        self.color.hbin_colors.update(new.color.hbin_colors)
 
     def dumpConfig(self, path: str) -> None:
         # dump with aliases so the TOML matches your original style
@@ -193,8 +198,10 @@ def updateRecentFolder(filepath: str):
 
 
 def loadConfigFile():
+    global GlobalSetting
     try:
-        GlobalSetting.loadConfig(sys.CONFIG_PATH)
+        data = toml.load(sys.CONFIG_PATH)
+        GlobalSetting = SettingParams.model_validate(data)
     except (FileNotFoundError, TypeError, toml.TomlDecodeError):
         # any error occurs in config file reading, simply ignore
         pass

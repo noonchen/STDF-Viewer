@@ -328,11 +328,7 @@ class stdfSettings(QtWidgets.QDialog):
                 refreshTable = True
                 
             # update global settings before updating UI
-            origSettings.gen = userSettings.gen
-            origSettings.trend = userSettings.trend
-            origSettings.histo = userSettings.histo
-            origSettings.ppqq = userSettings.ppqq
-            origSettings.color = userSettings.color
+            origSettings.updateConfig(userSettings)
             
             # TODO replace with signals
             if refreshTab: self.parent.updateTabContent()

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sat Sep 13 2025
+# Last Modified: Sun Sep 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -99,8 +99,8 @@ class stdfLoader(QtWidgets.QDialog):
         
         # read test item identifier from setting
         setting = getSetting()
-        if setting.general.test_identifier in TestIDTypeDict:
-            self.reader.setIDType(TestIDTypeDict[setting.general.test_identifier])
+        if setting.gen.id_type in TestIDTypeDict:
+            self.reader.setIDType(TestIDTypeDict[setting.gen.id_type])
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
