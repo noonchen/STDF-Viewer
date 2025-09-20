@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Sep 14 2025
+# Last Modified: Sun Sep 21 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -681,12 +681,12 @@ class TrendChart(GraphicViewWithMenu):
                 pitem.addItem(pdi)
                 # mean
                 mean = data_per_site["Mean"]
-                if settings.trend.show_mean and ~np.isnan(mean):
+                if settings.trend.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
                     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
                                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
                 # median
                 median = data_per_site["Median"]
-                if settings.trend.show_median and ~np.isnan(median):
+                if settings.trend.show_median and ~np.isnan(median) and ~np.isinf(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
@@ -697,7 +697,7 @@ class TrendChart(GraphicViewWithMenu):
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim):
+                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
                     pitem.addLine(y=lim, pen=pen, name=name, 
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 
@@ -854,6 +854,16 @@ class HistoChart(TrendChart):
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 bar_base += inc
+                # mean
+                mean = data_per_site["Mean"]
+                if settings.histo.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
+                    pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
+                                  labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
+                # median
+                median = data_per_site["Median"]
+                if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
+                    pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
+                                  labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})                
             # add test limits and specs
             for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.histo.show_lolim), 
                                               ("HLimit", "High Limit", self.hilimitPen, settings.histo.show_hilim), 
@@ -862,7 +872,7 @@ class HistoChart(TrendChart):
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim):
+                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
                     pitem.addLine(y=lim, pen=pen, name=name, 
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 

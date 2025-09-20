@@ -462,7 +462,7 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
     sdev = np.nanstd(data)
     mean = np.nanmean(data)
     
-    if np.isnan(L) or np.isnan(H):
+    if np.isnan(L) or np.isnan(H) or np.isinf(sdev):
         return mean, sdev, np.nan
     
     T = H - L
