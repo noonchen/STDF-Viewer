@@ -301,6 +301,7 @@ fn generate_database(
     dbpath: String,
     stdf_paths: Vec<Vec<String>>,
     test_id_type: TestIDType,
+    build_db_index: bool,
     progress_signal: Bound<'_, PyAny>,
     stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
@@ -523,7 +524,7 @@ fn generate_database(
             handle.join().unwrap()?;
         }
         // finalize database
-        db_ctx.finalize()?;
+        db_ctx.finalize(build_db_index)?;
         if let Err((_, err)) = conn.close() {
             return Err(StdfHelperError::from(err))?;
         };
