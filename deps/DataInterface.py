@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Sun Sep 21 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -292,6 +292,19 @@ class DataInterface:
             # FTR doesn't have `data`, use flag instead
             outData["dataList"] = testData["flagList"]
         
+        # check Inf values
+        infData = np.isinf(outData["dataList"])
+        if np.any(infData):
+            settings = getSetting()
+            if settings.gen.hide_inf:
+                # replace Inf with nan to auto hide
+                outData["dataList"][infData] = np.nan
+            else:
+                # replace inf to float max/min for visualization
+                outData["dataList"][np.logical_and(infData, outData["dataList"] > 0)] = np.finfo(np.float32).max
+                outData["dataList"][np.logical_and(infData, outData["dataList"] < 0)] = np.finfo(np.float32).min
+        del infData
+            
         # get statistics
         if outData["dataList"].size > 0 and not np.all(np.isnan(outData["dataList"])):
             outData["Min"] = np.nanmin(outData["dataList"])

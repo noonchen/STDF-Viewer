@@ -96,6 +96,7 @@ class GeneralConfig(BaseModel):
     cpk_thrsh: float = Field(1.33, alias="Cpk Warning Threshold")
     sort_tlist: str = Field("Original", alias="Sort TestList")
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
+    hide_inf: bool = Field(True, alias="Hide Infinite Value")
     gen_db_idx: bool = Field(False, alias="Create DB Index")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
