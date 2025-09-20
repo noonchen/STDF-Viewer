@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Sep 14 2025
+# Last Modified: Sun Sep 21 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -96,6 +96,7 @@ class GeneralConfig(BaseModel):
     cpk_thrsh: float = Field(1.33, alias="Cpk Warning Threshold")
     sort_tlist: str = Field("Original", alias="Sort TestList")
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
+    gen_db_idx: bool = Field(False, alias="Create DB Index")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"

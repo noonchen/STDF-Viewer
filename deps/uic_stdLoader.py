@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Sep 14 2025
+# Last Modified: Sun Sep 21 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -75,6 +75,7 @@ class stdfLoader(QtWidgets.QDialog):
         super().__init__(parent)
         self.translator = QTranslator(self)
         self.closeEventByThread = False    # used to determine the source of close event
+        self.genIdx = False
         
         self.signals = signal4Loader()
         self.signals.progressBarSignal.connect(self.updateProgressBar)
@@ -101,6 +102,7 @@ class stdfLoader(QtWidgets.QDialog):
         setting = getSetting()
         if setting.gen.id_type in TestIDTypeDict:
             self.reader.setIDType(TestIDTypeDict[setting.gen.id_type])
+        self.genIdx = self.reader.genIdx = setting.gen.gen_db_idx
         
         # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
@@ -132,7 +134,8 @@ class stdfLoader(QtWidgets.QDialog):
     @Slot(int)
     def updateProgressBar(self, num):
         if num == 10000:
-            self.loaderUI.progressBar.setFormat("Loading database...")
+            completeMsg = "Creating index for fast query" if self.genIdx else "Loading database..."
+            self.loaderUI.progressBar.setFormat(completeMsg)
             self.loaderUI.progressBar.setValue(num)
         else:
             # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
@@ -170,6 +173,7 @@ class stdReader(QtCore.QObject):
         self.msgSignal = self.QSignals.msgSignal
         self.flag = flags()     # used for stopping parser
         self.idType = rust_stdf_helper.TestIDType.TestNumberAndName
+        self.genIdx = False
         
     def readThis(self, stdPaths: list[list[str]]):
         self.stdPaths = stdPaths
@@ -189,7 +193,7 @@ class stdReader(QtCore.QObject):
             start = time.time()
             # auto generate a database name
             databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
-            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
+            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.genIdx, self.progressBarSignal, self.flag)
             end = time.time()
             if self.flag.stop:
                 # user terminated...
