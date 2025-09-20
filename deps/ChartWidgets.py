@@ -725,7 +725,8 @@ class TrendChart(GraphicViewWithMenu):
             x_max += oh
             # view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
-                          yRange=(y_min, y_max))
+                          yRange=(y_min, y_max),
+                          padding=0.0)
             view.setLimits(xMin=x_min, xMax=x_max,      # avoid blank area
                            yMin=y_min, yMax=y_max,
                            minXRange=2)                 # avoid zoom too deep
@@ -738,10 +739,6 @@ class TrendChart(GraphicViewWithMenu):
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-        # set auto range for all view
-        # to fix the issue that y axis not synced
-        for v in self.view_list:
-            v.enableAutoRange(enable=True)
 
 
 class SVBarGraphItem(pg.BarGraphItem):
@@ -882,7 +879,8 @@ class HistoChart(TrendChart):
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             view.setRange(xRange=(0, bar_base), 
-                          yRange=(y_min, y_max))
+                          yRange=(y_min, y_max),
+                          padding=0.0)
             view.setLimits(xMin=0, xMax=bar_base+0.5,
                            yMin=y_min, yMax=y_max)
             # add to layout
@@ -899,10 +897,6 @@ class HistoChart(TrendChart):
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-        # set auto range for all view
-        # to fix the issue that y axis not synced
-        for v in self.view_list:
-            v.enableAutoRange(enable=True)
 
 
 class BinChart(GraphicViewWithMenu):
@@ -972,7 +966,7 @@ class BinChart(GraphicViewWithMenu):
                                    minXRange=2, minYRange=4)
                 view_bin.setRange(xRange=(0, x_max), 
                                   yRange=(-1, y_max),
-                                  disableAutoRange=False)
+                                  padding=0.0)
                 # add them to the same row
                 self.plotlayout.addItem(pitem, row=row, col=fid, rowspan=1, colspan=1)
                 # for 2nd+ plots
