@@ -575,31 +575,35 @@ class TrendChart(GraphicViewWithMenu):
         self.hilimitPen = pg.mkPen({"color": "#ff0000", "width": 3.5})
         self.lospecPen = pg.mkPen({"color": "#000080", "width": 3.5})
         self.hispecPen = pg.mkPen({"color": "#8b0000", "width": 3.5})
-        self.trendData = {}
+        self.testInfo = {}
+        self.testData = {}
+        self.test_num = -9999
+        self.test_name = ""
+        self.y_min = np.nan
+        self.y_max = np.nan
         self.validData = False
         
-    def setTrendData(self, trendData: dict):
-        settings = ss.getSetting()
-        self.trendData = trendData
-        testInfo: dict = trendData["TestInfo"]
+    def setData(self, dataDict: dict):
+        '''
+        Store info and data, calculate y axis limits for plotting
+        '''
+        self.testInfo: dict = dataDict["TestInfo"]
         # testData  key: fid, 
         #           value: a dict with site number as key and value: testDataDict of this site
-        testData: dict = trendData["Data"]
+        self.testData: dict = dataDict["Data"]
         # get display limit of y axis, should be 
         # the max|min of (lim, spec, data)
         y_min_list = []
         y_max_list = []
-        test_num = -9999
-        test_name = ""
-        for fid in testData.keys():
-            i_file = testInfo[fid]
-            d_file = testData[fid]
+        for fid in self.testData.keys():
+            i_file = self.testInfo[fid]
+            d_file = self.testData[fid]
             if len(i_file) == 0:
                 # this file doesn't contain
                 # current test, 
                 continue
-            test_num = i_file["TEST_NUM"]
-            test_name = i_file["TEST_NAME"]
+            self.test_num = i_file["TEST_NUM"]
+            self.test_name = i_file["TEST_NAME"]
             y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
@@ -617,23 +621,28 @@ class TrendChart(GraphicViewWithMenu):
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
-        y_min = np.nanmin(y_min_list)
-        y_max = np.nanmax(y_max_list)
-        # add 15% as overhead
-        oh = 0.15 * (y_max - y_min)
-        y_min -= oh
-        y_max += oh
+        self.y_min = np.nanmin(y_min_list)
+        self.y_max = np.nanmax(y_max_list)
+        # add 15% padding
+        padding = 0.15 * (self.y_max - self.y_min)
+        self.y_min -= padding
+        self.y_max += padding
         # it's common that y_min == y_max for FTR
         # in this case we need to manually assign y limits
-        if y_min == y_max:
-            y_min -= 1
-            y_max += 1
+        if self.y_min == self.y_max:
+            self.y_min -= 1
+            self.y_max += 1
+        # call draw() if valid
+        self.draw()
+        
+    def draw(self):
+        settings = ss.getSetting()
         # add title
-        self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(testInfo),
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+                                 rowspan=1, colspan=len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(testInfo.keys()):
+        for fid in sorted(self.testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = TrendViewBox()
             view.setFileID(fid)
@@ -642,8 +651,8 @@ class TrendChart(GraphicViewWithMenu):
             pitem.addLegend((0, 1), labelTextSize="12pt")
             # iterate site data and draw in a same plot item
             # if mean and median is enabled, draw them as well
-            sitesData = testData[fid]
-            infoDict = testInfo[fid]
+            sitesData = self.testData[fid]
+            infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
                 # skip this file if: 
                 #  - test is not in this file (empty sitesData)
@@ -713,7 +722,7 @@ class TrendChart(GraphicViewWithMenu):
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
-            if len(testInfo) > 1:
+            if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             pitem.setClipToView(True)
@@ -725,10 +734,10 @@ class TrendChart(GraphicViewWithMenu):
             x_max += oh
             # view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
-                          yRange=(y_min, y_max),
+                          yRange=(self.y_min, self.y_max),
                           padding=0.0)
             view.setLimits(xMin=x_min, xMax=x_max,      # avoid blank area
-                           yMin=y_min, yMax=y_max,
+                           yMin=self.y_min, yMax=self.y_max,
                            minXRange=2)                 # avoid zoom too deep
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
@@ -757,57 +766,14 @@ class SVBarGraphItem(pg.BarGraphItem):
 
 
 class HistoChart(TrendChart):
-    def setTrendData(self, trendData: dict):
+    def draw(self):
         settings = ss.getSetting()
-        self.trendData = trendData
-        testInfo: dict = trendData["TestInfo"]
-        # testData  key: fid, 
-        #           value: a dict with site number as key and value: testDataDict of this site
-        testData: dict = trendData["Data"]
-        # get display limit of y axis, should be 
-        # the max|min of (lim, spec, data)
-        y_min_list = []
-        y_max_list = []
-        test_num = -9999
-        test_name = ""
-        for fid in testData.keys():
-            i_file = testInfo[fid]
-            d_file = testData[fid]
-            if len(i_file) == 0:
-                # this file doesn't contain
-                # current test, 
-                continue
-            test_num = i_file["TEST_NUM"]
-            test_name = i_file["TEST_NAME"]
-            y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
-            y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
-            for d_site in d_file.values():
-                y_min_list.append(d_site["Min"])
-                y_max_list.append(d_site["Max"])
-                # at least one site data should be valid
-                self.validData |= (~np.isnan(d_site["Min"]) and 
-                                   ~np.isnan(d_site["Max"]))
-        # validData means the valid data exists, 
-        # set the flag to True and put it in top GUI
-        if not self.validData:
-            return
-        y_min = np.nanmin(y_min_list)
-        y_max = np.nanmax(y_max_list)
-        # add 15% as overhead
-        oh = 0.15 * (y_max - y_min)
-        y_min -= oh
-        y_max += oh
-        # it's common that y_min == y_max for FTR
-        # in this case we need to manually assign y limits
-        if y_min == y_max:
-            y_min -= 1
-            y_max += 1
         # add title
-        self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(testInfo),
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+                                 rowspan=1, colspan=len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(testInfo.keys()):
+        for fid in sorted(self.testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = SVBarViewBox()
             view.setFileID(fid)
@@ -816,8 +782,8 @@ class HistoChart(TrendChart):
             pitem.addLegend((0, 1), labelTextSize="12pt")
             # iterate site data and draw in a same plot item
             # if mean and median is enabled, draw them as well
-            sitesData = testData[fid]
-            infoDict = testInfo[fid]
+            sitesData = self.testData[fid]
+            infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
                 # skip this file if: 
                 #  - test is not in this file (empty sitesData)
@@ -875,14 +841,14 @@ class HistoChart(TrendChart):
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
             
-            if len(testInfo) > 1:
+            if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             view.setRange(xRange=(0, bar_base), 
-                          yRange=(y_min, y_max),
+                          yRange=(self.y_min, self.y_max),
                           padding=0.0)
             view.setLimits(xMin=0, xMax=bar_base+0.5,
-                           yMin=y_min, yMax=y_max)
+                           yMin=self.y_min, yMax=self.y_max)
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
             # link current viewbox to previous, 
@@ -891,7 +857,7 @@ class HistoChart(TrendChart):
             unit = infoDict["Unit"]
             pitem.getAxis("bottom").setTicks([ticks])
             if isFirstPlot:
-                pitem.getAxis("left").setLabel(test_name + f" ({unit})" if unit else "")
+                pitem.getAxis("left").setLabel(self.test_name + f" ({unit})" if unit else "")
             else:
                 pitem.getAxis("left").setStyle(showValues=False)
                 view.setYLink(self.view_list[0])
