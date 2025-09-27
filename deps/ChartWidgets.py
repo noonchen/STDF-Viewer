@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Sep 21 2025
+# Last Modified: Sat Sep 27 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -44,7 +44,11 @@ def addFileLabel(parent, fid: int, yoffset = -50):
     file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
 
 
-def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, rectL: int):
+def prepareHistoData(dutList: np.ndarray, 
+                     dataList: np.ndarray, 
+                     binCount: int, 
+                     rectBaseLevel: int, 
+                     horizontalBar: bool = True):
     '''
     returns hist, bin left edges, bin width, [(rect, duts)]
     '''
@@ -66,25 +70,52 @@ def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, r
         if h == 0:
             continue
         duts = bin_dut_dict[ind]
-        rect = QRectF(rectL, e, h, bin_width)
-        rectDutList.append( (rect, duts) )
+        
+        if horizontalBar:
+            left    = rectBaseLevel
+            top     = e
+            width   = h
+            height  = bin_width
+        else:
+            left    = e
+            top     = rectBaseLevel + h
+            width   = bin_width
+            height  = h
+        
+        rectDutList.append( (QRectF(left, top, width, height), 
+                             duts) )
     return hist, edges, bin_width, rectDutList
 
 
-def prepareBinRectList(y: np.ndarray, binCnt: np.ndarray, height: float, isHBIN: bool, binNumList: np.ndarray):
+def prepareBinRectList(binCenter: np.ndarray, 
+                       binCnt: np.ndarray, 
+                       binWidth: float, 
+                       isHBIN: bool, 
+                       binNumList: np.ndarray,
+                       horizontalBar: bool = True):
     '''
     return [(rect, (isHBIN, bin_num))]
     '''
     rectList = []
     
-    # y is the center of the rects in BinChart
-    for center, width, bin_num in zip(y, binCnt, binNumList):
-        if width == 0:
+    for center, cnt, bin_num in zip(binCenter, binCnt, binNumList):
+        if cnt == 0:
             continue
-        edge = center - height/2
-        rect = QRectF(0, edge, width, height)
-        rectList.append( (rect, (isHBIN, bin_num)) )
-    
+        edge = center - binWidth/2
+        
+        if horizontalBar:
+            left    = 0
+            top     = edge
+            width   = cnt
+            height  = binWidth
+        else:
+            left    = edge
+            top     = cnt
+            width   = binWidth
+            height  = cnt
+
+        rectList.append( (QRectF(left, top, width, height), 
+                          (isHBIN, bin_num)) )
     return rectList
 
 
@@ -763,6 +794,36 @@ class SVBarGraphItem(pg.BarGraphItem):
         
     def getRectDutList(self):
         return self.rectDutList
+    
+    def hoverEvent(self, ev):
+        if ev.exit:
+            new = np.zeros_like(self.data['hovered'])
+        else:
+            new = self._maskAt(ev.pos())
+
+        if self._hasHoverStyle():
+            self.data['sourceRect'][old ^ new] = 0
+            self.data['hovered'] = new
+            self.updateSpots()
+
+        points = self.points()[new][::-1]
+
+        # Show information about hovered points in a tool tip
+        vb = self.getViewBox()
+        if vb is not None and self.opts['tip'] is not None:
+            if len(points) > 0:
+                cutoff = 3
+                tip = [self.opts['tip'](x=pt.pos().x(), y=pt.pos().y(), data=pt.data())
+                        for pt in points[:cutoff]]
+                if len(points) > cutoff:
+                    tip.append('({} others...)'.format(len(points) - cutoff))
+                vb.setToolTip('\n\n'.join(tip))
+                self._toolTipCleared = False
+            elif not self._toolTipCleared:
+                vb.setToolTip("")
+                self._toolTipCleared = True
+
+        self.sigHovered.emit(self, points, ev)
 
 
 class HistoChart(TrendChart):
