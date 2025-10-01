@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Wed Oct 01 2025
+# Last Modified: Thu Oct 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -15,7 +15,6 @@ import io, os, sys, logging, datetime
 import subprocess, platform, sqlite3
 import numpy as np
 import tomlkit, tomllib
-from tomlkit.exceptions import ParseError
 from enum import IntEnum
 from random import choice
 from PyQt5 import QtGui, QtCore
@@ -73,7 +72,7 @@ class ColorSettingConfig(BaseModel):
         for i, color in v.items():
             try:
                 i_num = int(i)
-            except:
+            except ValueError:
                 continue
             
             if not isHexColor(color):
@@ -638,6 +637,9 @@ def openFileInOS(filepath: str):
 
 def revealFile(filepath: str):
     filepath = os.path.normpath(filepath)
+    if not os.path.exists(filepath):
+        return
+    
     if platform.system() == 'Darwin':       # macOS
         subprocess.call(('open', '-R', filepath))
     elif platform.system() == 'Windows':    # Windows
