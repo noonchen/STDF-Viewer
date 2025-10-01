@@ -14,7 +14,7 @@
 import io, os, sys, logging, datetime
 import subprocess, platform, sqlite3
 import numpy as np
-import tomlkit
+import tomlkit, tomllib
 from tomlkit.exceptions import ParseError
 from enum import IntEnum
 from random import choice
@@ -204,10 +204,12 @@ def updateRecentFolder(filepath: str):
 def loadConfigFile():
     global GlobalSetting
     try:
-        with open(sys.CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = tomlkit.load(f)
+        # use built-in tomllib to read, pydantic doesn't 
+        # support tomlkit container class
+        with open(sys.CONFIG_PATH, "rb") as f:
+            data = tomllib.load(f)
             GlobalSetting = SettingParams.model_validate(data)
-    except (FileNotFoundError, TypeError, ParseError):
+    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError):
         # any error occurs in config file reading, simply ignore
         pass
     
