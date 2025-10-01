@@ -1,0 +1,24 @@
+[project]
+name = "STDF-Viewer"
+version = "4.1.0"
+description = "STDF Viewer is a free, fast and powerful GUI tool to visualize STDF files"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.3.3",
+    "pydantic>=2.11.9",
+    "pyqt5>=5.15.11",
+    "pyqtgraph>=0.13.7",
+    "tomlkit>=0.13.3",
+    "xlsxwriter>=3.2.9",
+    "rust_stdf_helper",
+]
+
+[tool.uv.sources]
+rust_stdf_helper = { path = "./deps/rust_stdf_helper" }
+
+[dependency-groups]
+dev = [
+    "maturin>=1.9.4",
+    "pyinstaller>=6.16.0",
+]
