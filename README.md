@@ -1,6 +1,6 @@
 # STDF Viewer <img src="screenshots/stdfViewer.png" height=50>
 
-[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/noonchen/STDF-Viewer.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/noonchen/STDF-Viewer/context:python)  [![Codacy Badge](https://api.codacy.com/project/badge/Grade/d773b27672d34686bee9631f393d2ea6)](https://app.codacy.com/gh/noonchen/STDF-Viewer?utm_source=github.com&utm_medium=referral&utm_content=noonchen/STDF-Viewer&utm_campaign=Badge_Grade_Settings)  [![version](https://img.shields.io/github/v/release/noonchen/STDF-Viewer?include_prereleases)](https://github.com/noonchen/STDF-Viewer/releases/latest)  [![downloads](https://img.shields.io/github/downloads/noonchen/STDF-Viewer/total?label=total%20downloads)](https://github.com/noonchen/STDF-Viewer/releases)  [![license](https://img.shields.io/github/license/noonchen/STDF-Viewer)](https://github.com/noonchen/STDF-Viewer/blob/main/LICENSE)
+[![build](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml/badge.svg)](https://github.com/noonchen/STDF-Viewer/actions/workflows/build.yml)  [![Codacy Badge](https://api.codacy.com/project/badge/Grade/d773b27672d34686bee9631f393d2ea6)](https://app.codacy.com/gh/noonchen/STDF-Viewer?utm_source=github.com&utm_medium=referral&utm_content=noonchen/STDF-Viewer&utm_campaign=Badge_Grade_Settings)  [![version](https://img.shields.io/github/v/release/noonchen/STDF-Viewer?include_prereleases)](https://github.com/noonchen/STDF-Viewer/releases/latest)  [![downloads](https://img.shields.io/github/downloads/noonchen/STDF-Viewer/total?label=total%20downloads)](https://github.com/noonchen/STDF-Viewer/releases)  [![license](https://img.shields.io/github/license/noonchen/STDF-Viewer)](https://github.com/noonchen/STDF-Viewer/blob/main/LICENSE)
 
 STDF Viewer is a free, fast and powerful GUI tool to visualize STDF (semiconductor Standard Test Data Format) data files.
 
@@ -12,28 +12,30 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 
 ## Table of Content
 - [**Build**](#build)
+  - [Using `uv`](#using-uv)
+  - [Manual](#manual)
 - [**Usage**](#usage)
   - [Open STDF files](#open-stdf-files)
   - [Merge STDF files](#merge-stdf-files)
   - [Find failed test items](#find-failed-test-items)
-  - [Looking for DUTs' info](#looking-for-duts-info)
-  - [Display GDRs & DTRs info](#display-gdrs--dtrs-info)
+  - [Looking for DUT info](#looking-for-dut-info)
+  - [Display GDR \& DTR](#display-gdr--dtr)
   - [Analyzing test data](#analyzing-test-data)
-      - [Test data](#test-data)
-      - [Trend chart](#trend-chart)
-      - [Histogram](#histogram)
+    - [Test data](#test-data)
+    - [Trend chart](#trend-chart)
+    - [Histogram](#histogram)
   - [Analyzing bin distribution](#analyzing-bin-distribution)
   - [Viewing wafer maps](#viewing-wafer-maps)
   - [Read complete test data of specific DUTs](#read-complete-test-data-of-specific-duts)
-      - [From `DUT Summary`](#from-dut-summary)
-      - [From `Test Summary`](#from-test-summary)
-      - [From Plots](#from-plots)
+    - [From `DUT Summary`](#from-dut-summary)
+    - [From `Test Summary`](#from-test-summary)
+    - [From Plots](#from-plots)
   - [Generating an Excel report](#generating-an-excel-report)
   - [Settings](#settings)
   - [Utilities](#utilities)
-      - [Load / Save Session](#load--save-session)
-      - [Add Font](#add-font)
-      - [Converter](#converter)
+    - [Load \& Save Session](#load--save-session)
+    - [Add Font](#add-font)
+    - [Converter](#converter)
 - [**Having issues?**](#having-issues)
 - [**Acknowledgements**](#acknowledgements)
 - [**License**](#license)
@@ -41,34 +43,59 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 - [**Contributions**](#contributions)
 
 
-## Build
+## **Build**
 
-1. Install Python 3.9+ and [Rust](https://www.rust-lang.org/tools/install)
-2. Install python modules, `maturin` is required to build `rust_stdf_helper`.
+Prerequisites:
 
+- Python 3.11+
+- [Rust](https://www.rust-lang.org/tools/install)
+
+> [!NOTE]
+> You might need to install `patchelf` in some Linux distributions to build.
+
+### Using `uv`
+
+1. Install [uv](https://docs.astral.sh/uv/#installation).
+2. (Optional) Create a venv.
+
+```shell
+uv venv
 ```
+
+3. Install and build deps.
+
+```shell
+uv sync
+```
+
+### Manual
+
+1. Install python modules, `maturin` is required to build `rust_stdf_helper`.
+
+```shell
 pip install -r requirements.txt
-pip install maturin
+pip install maturin==1.9.4
 ```
 
-3. Build `rust_stdf_helper`
+2. Build `rust_stdf_helper`
 
-```
+```shell
 cd ./deps/rust_stdf_helper
 maturin build -f -r
 ```
 
-4. Install `rust_stdf_helper`, the wheel is located in `target/wheels/`.
-```
+3. Install `rust_stdf_helper`, the wheel is located in `target/wheels/`.
+
+```shell
 pip install /path/to/whl/file
 ```
 
-5. You can run `STDF-Viewer.py` directly, or using your favorite tool to bundle it to an executable.
+4. You can run `STDF-Viewer.py` directly, or using your favorite tool to bundle it to an executable.
 
 
-## Usage
+## **Usage**
 
-### **Open STDF files**
+### Open STDF files
 
 STDF Viewer supports files under STDF V4 and V4-2007 Specification, ZIP*, GZ and BZIP compressed STDF files can also be opened without decompression.
 
@@ -87,7 +114,7 @@ If multiple STDF files are selected, compare mode is automatically enabled, you 
 
 <br>
 
-### **Merge STDF files**
+### Merge STDF files
 
 (Introduced in V4.0.0) Open the merge panel by clicking `Merge` button on the toolbar, user can add multiple files in merge groups,
 files in a same group will be merged into a single file and index 0 is regarded as the first file in a group.
@@ -100,7 +127,7 @@ Adding multiple merge groups is also supported, in case you'd like to compare me
 
 <br>
 
-### **Find failed test items**
+### Find failed test items
 
 By clicking the `Fail Marker` button on the toolbar can paint all failed test items in <span style="color:red">red</span>, if the `Find Low Cpk` is enabled in `Settings`, test items with Cpk lower than the threshold (can be set in `Settings`) will be painted in <span style="color:orange">orange</span>.
 
@@ -108,7 +135,7 @@ By clicking the `Fail Marker` button on the toolbar can paint all failed test it
 
 <br>
 
-### **Looking for DUTs' info**
+### Looking for DUT info
 
 DUTs' info can be viewed in `Detailed Info` -> `DUT Summary`. Each line in the table represents a single DUT, and it will be marked in <span style="color:red">red</span> if this DUT is failed.
 
@@ -122,7 +149,7 @@ DUTs' info can be sorted by any columns. For instance, the screenshot below show
 
 <br>
 
-### **Display GDRs & DTRs info**
+### Display GDR & DTR
 
 All the GDR (Generic Data Record) and DTR (Datalog Text Record) will be listed in `Detailed Info` -> `GDR & DTR Summary`. The precise location of GDR & DTR is hard to trace, the relative location compared to PIR/PRR is given instead.
 
@@ -136,7 +163,7 @@ Same as DUT Summary table, use `Fetch All Rows` to load all data into the table.
 
 <br>
 
-### **Analyzing test data**
+### Analyzing test data
 
 ***Importance Notice**: Functional Tests (FTR) have no test value, instead, the test flag is used as the test value for drawing trend charts and histograms*
 
@@ -144,12 +171,12 @@ All test items in the STDF file will be shown in the `Test Selection`, in which 
 
 Statistic (Cpk, mean, std dev, etc.) of the test items in the selected heads and sites is displayed in `Test Statistics`.
 
-#### **Test data**
+#### Test data
 Select test item(s) and then navigate to `Detailed Info` -> `Test Summary`. Each row is a DUT that's been tested in the selected heads and sites, data of selected tests will be appended to the rightmost column.
 
 <img src="screenshots/test summary.png">
 
-#### **Trend chart**
+#### Trend chart
 Display interactive trend charts of test item(s), y axis is the value of the test item, x axis is the index of DUTs that's been tested in selected head and site. You can hover over the point to show more information.
 
 <img src="screenshots/trend interactive.png">
@@ -158,14 +185,14 @@ If the test have PAT enabled, e.g. high/low limits in PTRs are changing over dut
 
 <img src="screenshots/trend dynamic limit.png">
 
-#### **Histogram**
+#### Histogram
 Display interactive histograms of test item(s), y axis is the test value distribution. ~~you can hover over the rectangle to display its data range and dut counts.~~
 
 <img src="screenshots/histo.png">
 
 <br>
 
-### **Analyzing bin distribution**
+### Analyzing bin distribution
 Display histograms of dut counts of each hardware bin and software bin in selected heads and sites. 
 
 `Test Statistic` table displays the dut counts, bin name, bin number and precentage, bins with DUT counts of 0 will be hidden.
@@ -174,7 +201,7 @@ Display histograms of dut counts of each hardware bin and software bin in select
 
 <br>
 
-### **Viewing wafer maps**
+### Viewing wafer maps
 If STDF files contain wafer information (WCR, WIR, WRR records), the `Wafer Map` tab will be enabled. 
 
 There is a stacked wafer map at the top of `Wafer Selection` that summarizes the total count of fail dut in each (X, Y) coordinates of all wafermaps in the current file.
@@ -191,22 +218,22 @@ You can hide some software bins by clicking icons in the legend.
 
 <br>
 
-### **Read complete test data of specific DUTs**
+### Read complete test data of specific DUTs
 In some cases, it would be helpful to see the detailed test results of some DUTs, as shown below. It can be achieved by several methods in the STDF Viewer.
 
 <img src="screenshots/dut data table.png">
 
-#### **From `DUT Summary`**
+#### From `DUT Summary`
 Select row(s) of interest and right click, click `Read selected DUT data` in the context menu.
 
 <img src="screenshots/dut summary read dut data.png">
 
-#### **From `Test Summary`**
+#### From `Test Summary`
 Select cell(s) of interest and right click, click `Read selected DUT data` in the context menu.
 
 <img src="screenshots/test summary read dut data.png">
 
-#### **From Plots**
+#### From Plots
 Right click on a plot and select `Data Pick Mode`, select a region of interest then right click and select `Show Selected DUT Data`. Remember you can use legend icon to hide some data to help you select.
 
 <img src="screenshots/trend interactive 2.png">
@@ -219,7 +246,7 @@ Right click on a plot and select `Data Pick Mode`, select a region of interest t
 
 <br>
 
-### **Generating an Excel report**
+### Generating an Excel report
 Almost all information displayed on STDF Viewer can be exported to a Excel report.
 
 <img src="screenshots/report content selection.png">
@@ -241,31 +268,31 @@ The numbers of figures/data in the report are based on numbers of tests in `Expo
 
 <br>
 
-### **Settings**
+### Settings
 STDF Viewer offers a global setting UI, which can change the appearance of figures, colors of each sites/bins, etc. in STDF Viewer or the exported report. 
 
 The description should be self-explanatory, feel free to play it around.
 
 <img src="screenshots/setting.png">
 
-### **Utilities**
+### Utilities
 There is a `Utilities` button on toolbar from V4.0.0.
 
 <img src="screenshots/utilities.png">
 
-#### **Load & Save Session**
+#### Load & Save Session
 
 You can save current parse cache as a session so that you don't have to reload STDF files again, it can be helpful if you need to access some STDF multiple times.
 
-#### **Add Font**
+#### Add Font
 This process is much simpler then previous releases. All you need to do is select a `.ttf` font and select it in `Settings`!
 
-#### **Converter**
+#### Converter
 This tool can dump STDF records into a xlsx file, it can be used for debugging.
 
 <br>
 
-## Having issues?
+## **Having issues?**
 If you have encountered any error, follow these steps to create a report:
 1. Open STDF-Viewer and click `About` in the top-right corner.<img src="screenshots/how to open debug panel.png">
 2. Click `debug` button to show the debug panel.<img src="screenshots/debug panel.png">
@@ -273,7 +300,7 @@ If you have encountered any error, follow these steps to create a report:
 4. Click `Save Result` and create an issue on github.
 
 
-## Acknowledgements
+## **Acknowledgements**
 
 STDF Viewer uses code from the following open sources, much thanks to their authors.
  - [rust-stdf](https://github.com/noonchen/rust-stdf) <- I'm the author
@@ -292,7 +319,7 @@ Not used in version 4.0.0 and above:
 
 <br>
 
-## License
+## **License**
 
 STDF Viewer is licensed under GPL V3.0, which means the software is free but I don't take any responsibilites if anything goes wrong due to the usage of the STDF Viewer, it is always safe to be skeptical about the results or images on the STDF Viewer.
 
@@ -300,12 +327,12 @@ The icons that I designed for STDF Viewer is licensed under [Attribution-NonComm
 
 <br>
 
-## Download
+## **Download**
 
 [Click here](https://github.com/noonchen/STDF-Viewer/releases)
 
 <br>
 
-## Contributions
+## **Contributions**
 
 Pull requests and bug reports are always welcomed. 

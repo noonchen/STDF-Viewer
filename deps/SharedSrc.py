@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Thu Oct 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -12,9 +12,9 @@
 #
 
 import io, os, sys, logging, datetime
-import toml, subprocess, platform, sqlite3
-import rust_stdf_helper
+import subprocess, platform, sqlite3
 import numpy as np
+import tomlkit, tomllib
 from enum import IntEnum
 from random import choice
 from PyQt5 import QtGui, QtCore
@@ -22,72 +22,138 @@ from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
+from pydantic import BaseModel, Field, field_validator, field_serializer
+from rust_stdf_helper import get_icon_src
 
 
+class TrendPlotConfig(BaseModel):
+    show_hilim: bool = Field(True, alias="Show Upper Limit (Trend)")
+    show_lolim: bool = Field(True, alias="Show Lower Limit (Trend)")
+    show_hispec: bool = Field(True, alias="Show High Specification (Trend)")
+    show_lospec: bool = Field(True, alias="Show Low Specification (Trend)")
+    show_median: bool = Field(True, alias="Show Median Line (Trend)")
+    show_mean: bool = Field(True, alias="Show Mean Line (Trend)")
 
-class SettingParams:
-    def __init__(self):
-        # trend
-        self.showHL_trend = True
-        self.showLL_trend = True
-        self.showHSpec_trend = True
-        self.showLSpec_trend = True
-        self.showMed_trend = True
-        self.showMean_trend = True
-        # histo
-        self.showHL_histo = True
-        self.showLL_histo = True
-        self.showHSpec_histo = True
-        self.showLSpec_histo = True
-        self.showMed_histo = True
-        self.showMean_histo = True
-        self.showBoxp_histo = True
-        self.showBoxpOl_histo = True
-        self.showBars_histo = True
-        self.binCount = 30
-        self.showSigma = "3, 6, 9"
-        # PPQQ
-        self.x_ppqq = "Normal Quantiles"
-        self.y_ppqq = "Data Quantiles"
-        # General
-        self.language = "English"
-        self.font = "JetBrains Mono"
-        self.recentFolder = ""
-        self.dataNotation = "G"  # F E G stand for float, Scientific, automatic
-        self.dataPrecision = 3
-        self.checkCpk = False
-        self.cpkThreshold = 1.33
-        self.sortTestList = "Original"
-        self.fileSymbol = {0: "o"}
-        # colors
-        self.siteColor = {-1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
-                          3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"}
-        self.sbinColor = {}
-        self.hbinColor = {}
+
+class HistoPlotConfig(BaseModel):
+    show_hilim: bool = Field(True, alias="Show Upper Limit (Histo)")
+    show_lolim: bool = Field(True, alias="Show Lower Limit (Histo)")
+    show_hispec: bool = Field(True, alias="Show High Specification (Histo)")
+    show_lospec: bool = Field(True, alias="Show Low Specification (Histo)")
+    show_median: bool = Field(True, alias="Show Median Line (Histo)")
+    show_mean: bool = Field(True, alias="Show Mean Line (Histo)")
+    show_boxp: bool = Field(True, alias="Show Boxplot")
+    show_boxpol: bool = Field(True, alias="Show Boxplot Outlier")
+    show_histobars: bool = Field(True, alias="Show Histogram Bars")
+    bin_count: int = Field(30, alias="Bin Count")
+    sigma_lines: str = Field("3, 6, 9", alias="δ Lines")
+
+
+class PPQQPlotConfig(BaseModel):
+    show_ref: bool = Field(True, alias="Show Reference Line")
+    axis_mode: str = Field("X: Original; Y: Theoretical", alias="Axis Mode")
+
+
+class ColorSettingConfig(BaseModel):
+    site_colors: dict[int, str] = Field(
+        default_factory=lambda: {
+            -1: "#00CC00", 0: "#00B3FF", 1: "#FF9300", 2: "#EC4EFF", 
+            3: "#00FFFF", 4: "#AA8D00", 5: "#FFB1FF", 6: "#929292", 7: "#FFFB00"
+            }, 
+        alias="Site Colors"
+        )
+    sbin_colors: dict[int, str] = Field(default_factory=dict, alias="Software Bin Colors")
+    hbin_colors: dict[int, str] = Field(default_factory=dict, alias="Hardware Bin Colors")
+
+    @field_validator("site_colors", "sbin_colors", "hbin_colors", mode="before")
+    @classmethod
+    def validate_colors(cls, v: dict):
+        new_v = {}
+        for i, color in v.items():
+            try:
+                i_num = int(i)
+            except ValueError:
+                continue
+            
+            if not isHexColor(color):
+                # ignore invalid color string
+                continue
+            
+            new_v[i_num] = color
+        return new_v
+
+    @field_serializer("site_colors", "sbin_colors", "hbin_colors")
+    def serialize_colors(self, v: dict[int, str], _info):
+        return {str(k): v for k, v in v.items()}
+
+
+class GeneralConfig(BaseModel):
+    language: str = Field("English", alias="Language")
+    font: str = Field("JetBrains Mono", alias="Font")
+    recent_dir: str = Field("", alias="Recent Folder")
+    data_notation: str = Field("G", alias="Data Notation")  # F E G stand for float, Scientific, automatic
+    data_precision: int = Field(3, alias="Data Precison")
+    check_cpk: bool = Field(False, alias="Search Low Cpk")
+    cpk_thrsh: float = Field(1.33, alias="Cpk Warning Threshold")
+    sort_tlist: str = Field("Original", alias="Sort TestList")
+    id_type: str = Field("Number + Name", alias="Test Item Identifier")
+    hide_inf: bool = Field(True, alias="Hide Infinite Value")
+    gen_db_idx: bool = Field(False, alias="Create DB Index")
+    file_symbols: dict[int, str] = Field(
+        default_factory=lambda: {0: "o"},
+        alias="File Symbols (Scatter Points)"
+    )
+    
+    @field_validator("file_symbols", mode="before")
+    @classmethod
+    def validate_symbols(cls, v: dict):
+        new_v = {}
+        for i, symbol in v.items():
+            try:
+                i_num = int(i)
+            except:
+                continue
+            
+            if not isValidSymbol(symbol):
+                # ignore unsupported symbol
+                continue
+            
+            new_v[i_num] = symbol
+        return v
+    
+    @field_serializer("file_symbols")
+    def serialize_file_symbols(self, v: dict[int, str], _info):
+        return {str(k): v for k, v in v.items()}
+
+
+class SettingParams(BaseModel):
+    gen: GeneralConfig = Field(default_factory=GeneralConfig, alias="General")
+    trend: TrendPlotConfig = Field(default_factory=TrendPlotConfig, alias="Trend Plot")
+    histo: HistoPlotConfig = Field(default_factory=HistoPlotConfig, alias="Histo Plot")
+    ppqq: PPQQPlotConfig = Field(default_factory=PPQQPlotConfig, alias="PP/QQ Plot")
+    color: ColorSettingConfig = Field(default_factory=ColorSettingConfig, alias="Color Setting")
+
+    class Config:
+        validate_by_name = True  # allow dumping with field names
+        populate_by_name = True
         
+    def updateConfig(self, new: "SettingParams"):
+        self.gen = new.gen
+        self.trend = new.trend
+        self.histo = new.histo
+        self.ppqq = new.ppqq
+        # need to merge instead of replacing
+        self.color.site_colors.update(new.color.site_colors)
+        self.color.sbin_colors.update(new.color.sbin_colors)
+        self.color.hbin_colors.update(new.color.hbin_colors)
+
+    def dumpConfig(self, path: str) -> None:
+        # dump with aliases so the TOML matches your original style
+        with open(path, "w", encoding="utf-8") as f:
+            tomlkit.dump(self.model_dump(by_alias=True), f)
+
     def getFloatFormat(self) -> str:
-        return "%%.%d%s" % (self.dataPrecision, self.dataNotation)
-
-
-# setting attr to human string
-settingNamePair = [("showHL_trend", "Show Upper Limit (Trend)"), ("showLL_trend", "Show Lower Limit (Trend)"), 
-                   ("showHSpec_trend", "Show High Specification (Trend)"), ("showLSpec_trend", "Show Low Specification (Trend)"), 
-                   ("showMed_trend", "Show Median Line (Trend)"), ("showMean_trend", "Show Mean Line (Trend)"),
-                   # histo
-                   ("showHL_histo", "Show Upper Limit (Histo)"), ("showLL_histo", "Show Lower Limit (Histo)"), 
-                   ("showHSpec_histo", "Show High Specification (Histo)"), ("showLSpec_histo", "Show Low Specification (Histo)"), 
-                   ("showMed_histo", "Show Median Line (Histo)"), ("showMean_histo", "Show Mean Line (Histo)"), 
-                   ("showBoxp_histo", "Show Boxplot"), ("showBoxpOl_histo", "Show Boxplot Outlier"), 
-                   ("showBars_histo", "Show Histogram Bars"), ("binCount", "Bin Count"), ("showSigma", "δ Lines"),
-                   # PPQQ
-                   ("x_ppqq", "X of Normal Plot"), ("y_ppqq", "Y of Normal Plot"), 
-                   # general
-                   ("language", "Language"), ("font", "Font"), ("recentFolder", "Recent Folder"), 
-                   ("dataNotation", "Data Notation"), ("dataPrecision", "Data Precison"), 
-                   ("cpkThreshold", "Cpk Warning Threshold"), ("checkCpk", "Search Low Cpk"), ("sortTestList", "Sort TestList"),
-                   ("fileSymbol", "File Symbols (Scatter Points)"), 
-                   # color
-                   ("siteColor", "Site Colors"), ("sbinColor", "Software Bin Colors"), ("hbinColor", "Hardware Bin Colors")]
+        return f"%.{self.gen.data_precision}{self.gen.data_notation}"
 
 
 # This is the setting that will
@@ -99,13 +165,6 @@ def getSetting() -> SettingParams:
     return GlobalSetting
 
 
-def updateSetting(**kwargs):
-    global GlobalSetting
-    for key, value in kwargs.items():
-        if key in GlobalSetting.__dict__:
-            setattr(GlobalSetting, key, value)
-
-
 def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dict):
     """
     Update default color for hbin & sbin, needed
@@ -114,11 +173,12 @@ def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dic
     global GlobalSetting
     # generate site color if not exist
     for site in availableSites:
-        if site not in GlobalSetting.siteColor:
-            GlobalSetting.siteColor[site] = rHEX()
+        if site not in GlobalSetting.color.site_colors:
+            GlobalSetting.color.site_colors[site] = rHEX()
+            
     # init bin color by bin info
-    for (binColorDict, bin_info) in [(GlobalSetting.sbinColor, SBIN_Info),
-                                     (GlobalSetting.hbinColor, HBIN_Info)]:
+    for (binColorDict, bin_info) in [(GlobalSetting.color.sbin_colors, SBIN_Info),
+                                     (GlobalSetting.color.hbin_colors, HBIN_Info)]:
         for bin_num in bin_info.keys():
             binType = bin_info[bin_num]["BIN_PF"]   # P, F or Unknown
             defaultColor = "#00CC00" if binType == "P" else ("#CC0000" if binType == "F" else "#FE7B00")
@@ -130,105 +190,31 @@ def setSettingDefaultSymbol(num_files: int):
     """
     Update file symbols if multiple files loaded
     """    
-    global GlobalSetting
     for fid in range(num_files):
-        if fid not in GlobalSetting.fileSymbol:
-            GlobalSetting.fileSymbol[fid] = rSymbol()
+        if fid not in GlobalSetting.gen.file_symbols:
+            GlobalSetting.gen.file_symbols[fid] = rSymbol()
 
 
 def updateRecentFolder(filepath: str):
     dirpath = os.path.dirname(filepath)
-    # update settings
-    updateSetting(recentFolder = dirpath)
+    GlobalSetting.gen.recent_dir = dirpath
 
 
 def loadConfigFile():
     global GlobalSetting
     try:
-        configData = toml.load(sys.CONFIG_PATH)
-        configString = dict([(v, k) for (k, v) in settingNamePair])
-        for sec, secDict in configData.items():
-            if sec == "Color Setting":
-                # convert string key (site/sbin/hbin) to int
-                for humanString, colorDict in secDict.items():
-                    if humanString in configString:
-                        attr = configString[humanString]    # e.g. siteColor
-                        oldColorDict = getattr(GlobalSetting, attr)
-                        for numString, hexColor in colorDict.items():
-                            try:
-                                num = int(numString)
-                            except ValueError:
-                                continue        # skip the invalid site or bin
-                            if isHexColor(hexColor): 
-                                oldColorDict[num] = hexColor
-            else:
-                for humanString, param in secDict.items():
-                    if humanString in configString:
-                        attr = configString[humanString]    # e.g. showHL_trend
-                        # file symbol in general section is a dict
-                        if attr == "fileSymbol":
-                            oldSymbolDict = getattr(GlobalSetting, attr)
-                            for numString, symbol in param.items():
-                                try:
-                                    num = int(numString)
-                                except ValueError:
-                                    continue
-                                if isValidSymbol(symbol):
-                                    oldSymbolDict[num] = symbol
-                            continue
-                        if type(param) == type(getattr(GlobalSetting, attr)):
-                            
-                            setattr(GlobalSetting, attr, param)
-    except (FileNotFoundError, TypeError, toml.TomlDecodeError):
+        # use built-in tomllib to read, pydantic doesn't 
+        # support tomlkit container class
+        with open(sys.CONFIG_PATH, "rb") as f:
+            data = tomllib.load(f)
+            GlobalSetting = SettingParams.model_validate(data)
+    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError):
         # any error occurs in config file reading, simply ignore
         pass
     
     
 def dumpConfigFile():
-    # save data to toml config
-    configData = {"General": {},
-                  "Trend Plot": {},
-                  "Histo Plot": {},
-                  "PP/QQ Plot": {},
-                  "Color Setting": {}}
-    configName = dict(settingNamePair)
-    for k, v in GlobalSetting.__dict__.items():
-        if k in ["language", "font", "recentFolder", 
-                 "dataNotation", "dataPrecision", 
-                 "checkCpk", "cpkThreshold", "sortTestList"]:
-            # General
-            configData["General"][configName[k]] = v
-            
-        elif k in ["showHL_trend", "showLL_trend", 
-                   "showHSpec_trend", "showLSpec_trend", 
-                   "showMed_trend", "showMean_trend"]:
-            # Trend
-            configData["Trend Plot"][configName[k]] = v
-            
-        elif k in ["showHL_histo", "showLL_histo", 
-                   "showHSpec_histo", "showLSpec_histo", 
-                   "showMed_histo", "showMean_histo", 
-                   "showBoxp_histo", "showBoxpOl_histo", 
-                   "showBars_histo", "binCount", "showSigma"]:
-            # Histo
-            configData["Histo Plot"][configName[k]] = v
-
-        elif k in ["x_ppqq", "y_ppqq"]:
-            # PPQQ
-            configData["PP/QQ Plot"][configName[k]] = v
-        
-        elif k in ["fileSymbol", "siteColor", "sbinColor", "hbinColor"]:
-            # dict
-            # change Int key to string, since toml only support string keys
-            v = dict([(str(intKey), color) for intKey, color in v.items()])
-            if k == "fileSymbol":
-                section = "General"
-            else:
-                section = "Color Setting"
-            configData[section][configName[k]] = v
-            
-    with open(sys.CONFIG_PATH, "w+", encoding="utf-8") as fd:
-        toml.dump(configData, fd)
+    GlobalSetting.dumpConfig(sys.CONFIG_PATH)
 
 
 def loadFonts():
@@ -271,7 +257,7 @@ convert2QIcon = lambda raw: \
 def getIcon(name: str) -> QtGui.QIcon:
     global iconDict
     if name not in iconDict:
-        iconDict[name] = convert2QIcon(rust_stdf_helper.get_icon_src(name))
+        iconDict[name] = convert2QIcon(get_icon_src(name))
     return iconDict[name]
 
 
@@ -480,7 +466,7 @@ def calc_cpk(L:float, H:float, data:np.ndarray) -> tuple:
     sdev = np.nanstd(data)
     mean = np.nanmean(data)
     
-    if np.isnan(L) or np.isnan(H):
+    if np.isnan(L) or np.isnan(H) or np.isinf(sdev):
         return mean, sdev, np.nan
     
     T = H - L
@@ -651,6 +637,9 @@ def openFileInOS(filepath: str):
 
 def revealFile(filepath: str):
     filepath = os.path.normpath(filepath)
+    if not os.path.exists(filepath):
+        return
+    
     if platform.system() == 'Darwin':       # macOS
         subprocess.call(('open', '-R', filepath))
     elif platform.system() == 'Windows':    # Windows
@@ -787,7 +776,7 @@ def validateSession(dbPath: str):
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
-           "getSetting", "updateSetting", "updateRecentFolder", 
+           "getSetting", "updateRecentFolder", 
            "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
            "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 

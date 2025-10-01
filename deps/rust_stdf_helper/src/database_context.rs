@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Wed Nov 23 2022
+// Last Modified: Sun Sep 21 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -27,6 +27,10 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 DROP TABLE IF EXISTS TestPin_Map;
                                 DROP TABLE IF EXISTS Dynamic_Limits;
                                 DROP TABLE IF EXISTS Datalog;
+                                DROP INDEX IF EXISTS dutKey;
+                                DROP INDEX IF EXISTS ptrKey;
+                                DROP INDEX IF EXISTS mprKey;
+                                DROP INDEX IF EXISTS ftrKey;
                                 VACUUM;
 
                                 BEGIN;
@@ -183,8 +187,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         Value TEXT, 
                                                         AfterDUTIndex INTEGER,
                                                         isBeforePRR INTEGER);
-                                                        
-                                DROP INDEX IF EXISTS dutKey;
+
                                 CREATE INDEX 
                                     dutKey 
                                 ON 
@@ -263,7 +266,7 @@ static INSERT_FTR_DATA: &str = "INSERT OR REPLACE INTO
                                 VALUES 
                                     (:DUTIndex, :TEST_ID, :TEST_FLAG);";
 
-static INSERT_TEST_INFO: &str = "INSERT INTO 
+static INSERT_TEST_INFO: &str = "INSERT OR IGNORE INTO 
                                     Test_Info 
                                 VALUES 
                                     (:Fid, :TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
@@ -349,6 +352,21 @@ static INSERT_DATALOG: &str = "INSERT INTO
                                     Datalog 
                                 VALUES 
                                     (:Fid, :RecordType, :Value, :AfterDUTIndex ,:isBeforePRR);";
+
+static CREATE_INDEX_FOR_QUERY: &str = "CREATE INDEX 
+                                            ptrKey
+                                        ON 
+                                            PTR_Data (TEST_ID, DUTIndex);
+
+                                        CREATE INDEX 
+                                            mprKey
+                                        ON 
+                                            MPR_Data (TEST_ID, DUTIndex);
+
+                                        CREATE INDEX 
+                                            ftrKey
+                                        ON 
+                                            FTR_Data (TEST_ID, DUTIndex);";
 
 static COMMIT_AND_SET_LOCKING: &str = "COMMIT;
                                         PRAGMA locking_mode = NORMAL";
@@ -582,7 +600,10 @@ impl<'con> DataBaseCtx<'con> {
     }
 
     #[inline(always)]
-    pub fn finalize(self) -> Result<(), StdfHelperError> {
+    pub fn finalize(self, build_index: bool) -> Result<(), StdfHelperError> {
+        if build_index {
+            self.db.execute_batch(CREATE_INDEX_FOR_QUERY)?;
+        }
         self.db.execute_batch(COMMIT_AND_SET_LOCKING)?;
         self.insert_file_name_stmt.finalize()?;
         self.update_file_list_stmt.finalize()?;

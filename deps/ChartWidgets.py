@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Wed Oct 01 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -44,10 +44,15 @@ def addFileLabel(parent, fid: int, yoffset = -50):
     file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
 
 
-def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, rectL: int):
+def prepareHistoData(dutList: np.ndarray, 
+                     dataList: np.ndarray, 
+                     binCount: int, 
+                     rectBaseLevel: int, 
+                     horizontalBar: bool = True):
     '''
-    returns hist, bin left edges, bin width, [(rect, duts)]
+    returns hist, bin left edges, bin width, [(rect, duts)], tipData
     '''
+    ffmt = ss.getSetting().getFloatFormat()
     hist, edges = np.histogram(dataList, bins=binCount)
     bin_width = edges[1]-edges[0]
     # get left edges
@@ -62,29 +67,63 @@ def prepareHistoData(dutList: np.ndarray, dataList: np.ndarray, binCount: int, r
         bin_dut_dict.setdefault(ind-1, []).append(dut)
     # list of (rect, duts) for data picking
     rectDutList = []
+    # list of tip data for hovering display
+    tipData = []
     for ind, (h, e) in enumerate(zip(hist, edges)):
+        # tipData must be the same length of hist/edges,
+        # add data even if h == 0
+        tipData.append( ("[{}, {})".format(ffmt % e, 
+                                           ffmt % (e + bin_width)), 
+                         h) )
         if h == 0:
             continue
         duts = bin_dut_dict[ind]
-        rect = QRectF(rectL, e, h, bin_width)
-        rectDutList.append( (rect, duts) )
-    return hist, edges, bin_width, rectDutList
+        
+        if horizontalBar:
+            left    = rectBaseLevel
+            top     = e
+            width   = h
+            height  = bin_width
+        else:
+            left    = e
+            top     = rectBaseLevel + h
+            width   = bin_width
+            height  = h
+        
+        rectDutList.append( (QRectF(left, top, width, height), 
+                             duts) )
+    return hist, edges, bin_width, rectDutList, tipData
 
 
-def prepareBinRectList(y: np.ndarray, binCnt: np.ndarray, height: float, isHBIN: bool, binNumList: np.ndarray):
+def prepareBinRectList(binCenter: np.ndarray, 
+                       binCnt: np.ndarray, 
+                       binWidth: float, 
+                       isHBIN: bool, 
+                       binNumList: np.ndarray,
+                       horizontalBar: bool = True):
     '''
     return [(rect, (isHBIN, bin_num))]
     '''
     rectList = []
     
-    # y is the center of the rects in BinChart
-    for center, width, bin_num in zip(y, binCnt, binNumList):
-        if width == 0:
+    for center, cnt, bin_num in zip(binCenter, binCnt, binNumList):
+        if cnt == 0:
             continue
-        edge = center - height/2
-        rect = QRectF(0, edge, width, height)
-        rectList.append( (rect, (isHBIN, bin_num)) )
-    
+        edge = center - binWidth/2
+        
+        if horizontalBar:
+            left    = 0
+            top     = edge
+            width   = cnt
+            height  = binWidth
+        else:
+            left    = edge
+            top     = cnt
+            width   = binWidth
+            height  = cnt
+
+        rectList.append( (QRectF(left, top, width, height), 
+                          (isHBIN, bin_num)) )
     return rectList
 
 
@@ -575,31 +614,35 @@ class TrendChart(GraphicViewWithMenu):
         self.hilimitPen = pg.mkPen({"color": "#ff0000", "width": 3.5})
         self.lospecPen = pg.mkPen({"color": "#000080", "width": 3.5})
         self.hispecPen = pg.mkPen({"color": "#8b0000", "width": 3.5})
-        self.trendData = {}
+        self.testInfo = {}
+        self.testData = {}
+        self.test_num = -9999
+        self.test_name = ""
+        self.y_min = np.nan
+        self.y_max = np.nan
         self.validData = False
         
-    def setTrendData(self, trendData: dict):
-        settings = ss.getSetting()
-        self.trendData = trendData
-        testInfo: dict = trendData["TestInfo"]
+    def setData(self, dataDict: dict):
+        '''
+        Store info and data, calculate y axis limits for plotting
+        '''
+        self.testInfo: dict = dataDict["TestInfo"]
         # testData  key: fid, 
         #           value: a dict with site number as key and value: testDataDict of this site
-        testData: dict = trendData["Data"]
+        self.testData: dict = dataDict["Data"]
         # get display limit of y axis, should be 
         # the max|min of (lim, spec, data)
         y_min_list = []
         y_max_list = []
-        test_num = -9999
-        test_name = ""
-        for fid in testData.keys():
-            i_file = testInfo[fid]
-            d_file = testData[fid]
+        for fid in self.testData.keys():
+            i_file = self.testInfo[fid]
+            d_file = self.testData[fid]
             if len(i_file) == 0:
                 # this file doesn't contain
                 # current test, 
                 continue
-            test_num = i_file["TEST_NUM"]
-            test_name = i_file["TEST_NAME"]
+            self.test_num = i_file["TEST_NUM"]
+            self.test_name = i_file["TEST_NAME"]
             y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
@@ -617,23 +660,28 @@ class TrendChart(GraphicViewWithMenu):
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
-        y_min = np.nanmin(y_min_list)
-        y_max = np.nanmax(y_max_list)
-        # add 15% as overhead
-        oh = 0.15 * (y_max - y_min)
-        y_min -= oh
-        y_max += oh
+        self.y_min = np.nanmin(y_min_list)
+        self.y_max = np.nanmax(y_max_list)
+        # add 15% padding
+        padding = 0.15 * (self.y_max - self.y_min)
+        self.y_min -= padding
+        self.y_max += padding
         # it's common that y_min == y_max for FTR
         # in this case we need to manually assign y limits
-        if y_min == y_max:
-            y_min -= 1
-            y_max += 1
+        if self.y_min == self.y_max:
+            self.y_min -= 1
+            self.y_max += 1
+        # call draw() if valid
+        self.draw()
+        
+    def draw(self):
+        settings = ss.getSetting()
         # add title
-        self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(testInfo),
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+                                 rowspan=1, colspan=len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(testInfo.keys()):
+        for fid in sorted(self.testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = TrendViewBox()
             view.setFileID(fid)
@@ -642,8 +690,8 @@ class TrendChart(GraphicViewWithMenu):
             pitem.addLegend((0, 1), labelTextSize="12pt")
             # iterate site data and draw in a same plot item
             # if mean and median is enabled, draw them as well
-            sitesData = testData[fid]
-            infoDict = testInfo[fid]
+            sitesData = self.testData[fid]
+            infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
                 # skip this file if: 
                 #  - test is not in this file (empty sitesData)
@@ -665,8 +713,8 @@ class TrendChart(GraphicViewWithMenu):
                 x_max_list.append(np.nanmax(x))
                 dyL.update(data_per_site.get("dyLLimit", {}))
                 dyH.update(data_per_site.get("dyHLimit", {}))
-                fsymbol = settings.fileSymbol[fid]
-                siteColor = settings.siteColor[site]
+                fsymbol = settings.gen.file_symbols[fid]
+                siteColor = settings.color.site_colors[site]
                 # test value
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
@@ -681,30 +729,30 @@ class TrendChart(GraphicViewWithMenu):
                 pitem.addItem(pdi)
                 # mean
                 mean = data_per_site["Mean"]
-                if settings.showMean_trend and ~np.isnan(mean):
+                if settings.trend.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
                     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
                                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
                 # median
                 median = data_per_site["Median"]
-                if settings.showMed_trend and ~np.isnan(median):
+                if settings.trend.show_median and ~np.isnan(median) and ~np.isinf(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.showHL_trend), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.showLSpec_trend), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.showHSpec_trend)]:
+            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+                                              ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
+                                              ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec), 
+                                              ("HSpec", "High Spec", self.hispecPen, settings.trend.show_hispec)]:
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim):
+                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
                     pitem.addLine(y=lim, pen=pen, name=name, 
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
             # dynamic limits
-            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.showHL_trend)]:
+            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.trend.show_hilim)]:
                 if enabled and len(dyDict) > 0:
                     x = np.array(sorted(dyDict.keys()))
                     dylims = np.array([dyDict[i] for i in x])
@@ -713,7 +761,7 @@ class TrendChart(GraphicViewWithMenu):
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
-            if len(testInfo) > 1:
+            if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             pitem.setClipToView(True)
@@ -725,9 +773,10 @@ class TrendChart(GraphicViewWithMenu):
             x_max += oh
             # view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
-                          yRange=(y_min, y_max))
+                          yRange=(self.y_min, self.y_max),
+                          padding=0.0)
             view.setLimits(xMin=x_min, xMax=x_max,      # avoid blank area
-                           yMin=y_min, yMax=y_max,
+                           yMin=self.y_min, yMax=self.y_max,
                            minXRange=2)                 # avoid zoom too deep
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
@@ -738,10 +787,6 @@ class TrendChart(GraphicViewWithMenu):
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-        # set auto range for all view
-        # to fix the issue that y axis not synced
-        for v in self.view_list:
-            v.enableAutoRange(enable=True)
 
 
 class SVBarGraphItem(pg.BarGraphItem):
@@ -751,66 +796,63 @@ class SVBarGraphItem(pg.BarGraphItem):
     def __init__(self, **opts):
         super().__init__(**opts)
         self.rectDutList = []
+        self.opts['tip'] = None
+        self._toolTipCleared = True
         
     def setRectDutList(self, rdl: list):
         self.rectDutList = rdl
         
     def getRectDutList(self):
         return self.rectDutList
+    
+    def setHoverTipFunction(self, tipFunc):
+        # tipFunc(arg1, arg2):
+        # arg1: str, bar description
+        # arg2: int, bar height/count
+        #
+        # the value of args are get from `tipData`
+        self.opts['tip'] = tipFunc
+    
+    def setTipData(self, tipData: list):
+        # a list of (description, height/count) 
+        # using same order of bar data (x0, y0, etc.)
+        self.tipData = tipData
+    
+    def hoverEvent(self, ev):
+        hoveredRectIdx = []
+        if not ev.exit:
+            # found which rects contain the hover position,
+            # and store their indexes
+            for idx, rect in enumerate(self._rectarray.instances()):
+                if rect.contains(ev.pos()):
+                    hoveredRectIdx.append(idx)
+        
+        # Show information about hovered points in a tool tip
+        vb = self.getViewBox()
+        if vb is not None and self.opts['tip'] is not None and len(self.tipData) > 0:
+            numHovered = len(hoveredRectIdx)
+            if numHovered > 0:
+                cutoff = 3
+                tip = [self.opts['tip'](*self.tipData[idx])
+                        for idx in hoveredRectIdx[:cutoff]]
+                if numHovered > cutoff:
+                    tip.append('({} others...)'.format(numHovered - cutoff))
+                vb.setToolTip('\n\n'.join(tip))
+                self._toolTipCleared = False
+            elif not self._toolTipCleared:
+                vb.setToolTip("")
+                self._toolTipCleared = True
 
 
 class HistoChart(TrendChart):
-    def setTrendData(self, trendData: dict):
+    def draw(self):
         settings = ss.getSetting()
-        self.trendData = trendData
-        testInfo: dict = trendData["TestInfo"]
-        # testData  key: fid, 
-        #           value: a dict with site number as key and value: testDataDict of this site
-        testData: dict = trendData["Data"]
-        # get display limit of y axis, should be 
-        # the max|min of (lim, spec, data)
-        y_min_list = []
-        y_max_list = []
-        test_num = -9999
-        test_name = ""
-        for fid in testData.keys():
-            i_file = testInfo[fid]
-            d_file = testData[fid]
-            if len(i_file) == 0:
-                # this file doesn't contain
-                # current test, 
-                continue
-            test_num = i_file["TEST_NUM"]
-            test_name = i_file["TEST_NAME"]
-            y_min_list.extend([i_file["LLimit"], i_file["LSpec"]])
-            y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
-            for d_site in d_file.values():
-                y_min_list.append(d_site["Min"])
-                y_max_list.append(d_site["Max"])
-                # at least one site data should be valid
-                self.validData |= (~np.isnan(d_site["Min"]) and 
-                                   ~np.isnan(d_site["Max"]))
-        # validData means the valid data exists, 
-        # set the flag to True and put it in top GUI
-        if not self.validData:
-            return
-        y_min = np.nanmin(y_min_list)
-        y_max = np.nanmax(y_max_list)
-        # add 15% as overhead
-        oh = 0.15 * (y_max - y_min)
-        y_min -= oh
-        y_max += oh
-        # it's common that y_min == y_max for FTR
-        # in this case we need to manually assign y limits
-        if y_min == y_max:
-            y_min -= 1
-            y_max += 1
         # add title
-        self.plotlayout.addLabel(f"{test_num} {test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(testInfo),
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+                                 rowspan=1, colspan=len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(testInfo.keys()):
+        for fid in sorted(self.testInfo.keys()):
             isFirstPlot = len(self.view_list) == 0
             view = SVBarViewBox()
             view.setFileID(fid)
@@ -819,8 +861,8 @@ class HistoChart(TrendChart):
             pitem.addLegend((0, 1), labelTextSize="12pt")
             # iterate site data and draw in a same plot item
             # if mean and median is enabled, draw them as well
-            sitesData = testData[fid]
-            infoDict = testInfo[fid]
+            sitesData = self.testData[fid]
+            infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
                 # skip this file if: 
                 #  - test is not in this file (empty sitesData)
@@ -837,11 +879,15 @@ class HistoChart(TrendChart):
                     # skip this site that contains 
                     # no data
                     continue
-                siteColor = settings.siteColor[site]
+                siteColor = settings.color.site_colors[site]
                 # calculate bin edges and histo counts                
-                hist, edges, bin_width, rectDutList = prepareHistoData(x, y, 
-                                                                       settings.binCount, 
-                                                                       bar_base)
+                (hist, 
+                 edges, 
+                 bin_width, 
+                 rectDutList, 
+                 tipData) = prepareHistoData(x, y, 
+                                            settings.histo.bin_count, 
+                                            bar_base)
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
                 # hist = hist / hist.max()
@@ -849,42 +895,45 @@ class HistoChart(TrendChart):
                                       width=hist, height=bin_width, 
                                       brush=siteColor, name=site_info)
                 item.setRectDutList(rectDutList)
+                item.setTipData(tipData)
+                item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
                 pitem.addItem(item)
                 # set the bar base of histogram of next site
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 bar_base += inc
-                # #TODO mean
-                # mean = data_per_site["Mean"]
-                # if settings.showMean_trend and ~np.isnan(mean):
-                #     pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
-                #                   labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
-                # # median
-                # median = data_per_site["Median"]
-                # if settings.showMed_trend and ~np.isnan(median):
-                #     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
-                #                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
+                # mean
+                mean = data_per_site["Mean"]
+                if settings.histo.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
+                    pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
+                                  labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
+                # median
+                median = data_per_site["Median"]
+                if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
+                    pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
+                                  labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})                
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.showLL_trend), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.showHL_trend), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.showLSpec_trend), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.showHSpec_trend)]:
+            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.histo.show_lolim), 
+                                              ("HLimit", "High Limit", self.hilimitPen, settings.histo.show_hilim), 
+                                              ("LSpec", "Low Spec", self.lospecPen, settings.histo.show_lospec), 
+                                              ("HSpec", "High Spec", self.hispecPen, settings.histo.show_hispec)]:
                 lim = infoDict[key]
                 pos = 0.8 if key.endswith("Spec") else 0.2
                 anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim):
+                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
                     pitem.addLine(y=lim, pen=pen, name=name, 
                                 label=f"{name} = {{value:0.2f}}", 
                                 labelOpts={"position":pos, "color": pen.color(), 
                                             "movable": True, "anchors": anchors})
             
-            if len(testInfo) > 1:
+            if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             view.setRange(xRange=(0, bar_base), 
-                          yRange=(y_min, y_max))
+                          yRange=(self.y_min, self.y_max),
+                          padding=0.0)
             view.setLimits(xMin=0, xMax=bar_base+0.5,
-                           yMin=y_min, yMax=y_max)
+                           yMin=self.y_min, yMax=self.y_max)
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
             # link current viewbox to previous, 
@@ -893,16 +942,12 @@ class HistoChart(TrendChart):
             unit = infoDict["Unit"]
             pitem.getAxis("bottom").setTicks([ticks])
             if isFirstPlot:
-                pitem.getAxis("left").setLabel(test_name + f" ({unit})" if unit else "")
+                pitem.getAxis("left").setLabel(self.test_name + f" ({unit})" if unit else "")
             else:
                 pitem.getAxis("left").setStyle(showValues=False)
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-        # set auto range for all view
-        # to fix the issue that y axis not synced
-        for v in self.view_list:
-            v.enableAutoRange(enable=True)
 
 
 class BinChart(GraphicViewWithMenu):
@@ -931,7 +976,7 @@ class BinChart(GraphicViewWithMenu):
             # a single plot, used for Y-link and 
             # hide axis
             tmpVbList = []
-            binColorDict = settings.hbinColor if isHBIN else settings.sbinColor
+            binColorDict = settings.color.hbin_colors if isHBIN else settings.color.sbin_colors
             # add title
             binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
             self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
@@ -957,9 +1002,15 @@ class BinChart(GraphicViewWithMenu):
                 bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
                 rectList = prepareBinRectList(y, cntList, height, isHBIN, numList)
                 bar.setRectDutList(rectList)
+                # show name (tick), bin number and count in hover tip
+                ticks = [[binTicks[n] for n in numList]]
+                tipData = [(f"{name[1]}\nBin: {n}", cnt) 
+                           for (name, n, cnt) 
+                           in zip(ticks[0], numList, cntList)]
+                bar.setTipData(tipData)
+                bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
                 pitem.addItem(bar)
                 # set ticks to y
-                ticks = [[binTicks[n] for n in numList]]
                 pitem.getAxis("left").setTicks(ticks)
                 pitem.getAxis("bottom").setLabel(f"{binType} Count" 
                                                  if num_files == 1 
@@ -972,7 +1023,7 @@ class BinChart(GraphicViewWithMenu):
                                    minXRange=2, minYRange=4)
                 view_bin.setRange(xRange=(0, x_max), 
                                   yRange=(-1, y_max),
-                                  disableAutoRange=False)
+                                  padding=0.0)
                 # add them to the same row
                 self.plotlayout.addItem(pitem, row=row, col=fid, rowspan=1, colspan=1)
                 # for 2nd+ plots
@@ -1043,7 +1094,7 @@ class WaferMap(GraphicViewWithMenu):
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nFail Count: {num}".format
                 legendString = f"Fail Count: {num}"
             else:
-                color = settings.sbinColor[num]
+                color = settings.color.sbin_colors[num]
                 (sbinName, sbinCnt, percent) = waferData["Statistic"][num]
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nSBIN {num}\nBin Name: {sbinName}".format
                 legendString = f"SBIN {num} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"

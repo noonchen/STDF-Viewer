@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Mon Dec 12 2022
+// Last Modified: Sun Sep 21 2025
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -61,7 +61,17 @@ fn scale_option_value(value: &Option<f32>, flag: &Option<[u8; 1]>, scale: i32, m
     }
 }
 
+#[repr(u32)] 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestIDType { 
+    TestNumberAndName = 0,
+    TestNumberOnly = 1, 
+}
+
 pub struct RecordTracker {
+    // determines how the unique test id is constructed
+    id_type: TestIDType,
+
     // file id, test num, test name -> unique test id (map size)
     id_map: HashMap<(usize, u32, String), usize>,
 
@@ -101,8 +111,9 @@ pub struct RecordTracker {
 }
 
 impl RecordTracker {
-    pub fn new() -> Self {
+    pub fn new(id_type: TestIDType) -> Self {
         RecordTracker {
+            id_type,
             id_map: HashMap::with_capacity(1024),
             scale_map: HashMap::with_capacity(1024),
             default_llimit: HashMap::with_capacity(1024),
@@ -300,7 +311,10 @@ impl RecordTracker {
             None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", file_id, test_num, head_num, site_num) }),
         }?;
         // get test_id
-        let key = (file_id, test_num, test_txt.to_string());
+        let key = match self.id_type {
+            TestIDType::TestNumberAndName => (file_id, test_num, test_txt.to_string()),
+            TestIDType::TestNumberOnly => (file_id, test_num, "".to_string()),  // Test Name is not used, use empty string for placeholder
+        };
         let test_id = match self.id_map.get(&key) {
             Some(id) => *id,
             None => {
@@ -310,6 +324,15 @@ impl RecordTracker {
             }
         };
         Ok((dut_index, test_id))
+    }
+
+    /// return `true` if test_id is already in both limit hashmaps
+    #[inline(always)]
+    pub fn default_limits_contains_id(&mut self, test_id: usize) -> bool {
+        let llimit_exist = self.default_llimit.contains_key(&test_id);
+        let hlimit_exist = self.default_hlimit.contains_key(&test_id);
+
+        llimit_exist && hlimit_exist
     }
 
     /// return `true` if test_id is already in hashmap, no update
@@ -348,14 +371,14 @@ impl RecordTracker {
                 Ok((llimit - *dft_ll).abs() > f32::EPSILON)
             }
             None => Err(StdfHelperError {
-                msg: "Default low limit can not be read...this should never happen".to_string(),
+                msg: format!("Default low limit of Test ID [{}] cannot be read...this should never happen", test_id),
             }),
         }?;
         // hlimit
         let hlimit_changed = match self.default_hlimit.get(&test_id) {
             Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
             None => Err(StdfHelperError {
-                msg: "Default high limit can not be read...this should never happen".to_string(),
+                msg: format!("Default high limit of Test ID [{}] cannot be read...this should never happen", test_id),
             }),
         }?;
         Ok((llimit_changed, hlimit_changed))
@@ -385,11 +408,11 @@ impl RecordTracker {
     #[inline(always)]
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
-        let test_id = match self.id_map.get(&(
-            file_id,
-            tsr_rec.test_num,
-            tsr_rec.test_nam.to_string(),
-        )) {
+        let key = match self.id_type {
+            TestIDType::TestNumberAndName => (file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string()),
+            TestIDType::TestNumberOnly => (file_id, tsr_rec.test_num, "".to_string()),
+        };
+        let test_id = match self.id_map.get(&key) {
             Some(id) => Ok(*id),
             None => {
                 // in some stdf files, the test name in TSR might be different
@@ -574,7 +597,8 @@ pub fn u32_to_localtime(timestamp: u32) -> String {
     let utc_time = Utc.from_local_datetime(&utc_native).unwrap();
     // convert UTC datetime to Local datetime
     let local_time: DateTime<Local> = DateTime::from(utc_time);
-    format!("{}", local_time.format("%Y-%m-%d %H:%M:%S"))
+
+    format!("{} (UTC{})", local_time.format("%Y-%m-%d %H:%M:%S"), local_time.format("%:z"))
 }
 
 #[inline(always)]
@@ -1126,15 +1150,21 @@ fn on_ptr_rec(
     )?;
     // get or update result scale
     let (exist, scale) = tracker.update_scale(test_id, &ptr_rec.res_scal);
+    // some users experienced corner cases where scale_map has seen the test_id
+    // but limit_map is not, a quick fix is always check limit_map contains the test_id.
+    // The schema to update TestInfo table is set to ignore if exists, so we do not afraid of 
+    // overwrite existing TestInfo entry.
+    let lim_exist = tracker.default_limits_contains_id(test_id);
     // insert ptr result
     db_ctx.insert_ptr_data(rusqlite::params![
         dut_index,
         test_id,
-        replace_inf(ptr_rec.result * 10f32.powi(scale)),
+        // replace_inf(ptr_rec.result * 10f32.powi(scale)),
+        ptr_rec.result * 10f32.powi(scale),
         ptr_rec.test_flg[0]
     ])?;
 
-    if !exist {
+    if !exist || !lim_exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
         // need to apply result scale to limits and units
         let lo_limit = scale_option_value(&ptr_rec.lo_limit, &ptr_rec.opt_flag, scale, 0x50);
@@ -1213,7 +1243,8 @@ fn on_mpr_rec(
     mpr_rec
         .rtn_rslt
         .iter_mut()
-        .for_each(|x| *x = replace_inf(*x * 10f32.powi(scale)));
+        // .for_each(|x| *x = replace_inf(*x * 10f32.powi(scale)));
+        .for_each(|x| *x = *x * 10f32.powi(scale));
     // serialize result array and stat array using hex
     let rslt_hex = hex::encode_upper({
         unsafe {
@@ -1907,36 +1938,16 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
     let mut rslt = String::with_capacity(256);
     for (i, v1_data) in gdr_rec.gen_data.iter().enumerate() {
         match v1_data {
-            V1::B0 => {
-                rslt.push_str(&format!("{} B0: NULL\n", i));
-            }
-            V1::U1(v) => {
-                rslt.push_str(&format!("{} U1: {}\n", i, v));
-            }
-            V1::U2(v) => {
-                rslt.push_str(&format!("{} U2: {}\n", i, v));
-            }
-            V1::U4(v) => {
-                rslt.push_str(&format!("{} U4: {}\n", i, v));
-            }
-            V1::I1(v) => {
-                rslt.push_str(&format!("{} I1: {}\n", i, v));
-            }
-            V1::I2(v) => {
-                rslt.push_str(&format!("{} I2: {}\n", i, v));
-            }
-            V1::I4(v) => {
-                rslt.push_str(&format!("{} I4: {}\n", i, v));
-            }
-            V1::R4(v) => {
-                rslt.push_str(&format!("{} R4: {}\n", i, v));
-            }
-            V1::R8(v) => {
-                rslt.push_str(&format!("{} R8: {}\n", i, v));
-            }
-            V1::Cn(v) => {
-                rslt.push_str(&format!("{} Cn: {}\n", i, v));
-            }
+            V1::B0 => { rslt.push_str(&format!("{} B0: NULL\n", i)); }
+            V1::U1(v) => { rslt.push_str(&format!("{} U1: {}\n", i, v)); }
+            V1::U2(v) => { rslt.push_str(&format!("{} U2: {}\n", i, v)); }
+            V1::U4(v) => { rslt.push_str(&format!("{} U4: {}\n", i, v)); }
+            V1::I1(v) => { rslt.push_str(&format!("{} I1: {}\n", i, v)); }
+            V1::I2(v) => { rslt.push_str(&format!("{} I2: {}\n", i, v)); }
+            V1::I4(v) => { rslt.push_str(&format!("{} I4: {}\n", i, v)); }
+            V1::R4(v) => { rslt.push_str(&format!("{} R4: {}\n", i, v)); }
+            V1::R8(v) => { rslt.push_str(&format!("{} R8: {}\n", i, v)); }
+            V1::Cn(v) => { rslt.push_str(&format!("{} Cn: {}\n", i, v)); }
             V1::Bn(v) => {
                 rslt.push_str(&match v.len() {
                     0 => format!("{} Bn: NULL\n", i),
@@ -1949,9 +1960,7 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
                     _ => format!("{} Dn: (HEX){}\n", i, hex::encode_upper(v)),
                 });
             }
-            V1::N1(v) => {
-                rslt.push_str(&format!("{} N1: {:X}\n", i, v));
-            }
+            V1::N1(v) => { rslt.push_str(&format!("{} N1: {:X}\n", i, v)); }
             V1::Invalid => (),
         };
     }
@@ -1984,18 +1993,18 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
     }
 }
 
-#[inline(always)]
-pub fn replace_inf(num: f32) -> f32 {
-    if num.is_finite() {
-        num
-    } else if num < 0.0 {
-        f32::MIN
-    } else if num > 0.0 {
-        f32::MAX
-    } else {
-        f32::NAN
-    }
-}
+// #[inline(always)]
+// pub fn replace_inf(num: f32) -> f32 {
+//     if num.is_finite() {
+//         num
+//     } else if num < 0.0 {
+//         f32::MIN
+//     } else if num > 0.0 {
+//         f32::MAX
+//     } else {
+//         f32::NAN
+//     }
+// }
 
 // stdf to excel converter function
 #[inline(always)]
