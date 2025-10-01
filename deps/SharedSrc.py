@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Sep 21 2025
+# Last Modified: Wed Oct 01 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -12,8 +12,10 @@
 #
 
 import io, os, sys, logging, datetime
-import toml, subprocess, platform, sqlite3
+import subprocess, platform, sqlite3
 import numpy as np
+import tomlkit
+from tomlkit.exceptions import ParseError
 from enum import IntEnum
 from random import choice
 from PyQt5 import QtGui, QtCore
@@ -149,7 +151,7 @@ class SettingParams(BaseModel):
     def dumpConfig(self, path: str) -> None:
         # dump with aliases so the TOML matches your original style
         with open(path, "w", encoding="utf-8") as f:
-            toml.dump(self.model_dump(by_alias=True), f)
+            tomlkit.dump(self.model_dump(by_alias=True), f)
 
     def getFloatFormat(self) -> str:
         return f"%.{self.gen.data_precision}{self.gen.data_notation}"
@@ -202,9 +204,10 @@ def updateRecentFolder(filepath: str):
 def loadConfigFile():
     global GlobalSetting
     try:
-        data = toml.load(sys.CONFIG_PATH)
-        GlobalSetting = SettingParams.model_validate(data)
-    except (FileNotFoundError, TypeError, toml.TomlDecodeError):
+        with open(sys.CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = tomlkit.load(f)
+            GlobalSetting = SettingParams.model_validate(data)
+    except (FileNotFoundError, TypeError, ParseError):
         # any error occurs in config file reading, simply ignore
         pass
     
