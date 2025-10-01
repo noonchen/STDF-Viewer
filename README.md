@@ -11,36 +11,36 @@ Devloped by Noon Chen <chennoon233@foxmail.com>
 <img src="screenshots/mainUI.png">
 
 ## Table of Content
-  - [**Build**](#build)
-    - [Using `uv`](#using-uv)
-    - [Manual](#manual)
-  - [**Usage**](#usage)
-    - [Open STDF files](#open-stdf-files)
-    - [Merge STDF files](#merge-stdf-files)
-    - [Find failed test items](#find-failed-test-items)
-    - [Looking for DUT info](#looking-for-dut-info)
-    - [Display GDR \& DTR](#display-gdr--dtr)
-    - [Analyzing test data](#analyzing-test-data)
-      - [Test data](#test-data)
-      - [Trend chart](#trend-chart)
-      - [Histogram](#histogram)
-    - [Analyzing bin distribution](#analyzing-bin-distribution)
-    - [Viewing wafer maps](#viewing-wafer-maps)
-    - [Read complete test data of specific DUTs](#read-complete-test-data-of-specific-duts)
-      - [From `DUT Summary`](#from-dut-summary)
-      - [From `Test Summary`](#from-test-summary)
-      - [From Plots](#from-plots)
-    - [Generating an Excel report](#generating-an-excel-report)
-    - [Settings](#settings)
-    - [Utilities](#utilities)
-      - [Load \& Save Session](#load--save-session)
-      - [Add Font](#add-font)
-      - [Converter](#converter)
-  - [**Having issues?**](#having-issues)
-  - [**Acknowledgements**](#acknowledgements)
-  - [**License**](#license)
-  - [**Download**](#download)
-  - [**Contributions**](#contributions)
+- [**Build**](#build)
+  - [Using `uv`](#using-uv)
+  - [Manual](#manual)
+- [**Usage**](#usage)
+  - [Open STDF files](#open-stdf-files)
+  - [Merge STDF files](#merge-stdf-files)
+  - [Find failed test items](#find-failed-test-items)
+  - [Looking for DUT info](#looking-for-dut-info)
+  - [Display GDR \& DTR](#display-gdr--dtr)
+  - [Analyzing test data](#analyzing-test-data)
+    - [Test data](#test-data)
+    - [Trend chart](#trend-chart)
+    - [Histogram](#histogram)
+  - [Analyzing bin distribution](#analyzing-bin-distribution)
+  - [Viewing wafer maps](#viewing-wafer-maps)
+  - [Read complete test data of specific DUTs](#read-complete-test-data-of-specific-duts)
+    - [From `DUT Summary`](#from-dut-summary)
+    - [From `Test Summary`](#from-test-summary)
+    - [From Plots](#from-plots)
+  - [Generating an Excel report](#generating-an-excel-report)
+  - [Settings](#settings)
+  - [Utilities](#utilities)
+    - [Load \& Save Session](#load--save-session)
+    - [Add Font](#add-font)
+    - [Converter](#converter)
+- [**Having issues?**](#having-issues)
+- [**Acknowledgements**](#acknowledgements)
+- [**License**](#license)
+- [**Download**](#download)
+- [**Contributions**](#contributions)
 
 
 ## **Build**
@@ -58,13 +58,13 @@ Prerequisites:
 1. Install [uv](https://docs.astral.sh/uv/#installation).
 2. (Optional) Create a venv.
 
-```
+```shell
 uv venv
 ```
 
 3. Install and build deps.
 
-```
+```shell
 uv sync
 ```
 
@@ -72,20 +72,21 @@ uv sync
 
 1. Install python modules, `maturin` is required to build `rust_stdf_helper`.
 
-```
+```shell
 pip install -r requirements.txt
 pip install maturin==1.9.4
 ```
 
 2. Build `rust_stdf_helper`
 
-```
+```shell
 cd ./deps/rust_stdf_helper
 maturin build -f -r
 ```
 
 3. Install `rust_stdf_helper`, the wheel is located in `target/wheels/`.
-```
+
+```shell
 pip install /path/to/whl/file
 ```
 
