@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sat Sep 27 2025
+# Last Modified: Wed Oct 01 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -50,8 +50,9 @@ def prepareHistoData(dutList: np.ndarray,
                      rectBaseLevel: int, 
                      horizontalBar: bool = True):
     '''
-    returns hist, bin left edges, bin width, [(rect, duts)]
+    returns hist, bin left edges, bin width, [(rect, duts)], tipData
     '''
+    ffmt = ss.getSetting().getFloatFormat()
     hist, edges = np.histogram(dataList, bins=binCount)
     bin_width = edges[1]-edges[0]
     # get left edges
@@ -66,7 +67,14 @@ def prepareHistoData(dutList: np.ndarray,
         bin_dut_dict.setdefault(ind-1, []).append(dut)
     # list of (rect, duts) for data picking
     rectDutList = []
+    # list of tip data for hovering display
+    tipData = []
     for ind, (h, e) in enumerate(zip(hist, edges)):
+        # tipData must be the same length of hist/edges,
+        # add data even if h == 0
+        tipData.append( ("[{}, {})".format(ffmt % e, 
+                                           ffmt % (e + bin_width)), 
+                         h) )
         if h == 0:
             continue
         duts = bin_dut_dict[ind]
@@ -84,7 +92,7 @@ def prepareHistoData(dutList: np.ndarray,
         
         rectDutList.append( (QRectF(left, top, width, height), 
                              duts) )
-    return hist, edges, bin_width, rectDutList
+    return hist, edges, bin_width, rectDutList, tipData
 
 
 def prepareBinRectList(binCenter: np.ndarray, 
@@ -788,6 +796,8 @@ class SVBarGraphItem(pg.BarGraphItem):
     def __init__(self, **opts):
         super().__init__(**opts)
         self.rectDutList = []
+        self.opts['tip'] = None
+        self._toolTipCleared = True
         
     def setRectDutList(self, rdl: list):
         self.rectDutList = rdl
@@ -795,35 +805,43 @@ class SVBarGraphItem(pg.BarGraphItem):
     def getRectDutList(self):
         return self.rectDutList
     
+    def setHoverTipFunction(self, tipFunc):
+        # tipFunc(arg1, arg2):
+        # arg1: str, bar description
+        # arg2: int, bar height/count
+        #
+        # the value of args are get from `tipData`
+        self.opts['tip'] = tipFunc
+    
+    def setTipData(self, tipData: list):
+        # a list of (description, height/count) 
+        # using same order of bar data (x0, y0, etc.)
+        self.tipData = tipData
+    
     def hoverEvent(self, ev):
-        if ev.exit:
-            new = np.zeros_like(self.data['hovered'])
-        else:
-            new = self._maskAt(ev.pos())
-
-        if self._hasHoverStyle():
-            self.data['sourceRect'][old ^ new] = 0
-            self.data['hovered'] = new
-            self.updateSpots()
-
-        points = self.points()[new][::-1]
-
+        hoveredRectIdx = []
+        if not ev.exit:
+            # found which rects contain the hover position,
+            # and store their indexes
+            for idx, rect in enumerate(self._rectarray.instances()):
+                if rect.contains(ev.pos()):
+                    hoveredRectIdx.append(idx)
+        
         # Show information about hovered points in a tool tip
         vb = self.getViewBox()
-        if vb is not None and self.opts['tip'] is not None:
-            if len(points) > 0:
+        if vb is not None and self.opts['tip'] is not None and len(self.tipData) > 0:
+            numHovered = len(hoveredRectIdx)
+            if numHovered > 0:
                 cutoff = 3
-                tip = [self.opts['tip'](x=pt.pos().x(), y=pt.pos().y(), data=pt.data())
-                        for pt in points[:cutoff]]
-                if len(points) > cutoff:
-                    tip.append('({} others...)'.format(len(points) - cutoff))
+                tip = [self.opts['tip'](*self.tipData[idx])
+                        for idx in hoveredRectIdx[:cutoff]]
+                if numHovered > cutoff:
+                    tip.append('({} others...)'.format(numHovered - cutoff))
                 vb.setToolTip('\n\n'.join(tip))
                 self._toolTipCleared = False
             elif not self._toolTipCleared:
                 vb.setToolTip("")
                 self._toolTipCleared = True
-
-        self.sigHovered.emit(self, points, ev)
 
 
 class HistoChart(TrendChart):
@@ -863,9 +881,13 @@ class HistoChart(TrendChart):
                     continue
                 siteColor = settings.color.site_colors[site]
                 # calculate bin edges and histo counts                
-                hist, edges, bin_width, rectDutList = prepareHistoData(x, y, 
-                                                                       settings.histo.bin_count, 
-                                                                       bar_base)
+                (hist, 
+                 edges, 
+                 bin_width, 
+                 rectDutList, 
+                 tipData) = prepareHistoData(x, y, 
+                                            settings.histo.bin_count, 
+                                            bar_base)
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # use normalized hist for better display
                 # hist = hist / hist.max()
@@ -873,6 +895,8 @@ class HistoChart(TrendChart):
                                       width=hist, height=bin_width, 
                                       brush=siteColor, name=site_info)
                 item.setRectDutList(rectDutList)
+                item.setTipData(tipData)
+                item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
                 pitem.addItem(item)
                 # set the bar base of histogram of next site
                 inc = 1.2 * hist.max()
@@ -978,9 +1002,15 @@ class BinChart(GraphicViewWithMenu):
                 bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
                 rectList = prepareBinRectList(y, cntList, height, isHBIN, numList)
                 bar.setRectDutList(rectList)
+                # show name (tick), bin number and count in hover tip
+                ticks = [[binTicks[n] for n in numList]]
+                tipData = [(f"{name[1]}\nBin: {n}", cnt) 
+                           for (name, n, cnt) 
+                           in zip(ticks[0], numList, cntList)]
+                bar.setTipData(tipData)
+                bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
                 pitem.addItem(bar)
                 # set ticks to y
-                ticks = [[binTicks[n] for n in numList]]
                 pitem.getAxis("left").setTicks(ticks)
                 pitem.getAxis("bottom").setLabel(f"{binType} Count" 
                                                  if num_files == 1 
