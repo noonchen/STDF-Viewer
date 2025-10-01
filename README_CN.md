@@ -11,59 +11,82 @@ STDF Viewer是一款用于分析半导体测试STDF报告的免费、高效的�
 <img src="screenshots/mainUI.png">
 
 ## 目录
-- [**编译**](#编译)
-- [使用方法](#使用方法)
-  - [**打开STDF文件**](#打开stdf文件)
-  - [**合并STDF文件**](#合并stdf文件)
-  - [**寻找失效测项**](#寻找失效测项)
-  - [**查看DUT测试信息**](#查看dut测试信息)
-  - [**显示GDR和DTR信息**](#显示gdr和dtr信息)
-  - [**分析测试数据**](#分析测试数据)
-    - [**测试原始数据**](#测试原始数据)
-    - [**趋势图**](#趋势图)
-    - [**直方图**](#直方图)
-  - [**Bin桶分布**](#bin桶分布)
-  - [**查看晶圆图**](#查看晶圆图)
-  - [**读取特定DUT的所有测试数据**](#读取特定dut的所有测试数据)
-    - [**在图像里中**](#在图像里中)
-  - [**生成Excel报告**](#生成excel报告)
-  - [**设置**](#设置)
-  - [**实用工具**](#实用工具)
-- [遇到问题？](#遇到问题)
-- [鸣谢](#鸣谢)
-- [软件许可证](#软件许可证)
-- [下载](#下载)
-- [合作](#合作)
+  - [**编译**](#编译)
+    - [使用 `uv`](#使用-uv)
+    - [手动](#手动)
+  - [**使用方法**](#使用方法)
+    - [打开STDF文件](#打开stdf文件)
+    - [合并STDF文件](#合并stdf文件)
+    - [寻找失效测项](#寻找失效测项)
+    - [查看DUT测试信息](#查看dut测试信息)
+    - [显示GDR和DTR信息](#显示gdr和dtr信息)
+    - [分析测试数据](#分析测试数据)
+      - [测试原始数据](#测试原始数据)
+      - [趋势图](#趋势图)
+      - [直方图](#直方图)
+    - [Bin桶分布](#bin桶分布)
+    - [查看晶圆图](#查看晶圆图)
+    - [读取特定DUT的所有测试数据](#读取特定dut的所有测试数据)
+      - [在`DUT详情`中](#在dut详情中)
+      - [在`数据详情`中](#在数据详情中)
+      - [在图像里中](#在图像里中)
+    - [生成Excel报告](#生成excel报告)
+    - [设置](#设置)
+    - [实用工具](#实用工具)
+      - [加载/保存缓存](#加载保存缓存)
+      - [添加字体](#添加字体)
+      - [STDF转换](#stdf转换)
+  - [**遇到问题？**](#遇到问题)
+  - [**鸣谢**](#鸣谢)
+  - [**软件许可证**](#软件许可证)
+  - [**下载**](#下载)
+  - [**合作**](#合作)
 
 
-## 编译
+## **编译**
 
-1. 安装Python 3.9+以及[Rust](https://www.rust-lang.org/tools/install)。
-2. 安装Python轮子，其中`maturin`是编译`rust_stdf_helper`的必须项。
+### 使用 `uv`
+
+1. 安装 [uv](https://docs.astral.sh/uv/#installation)。
+2. (可选) 创建虚拟环境。
+
+```
+uv venv
+```
+
+3. 安装以及自动编译。
+
+```
+uv sync
+```
+
+### 手动
+
+1. 安装Python轮子，其中`maturin`是编译`rust_stdf_helper`的必须项。
 
 ```
 pip install -r requirements.txt
 pip install maturin==1.9.4
 ```
 
-3. 编译`rust_stdf_helper`。
+2. 编译`rust_stdf_helper`。
 
 ```
 cd ./deps/rust_stdf_helper
 maturin build -f -r
 ```
 
-4. 安装`rust_stdf_helper`，编译出来的轮子位于`target/wheels/`。
+3. 安装`rust_stdf_helper`，编译出来的轮子位于`target/wheels/`。
 ```
 pip install /path/to/whl/file
 ```
 
-5. 至此你可以直接运行`STDF-Viewer.py`，也可以用你顺手的工具打包成一个可执行程序。
+4. 至此你可以直接运行`STDF-Viewer.py`，也可以用你顺手的工具打包成一个可执行程序。
 
 
-## 使用方法
+## **使用方法**
 
-### **打开STDF文件**
+### 打开STDF文件
 
 STDF Viewer可处理的文件为V4、V4-2007标准的STDF，ZIP*、GZ以及BZIP压缩的STDF文件可以不用解压直接打开。
 
@@ -82,7 +105,7 @@ STDF Viewer可处理的文件为V4、V4-2007标准的STDF，ZIP*、GZ以及BZIP�
 
 <br>
 
-### **合并STDF文件**
+### 合并STDF文件
 
 (V4.0.0) 点击工具栏的`合并`按钮打开合并面板, 同一个组里的多个文件最终会合并，且序号为0的文件为第一个文件。
 
@@ -94,7 +117,7 @@ STDF Viewer可处理的文件为V4、V4-2007标准的STDF，ZIP*、GZ以及BZIP�
 
 <br>
 
-### **寻找失效测项**
+### 寻找失效测项
 
 点击工具栏的`标记失效`可以把所有存在失效测项标为<span style="color:red">红色</span>，如果在`设置`里开启了`搜索低Cpk测项`，Cpk低于阈值（也可在`设置`中设置）的测项会标为<span style="color:orange">橙色</span>。
 
@@ -102,7 +125,7 @@ STDF Viewer可处理的文件为V4、V4-2007标准的STDF，ZIP*、GZ以及BZIP�
 
 <br>
 
-### **查看DUT测试信息**
+### 查看DUT测试信息
 
 DUT测试信息位于`STDF信息` -> `DUT详情`。表格中每行代表一个DUT，失效的DUT会被标为<span style="color:red">红色</span>。
 
@@ -116,7 +139,7 @@ DUT信息可以按照每列进行排列，点击对应列即可。
 
 <br>
 
-### **显示GDR和DTR信息**
+### 显示GDR和DTR信息
 
 所有GDR (Generic Data Record)和DTR (Datalog Text Record) 数据列在`STDF信息` -> `GDR & DTR汇总`中。这两种Record的精确位置不好确定，表中给出了相对于PIR/PRR的位置。
 
@@ -130,7 +153,7 @@ GDR的`值`的每一行代表一个V1数据，按照`{V1序列} {V1数据类型}
 
 <br>
 
-### **分析测试数据**
+### 分析测试数据
 
 ***提示**: 功能测试 FTR 没有测试值，在趋势图和直方图中用的是FTR的测试标识（Test Flag）进行绘图*
 
@@ -138,12 +161,12 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 测项的统计信息（Cpk、平均值、方差等）显示在`统计信息`中。
 
-#### **测试原始数据**
+#### 测试原始数据
 选择测项后在`STDF信息` -> `数据详情`查看。表格中每行代表一个DUT，每列代表一个测项。
 
 <img src="screenshots/test summary.png">
 
-#### **趋势图**
+#### 趋势图
 显示测试值随DUT变化的趋势图，横轴为测试值，横轴为所选的head/site包含的所有DUT的序号。鼠标停留到数据点上可以查看详细数据。
 
 <img src="screenshots/trend interactive.png">
@@ -152,14 +175,14 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <img src="screenshots/trend dynamic limit.png">
 
-#### **直方图**
+#### 直方图
 显示测项的数据分布，纵轴为测试值。~~鼠标停留到区间上可以查看具体计数。~~
 
 <img src="screenshots/histo.png">
 
 <br>
 
-### **Bin桶分布**
+### Bin桶分布
 显示HBIN和SBIN桶的分布。
 
 `统计信息`为每个Bin编号、名称和百分比，空的Bin自动隐藏.
@@ -168,7 +191,7 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <br>
 
-### **查看晶圆图**
+### 查看晶圆图
 `晶圆图`只会在STDF文件存在晶圆测试信息（WCR、WIR、WRR）的时候开启。 
 
 `选择晶圆`的第一行（`Stacked Wafer Map`）是当前文件里失效个数的分布图，每个(X, Y)坐标的数字代表这个失效的DUT的个数。
@@ -185,22 +208,22 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <br>
 
-### **读取特定DUT的所有测试数据**
+### 读取特定DUT的所有测试数据
 有时你可能需要某几个DUT的所有测项的值，如下图所示，在STDF Viewer中有多种方式可以实现。
 
 <img src="screenshots/dut data table.png">
 
-#### **在`DUT详情`中**
+#### 在`DUT详情`中
 选择行后，右键选择`读取DUT详细数据`。
 
 <img src="screenshots/dut summary read dut data.png">
 
-#### **在`数据详情`中**
+#### 在`数据详情`中
 选择单元格后，右键选`读取DUT详细数据`。
 
 <img src="screenshots/test summary read dut data.png">
 
-#### **在图像里中**
+#### 在图像里中
 图中右键点击`数据选择模式`，圈出感兴趣的地方后，再点击右键选择`读取DUT详细数据`，记得善用图例隐藏功能。
 
 <img src="screenshots/trend interactive 2.png">
@@ -213,7 +236,7 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <br>
 
-### **生成Excel报告**
+### 生成Excel报告
 程序显示的内容基本上都可以导出到报告里。
 
 <img src="screenshots/report content selection.png">
@@ -235,29 +258,29 @@ STDF文件中所有的测项会显示在`选择测项`，可以多选。下方�
 
 <br>
 
-### **设置**
+### 设置
 STDF Viewer提供了全局设置界面，可以用来更改程序界面中或导出报告中对图像元素、site/bin的颜色等等，可自行尝试修改。
 
 <img src="screenshots/setting.png">
 
-### **实用工具**
+### 实用工具
 4.0.0在工具栏增加了`实用工具`按钮。
 
 <img src="screenshots/utilities.png">
 
-#### **加载/保存缓存**
+#### 加载/保存缓存
 
 你可以把当间缓存保存下来，避免重复读去STDF文件。
 
-#### **添加字体**
+#### 添加字体
 和之前版本相比，现只需选择一个.ttf格式的字体文件，在`设置`中选择即可。
 
-#### **STDF转换**
+#### STDF转换
 此工具可以把STDF的所有record存到xlsx文件，便于分析和调试文件。
 
 <br>
 
-## 遇到问题？
+## **遇到问题？**
 如果在使用过程中遇到问题，按照以下步骤进行：
 1. 打开STDF-Viewer后点击右上角的`关于`。<img src="screenshots/how to open debug panel.png">
 2. 点击`调试`按钮打开调试界面。<img src="screenshots/debug panel.png">
@@ -265,7 +288,7 @@ STDF Viewer提供了全局设置界面，可以用来更改程序界面中或导
 4. 点击`保存结果`保存结果，在GitHub上创建个issue。
 
 
-## 鸣谢
+## **鸣谢**
 
 STDF Viewer使用了下列开源项目的代码，感谢作者们：
 
@@ -285,7 +308,7 @@ STDF Viewer使用了下列开源项目的代码，感谢作者们：
 
 <br>
 
-## 软件许可证
+## **软件许可证**
 
 STDF Viewer采用GPL V3.0，程序完全免费，由于使用本软件导致的任何问题，作者概不负责，也请使用者抱着怀疑的态度使用本软件。
 
@@ -293,12 +316,12 @@ STDF Viewer采用GPL V3.0，程序完全免费，由于使用本软件导致的�
 
 <br>
 
-## 下载
+## **下载**
 
 [点击这里](https://github.com/noonchen/STDF-Viewer/releases)
 
 <br>
 
-## 合作
+## **合作**
 
 欢迎各种PR和Issue～
