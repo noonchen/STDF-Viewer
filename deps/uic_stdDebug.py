@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 10th 2021
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Sun Oct 05 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -83,7 +83,7 @@ class stdDebugPanel(QtWidgets.QDialog):
     
     def onRecordAnalyzer(self):
         f, _typ = QFileDialog.getOpenFileName(self, caption=self.tr("Select a STD File To Analyze"),
-                                              directory=getSetting().recentFolder,
+                                              directory=getSetting().gen.recent_dir,
                                               filter=self.tr(FILE_FILTER),)
             
         if os.path.isfile(f):
