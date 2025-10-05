@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Sep 21 2025
+# Last Modified: Mon Oct 06 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -641,9 +641,8 @@ class DataInterface:
                 if bin_cnt == 0: 
                     continue
                 bin_name = binInfoDict.get(bin_num, {}).get("BIN_NAME", "NO NAME")
-                item = ("{}\nBin{}: {:.1f}%".format(bin_name, 
-                                                    bin_num, 
-                                                    100*bin_cnt/totalBinCnt), 
+                percent = 100 * bin_cnt / totalBinCnt
+                item = ("\"{}\"\nBin {}: {:.1f}%".format(bin_name, bin_num, percent), 
                         bin_num,
                         isHbin)
                 row.append(item)

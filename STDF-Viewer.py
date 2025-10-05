@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Sep 21 2025
+# Last Modified: Mon Oct 06 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -951,8 +951,12 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.layoutChanged.emit()
         hheaderview = self.ui.rawDataTable.horizontalHeader()
         hheaderview.setVisible(True)
-        # FIXME: resize to contents causes laggy
-        # hheaderview.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # resize table columns to header string (test name)
+        for col in range(self.tmodel_data.columnCount()):
+            cellWidth = hheaderview.fontMetrics().horizontalAdvance(
+                self.tmodel_data.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+            )
+            hheaderview.resizeSection(col, max(cellWidth, 80))
         self.ui.rawDataTable.verticalHeader().setVisible(True)
     
                 
@@ -1052,6 +1056,11 @@ class MyWindow(QtWidgets.QMainWindow):
             # activate bin wafer model
             self.ui.dataTable.setModel(self.bwmodel)
             self.bwmodel.layoutChanged.emit()
+        
+        # resize table cell by its contents
+        horizontalHeader.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # set min size to avoid "compressed" cells
+        horizontalHeader.setMinimumSectionSize(80)
                 
     
     def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
