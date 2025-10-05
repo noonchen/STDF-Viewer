@@ -429,7 +429,7 @@ fn analyze_stdf_file(
             });
             if reused {
                 analyze_rst += "\nNote: if test records share a test number and refer to the same test, \
-                                consider selecting 'Number Only' as the 'Test Identifier' in settings\n";
+                                consider selecting 'Number Only' as the 'Test Identifier' in settings.\n";
             }
         }
 
@@ -489,7 +489,7 @@ fn analyze_stdf_file(
             });
             if reused {
                 analyze_rst += "\nFatal Note: Test number and name are reused in multiple record types, \
-                        STDF-Viewer doesn't support this file and results of listed tests will be unreliable!.\n";
+                        STDF-Viewer doesn't support this file and results of listed tests will be unreliable!\n";
             }
         }
 
