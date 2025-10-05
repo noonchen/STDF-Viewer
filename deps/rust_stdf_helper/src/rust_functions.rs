@@ -61,11 +61,11 @@ fn scale_option_value(value: &Option<f32>, flag: &Option<[u8; 1]>, scale: i32, m
     }
 }
 
-#[repr(u32)] 
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TestIDType { 
+pub enum TestIDType {
     TestNumberAndName = 0,
-    TestNumberOnly = 1, 
+    TestNumberOnly = 1,
 }
 
 pub struct RecordTracker {
@@ -313,7 +313,7 @@ impl RecordTracker {
         // get test_id
         let key = match self.id_type {
             TestIDType::TestNumberAndName => (file_id, test_num, test_txt.to_string()),
-            TestIDType::TestNumberOnly => (file_id, test_num, "".to_string()),  // Test Name is not used, use empty string for placeholder
+            TestIDType::TestNumberOnly => (file_id, test_num, "".to_string()), // Test Name is not used, use empty string for placeholder
         };
         let test_id = match self.id_map.get(&key) {
             Some(id) => *id,
@@ -1152,7 +1152,7 @@ fn on_ptr_rec(
     let (exist, scale) = tracker.update_scale(test_id, &ptr_rec.res_scal);
     // some users experienced corner cases where scale_map has seen the test_id
     // but limit_map is not, a quick fix is always check limit_map contains the test_id.
-    // The schema to update TestInfo table is set to ignore if exists, so we do not afraid of 
+    // The schema to update TestInfo table is set to ignore if exists, so we do not afraid of
     // overwrite existing TestInfo entry.
     let lim_exist = tracker.default_limits_contains_id(test_id);
     // insert ptr result

@@ -1,3 +1,5 @@
+use core::f64;
+use crossbeam_channel;
 use numpy::ndarray::{Array1, Zip};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -11,9 +13,7 @@ use pyo3::{
 use rusqlite::{Connection, Error};
 use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
 use rust_xlsxwriter::{Workbook, XlsxError};
-use crossbeam_channel;
-use core::f64;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::{From, Infallible};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ mod statistic_functions;
 use database_context::DataBaseCtx;
 use rust_functions::{
     get_fields_from_code, get_file_size, process_incoming_record, process_summary_data,
-    write_json_to_sheet, TestIDType, RecordTracker,
+    write_json_to_sheet, RecordTracker, TestIDType,
 };
 
 #[derive(Debug)]
@@ -79,7 +79,10 @@ impl<'src> FromPyObject<'src> for TestIDType {
         match val {
             0 => Ok(TestIDType::TestNumberAndName),
             1 => Ok(TestIDType::TestNumberOnly),
-            _ => Err(PyValueError::new_err(format!("Invalid TestIDType value: {}", val))),
+            _ => Err(PyValueError::new_err(format!(
+                "Invalid TestIDType value: {}",
+                val
+            ))),
         }
     }
 }
@@ -137,11 +140,22 @@ fn analyze_stdf_file(
     let mut parse_progess = 0;
 
     let mut result_log = String::with_capacity(512);
+    let mut analyze_rst = {
+        let mut s = String::with_capacity(2048);
+        s.insert(0, '\n');
+        s
+    };
     let mut total_record: u64 = 0;
     let mut previous_rec_type: u64 = 0;
     let mut dup_cnt = 0;
     let mut dut_cnt = 0;
     let mut wafer_cnt = 0;
+    // rec_code -> Set of (test num, test name)
+    let mut test_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
+    // rec_code -> Set of (test num, test name) of TSR
+    let mut tsr_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
+    // rec_code -> (bin num -> has H/S bin rec?)
+    let mut test_bin_tracker = HashMap::<u64, HashMap<u16, bool>>::with_capacity(2);
 
     // signals without gil
     let data_signal: Py<PyAny> = data_signal.into();
@@ -204,6 +218,17 @@ fn analyze_stdf_file(
                             "{} (HEAD: {}, SITE: {})\n",
                             rec_name, prr_rec.head_num, prr_rec.site_num
                         );
+                        // track all bin numbers appear in PRR
+                        test_bin_tracker
+                            .entry(REC_HBR)
+                            .or_insert_with(HashMap::new)
+                            .entry(prr_rec.hard_bin)
+                            .or_insert(false);
+                        test_bin_tracker
+                            .entry(REC_SBR)
+                            .or_insert_with(HashMap::new)
+                            .entry(prr_rec.soft_bin)
+                            .or_insert(false);
                         // send or print result_log at PRR
                         // avoid result_log takes up too much memory...
                         // println!("{}", result_log);
@@ -211,16 +236,14 @@ fn analyze_stdf_file(
                         if is_valid_data_signal || is_valid_stop {
                             Python::attach(|py| -> PyResult<()> {
                                 if is_valid_data_signal {
-                                    data_signal.bind(py).call_method1(
-                                        intern!(py, "emit"),
-                                        (result_log,),
-                                    )?;
+                                    data_signal
+                                        .bind(py)
+                                        .call_method1(intern!(py, "emit"), (&result_log,))?;
                                 }
                                 if is_valid_progress_signal {
-                                    progress_signal.bind(py).call_method1(
-                                        intern!(py, "emit"),
-                                        (parse_progess,),
-                                    )?;
+                                    progress_signal
+                                        .bind(py)
+                                        .call_method1(intern!(py, "emit"), (parse_progess,))?;
                                 }
                                 if is_valid_stop {
                                     stop_flag_rust = stop_flag
@@ -232,7 +255,7 @@ fn analyze_stdf_file(
                             })?;
                         }
                         // reset to default
-                        result_log = String::with_capacity(512);
+                        result_log.clear();
                     }
                     StdfRecord::WRR(wrr_rec) => {
                         result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
@@ -258,8 +281,70 @@ fn analyze_stdf_file(
                     previous_rec_type = rec_code;
                     dup_cnt = 1;
                 }
+
+                // track the test number, name and bin of PTR, FTR and MPR
+                if rec.is_type(REC_PTR | REC_FTR | REC_MPR | REC_TSR | REC_HBR | REC_SBR) {
+                    let parsed_rec: StdfRecord = rec.into();
+                    match parsed_rec {
+                        StdfRecord::PTR(ptr_rec) => {
+                            test_id_tracker
+                                .entry(rec_code)
+                                .or_insert_with(HashSet::new)
+                                .insert((ptr_rec.test_num, ptr_rec.test_txt));
+                        }
+                        StdfRecord::FTR(ftr_rec) => {
+                            test_id_tracker
+                                .entry(rec_code)
+                                .or_insert_with(HashSet::new)
+                                .insert((ftr_rec.test_num, ftr_rec.test_txt));
+                        }
+                        StdfRecord::MPR(mpr_rec) => {
+                            test_id_tracker
+                                .entry(rec_code)
+                                .or_insert_with(HashSet::new)
+                                .insert((mpr_rec.test_num, mpr_rec.test_txt));
+                        }
+                        StdfRecord::TSR(tsr_rec) => {
+                            let rec_code = match tsr_rec.test_typ {
+                                'P' => REC_PTR,
+                                'F' => REC_FTR,
+                                'M' => REC_MPR,
+                                _ => continue,
+                            };
+                            tsr_id_tracker
+                                .entry(rec_code)
+                                .or_insert_with(HashSet::new)
+                                .insert((tsr_rec.test_num, tsr_rec.test_nam));
+                        }
+                        StdfRecord::HBR(hbr_rec) => {
+                            if let Some(s) = test_bin_tracker.get_mut(&REC_HBR) {
+                                if let Some(b) = s.get_mut(&hbr_rec.hbin_num) {
+                                    *b = true;
+                                }
+                            } else {
+                                analyze_rst += &format!(
+                                    "\nWarning: HBR (Bin {}) appears before any PRR!\n",
+                                    hbr_rec.hbin_num
+                                );
+                            }
+                        }
+                        StdfRecord::SBR(sbr_rec) => {
+                            if let Some(s) = test_bin_tracker.get_mut(&REC_SBR) {
+                                if let Some(b) = s.get_mut(&sbr_rec.sbin_num) {
+                                    *b = true;
+                                }
+                            } else {
+                                analyze_rst += &format!(
+                                    "\nWarning: SBR (Bin {}) appears before any PRR!\n",
+                                    sbr_rec.sbin_num
+                                );
+                            }
+                        }
+                        _ => { /* impossible case */ }
+                    }
+                }
             }
-        }
+        } // for loop
 
         // print last record
         if dup_cnt != 0 && previous_rec_type != 0 {
@@ -271,6 +356,144 @@ fn analyze_stdf_file(
             );
         }
 
+        // analyze the hashmaps
+        // 1. all bin numbers should have a corresponding HBR/SBR (warning)
+        test_bin_tracker.iter().for_each(|(bin_type, bin_map)| {
+            let bin_type = get_rec_name_from_code(*bin_type);
+            bin_map.iter().for_each(|(bin_num, &has_rec)| {
+                if !has_rec {
+                    analyze_rst += &format!(
+                        "\nWarning: missing {} for bin number [{}]\n",
+                        bin_type, bin_num
+                    );
+                }
+            });
+        });
+
+        // 2. each test should have corresponding TSR (warning)
+        tsr_id_tracker.iter().for_each(|(rec_code, tsr_set)| {
+            // get id set from test tracker, check for mismatch
+            let test_set = test_id_tracker.entry(*rec_code).or_default();
+            let mut mismatch_test: Vec<&(u32, String)> = test_set.difference(tsr_set).collect();
+            let mut mismatch_tsr: Vec<&(u32, String)> = tsr_set.difference(test_set).collect();
+            let has_mis_test = mismatch_test.len() > 1;
+            let has_mis_tsr = mismatch_tsr.len() > 1;
+
+            if has_mis_test || has_mis_tsr {
+                let rec_code = get_rec_name_from_code(*rec_code);
+                // print mismatched test records
+                if has_mis_test {
+                    analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
+                    mismatch_test.sort_by(|&a, &b| a.0.cmp(&b.0));
+                    mismatch_test.iter().for_each(|&(num, name)| {
+                        analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
+                    });
+                } else {
+                    analyze_rst += &format!("\nWarning: all {}s have matching TSR, but\n", rec_code);
+                }
+                // print mismatch TSR
+                if has_mis_tsr {
+                    analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
+                    mismatch_tsr.sort_by(|&a, &b| a.0.cmp(&b.0));
+                    mismatch_tsr.iter().for_each(|&(num, name)| {
+                        analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
+                    });
+                }
+            }
+        });
+
+        // 3. test number should only appear once (warning)
+        {
+            let mut reused = false;
+            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
+                let rec_code = get_rec_name_from_code(*rec_code);
+                // create a hashmap with test num as key, vec of test name as value
+                let mut num_map = HashMap::<u32, Vec<&str>>::new();
+                id_set.iter().for_each(|(num, name)| {
+                    num_map.entry(*num).or_default().push(name);
+                });
+                // iterate test number hashmap, if vec len > 1, means test number are reused
+                num_map.iter().for_each(|(num, name_vec)| {
+                    if name_vec.len() > 1 {
+                        reused = true;
+                        // add the test num and name as duplicates to result
+                        analyze_rst += &format!(
+                            "\nWarning: test number [{}] is reused in multiple {}s\n",
+                            num, rec_code
+                        );
+                        name_vec.iter().for_each(|&s| {
+                            analyze_rst += &format!("\t({}, \"{}\")\n", num, s);
+                        });
+                    }
+                });
+            });
+            if reused {
+                analyze_rst += "\nNote: if test records share a test number and refer to the same test, \
+                                consider selecting 'Number Only' as the 'Test Identifier' in settings.\n";
+            }
+        }
+
+        // 4. test number cannot be reused in multiple record types (error)
+        {
+            let mut reused = false;
+            // create a 
+            // a. (num, name) -> set of <rec_code> hashmap 
+            // b. num -> set of <rec_code> hashmap
+            // for detection
+            let mut reverse_id_map = HashMap::<(u32, &str), HashSet<u64>>::new();
+            let mut reverse_num_map = HashMap::<u32, HashSet<u64>>::new();
+            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
+                id_set.iter().for_each(|(num, name)| {
+                    reverse_id_map
+                        .entry((*num, name))
+                        .or_default()
+                        .insert(*rec_code);
+                    reverse_num_map
+                        .entry(*num)
+                        .or_default()
+                        .insert(*rec_code);
+                });
+            });
+            // check test number reuse
+            reverse_num_map.iter().for_each(|(num, rec_set)| {
+                if rec_set.len() > 1 {
+                    reused = true;
+                    analyze_rst += &format!("\nError: test number [{}] is reused in {:?}!\n",
+                        num,
+                        rec_set
+                            .iter()
+                            .map(|&code| get_rec_name_from_code(code))
+                            .collect::<Vec<&str>>()
+                    );
+                }
+            });
+            if reused {
+                analyze_rst += "\nNote: When a test number is reused in multiple record types, \
+                        plots and statistics will be unreliable when selecting 'Number Only' as 'Test Identifier' in settings!\
+                        \nConsider using 'Number + Name' instead.\n";
+            }
+
+            reused = false;
+            // check test number & name reuse
+            reverse_id_map.iter().for_each(|(&(num, name), rec_set)| {
+                if rec_set.len() > 1 {
+                    reused = true;
+                    analyze_rst += &format!("\nFatal: test number and name [{}, \"{}\"] are reused in {:?}!\n",
+                        num, name,
+                        rec_set
+                            .iter()
+                            .map(|&code| get_rec_name_from_code(code))
+                            .collect::<Vec<&str>>()
+                    );
+                }
+            });
+            if reused {
+                analyze_rst += "\nFatal Note: Test number and name are reused in multiple record types, \
+                        STDF-Viewer doesn't support this file and results of listed tests will be unreliable!\n";
+            }
+        }
+
+        result_log += &analyze_rst;
         result_log += &format!(
             "\nTotal wafers: {}\nTotal duts/dies: {}\nTotal Records: {}\nAnalysis Finished",
             wafer_cnt, dut_cnt, total_record
@@ -282,10 +505,14 @@ fn analyze_stdf_file(
         // send via qt signal..
         Python::attach(|py| -> PyResult<()> {
             if is_valid_data_signal {
-                data_signal.bind(py).call_method1(intern!(py, "emit"), (result_log,))?;
+                data_signal
+                    .bind(py)
+                    .call_method1(intern!(py, "emit"), (result_log,))?;
             }
             if is_valid_progress_signal {
-                progress_signal.bind(py).call_method1(intern!(py, "emit"), (100u64,))?;
+                progress_signal
+                    .bind(py)
+                    .call_method1(intern!(py, "emit"), (100u64,))?;
             }
             Ok(())
         })?;
@@ -323,7 +550,6 @@ fn generate_database(
         return Err(PyValueError::new_err("Empty STDF file group detected"));
     }
 
-
     let is_valid_progress_signal = match progress_signal.getattr(intern!(py, "emit")) {
         Ok(p) => p.is_callable(),
         Err(_) => {
@@ -346,7 +572,7 @@ fn generate_database(
     // prepare channel for multithreading communication
     const CHANNEL_CAP: usize = 16_384;
     let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
-    
+
     let mut thread_handles = vec![];
     let mut thread_txes = Vec::with_capacity(num_groups);
     // clone {num_groups-1} sender, and push the `tx` to last
@@ -432,10 +658,9 @@ fn generate_database(
                 // access python object inside a gil block
                 if let Err(py_e) = Python::attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
-                        progress_signal.bind(py).call_method1(
-                            intern!(py, "emit"),
-                            (current_progress,),
-                        )?;
+                        progress_signal
+                            .bind(py)
+                            .call_method1(intern!(py, "emit"), (current_progress,))?;
                     }
                     if is_valid_stop {
                         global_stop_copy.store(
@@ -779,10 +1004,9 @@ fn stdf_to_xlsx(
             if check_signal && (is_valid_progress_signal || is_valid_stop) {
                 if let Err(e) = Python::attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
-                        progress_signal.bind(py).call_method1(
-                            intern!(py, "emit"),
-                            (parse_progess,),
-                        )?;
+                        progress_signal
+                            .bind(py)
+                            .call_method1(intern!(py, "emit"), (parse_progess,))?;
                     }
                     if is_valid_stop {
                         stop_flag_rust = stop_flag
@@ -794,7 +1018,7 @@ fn stdf_to_xlsx(
                 }) {
                     return Err(StdfHelperError { msg: e.to_string() });
                 }
-            }            
+            }
         }
         // save xlsx to path
         xlsx.save_to_path(std::path::Path::new(&xlsx_path))?;
@@ -808,10 +1032,10 @@ fn stdf_to_xlsx(
 #[pyfunction]
 #[pyo3(name = "norm_cdf")]
 fn norm_cdf<'py>(
-    py: Python<'py>, 
-    data: PyReadonlyArray1<f64>, 
-    mean: f64, 
-    stddev: f64
+    py: Python<'py>,
+    data: PyReadonlyArray1<f64>,
+    mean: f64,
+    stddev: f64,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let data = data.as_array();
     let mut p = Array1::from_elem(data.len(), f64::NAN);
@@ -832,7 +1056,7 @@ fn norm_cdf<'py>(
 #[pyo3(name = "empirical_cdf")]
 fn empirical_cdf<'py>(
     py: Python<'py>,
-    data: PyReadonlyArray1<f64>
+    data: PyReadonlyArray1<f64>,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     // equivalent to scipy.stats.rankdata() in 'max' mode
     let data = data.as_array();
@@ -871,10 +1095,10 @@ fn empirical_cdf<'py>(
 #[pyfunction]
 #[pyo3(name = "norm_ppf")]
 fn norm_ppf<'py>(
-    py: Python<'py>, 
+    py: Python<'py>,
     p: PyReadonlyArray1<f64>,
-    mean: f64, 
-    stddev: f64
+    mean: f64,
+    stddev: f64,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let p = p.as_array();
     let init = if stddev == 0.0 { mean } else { f64::NAN };
