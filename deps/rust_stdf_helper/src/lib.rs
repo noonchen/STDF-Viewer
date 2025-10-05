@@ -374,8 +374,8 @@ fn analyze_stdf_file(
         tsr_id_tracker.iter().for_each(|(rec_code, tsr_set)| {
             // get id set from test tracker, check for mismatch
             let test_set = test_id_tracker.entry(*rec_code).or_default();
-            let mismatch_test: HashSet<&(u32, String)> = test_set.difference(tsr_set).collect();
-            let mismatch_tsr: HashSet<&(u32, String)> = tsr_set.difference(test_set).collect();
+            let mut mismatch_test: Vec<&(u32, String)> = test_set.difference(tsr_set).collect();
+            let mut mismatch_tsr: Vec<&(u32, String)> = tsr_set.difference(test_set).collect();
             let has_mis_test = mismatch_test.len() > 1;
             let has_mis_tsr = mismatch_tsr.len() > 1;
 
@@ -384,6 +384,7 @@ fn analyze_stdf_file(
                 // print mismatched test records
                 if has_mis_test {
                     analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
+                    mismatch_test.sort_by(|&a, &b| a.0.cmp(&b.0));
                     mismatch_test.iter().for_each(|&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
@@ -393,6 +394,7 @@ fn analyze_stdf_file(
                 // print mismatch TSR
                 if has_mis_tsr {
                     analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
+                    mismatch_tsr.sort_by(|&a, &b| a.0.cmp(&b.0));
                     mismatch_tsr.iter().for_each(|&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
@@ -401,30 +403,39 @@ fn analyze_stdf_file(
         });
 
         // 3. test number should only appear once (warning)
-        test_id_tracker.iter().for_each(|(rec_code, id_set)| {
-            let rec_code = get_rec_name_from_code(*rec_code);
-            // create a hashmap with test num as key, vec of test name as value
-            let mut num_map = HashMap::<u32, Vec<&str>>::new();
-            id_set.iter().for_each(|(num, name)| {
-                num_map.entry(*num).or_default().push(name);
+        {
+            let mut reused = false;
+            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
+                let rec_code = get_rec_name_from_code(*rec_code);
+                // create a hashmap with test num as key, vec of test name as value
+                let mut num_map = HashMap::<u32, Vec<&str>>::new();
+                id_set.iter().for_each(|(num, name)| {
+                    num_map.entry(*num).or_default().push(name);
+                });
+                // iterate test number hashmap, if vec len > 1, means test number are reused
+                num_map.iter().for_each(|(num, name_vec)| {
+                    if name_vec.len() > 1 {
+                        reused = true;
+                        // add the test num and name as duplicates to result
+                        analyze_rst += &format!(
+                            "\nWarning: test number [{}] is reused in multiple {}s\n",
+                            num, rec_code
+                        );
+                        name_vec.iter().for_each(|&s| {
+                            analyze_rst += &format!("\t({}, \"{}\")\n", num, s);
+                        });
+                    }
+                });
             });
-            // iterate test number hashmap, if vec len > 1, means test number are reused
-            num_map.iter().for_each(|(num, name_vec)| {
-                if name_vec.len() > 1 {
-                    // add the test num and name as duplicates to result
-                    analyze_rst += &format!(
-                        "\nWarning: test number [{}] is reused in multiple {}s\n",
-                        num, rec_code
-                    );
-                    name_vec.iter().for_each(|&s| {
-                        analyze_rst += &format!("\t({}, \"{}\")\n", num, s);
-                    });
-                }
-            });
-        });
+            if reused {
+                analyze_rst += "\nNote: if test records share a test number and refer to the same test, \
+                                consider selecting 'Number Only' as the 'Test Identifier' in settings\n";
+            }
+        }
 
         // 4. test number cannot be reused in multiple record types (error)
         {
+            let mut reused = false;
             // create a 
             // a. (num, name) -> set of <rec_code> hashmap 
             // b. num -> set of <rec_code> hashmap
@@ -446,8 +457,8 @@ fn analyze_stdf_file(
             // check test number reuse
             reverse_num_map.iter().for_each(|(num, rec_set)| {
                 if rec_set.len() > 1 {
-                    analyze_rst += &format!(
-                        "\nError: test number [{}] is reused in {:?}!\n\nPlots and statistics will be unreliable when selecting 'Number Only' as 'Test Identifier' in settings!\n",
+                    reused = true;
+                    analyze_rst += &format!("\nError: test number [{}] is reused in {:?}!\n",
                         num,
                         rec_set
                             .iter()
@@ -456,11 +467,18 @@ fn analyze_stdf_file(
                     );
                 }
             });
+            if reused {
+                analyze_rst += "\nNote: When a test number is reused in multiple record types, \
+                        plots and statistics will be unreliable when selecting 'Number Only' as 'Test Identifier' in settings!\
+                        \nConsider using 'Number + Name' instead.\n";
+            }
+
+            reused = false;
             // check test number & name reuse
             reverse_id_map.iter().for_each(|(&(num, name), rec_set)| {
                 if rec_set.len() > 1 {
-                    analyze_rst += &format!(
-                        "\nFatal: test number + name [{}, \"{}\"] is reused in {:?}!\n\nSTDF-Viewer cannot parse this file correctly, results will be unreliable!\n",
+                    reused = true;
+                    analyze_rst += &format!("\nFatal: test number and name [{}, \"{}\"] are reused in {:?}!\n",
                         num, name,
                         rec_set
                             .iter()
@@ -469,6 +487,10 @@ fn analyze_stdf_file(
                     );
                 }
             });
+            if reused {
+                analyze_rst += "\nFatal Note: Test number and name are reused in multiple record types, \
+                        STDF-Viewer doesn't support this file and results of listed tests will be unreliable!.\n";
+            }
         }
 
         result_log += &analyze_rst;
