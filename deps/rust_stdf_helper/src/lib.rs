@@ -238,7 +238,7 @@ fn analyze_stdf_file(
                                 if is_valid_data_signal {
                                     data_signal
                                         .bind(py)
-                                        .call_method1(intern!(py, "emit"), (result_log,))?;
+                                        .call_method1(intern!(py, "emit"), (&result_log,))?;
                                 }
                                 if is_valid_progress_signal {
                                     progress_signal
@@ -255,7 +255,7 @@ fn analyze_stdf_file(
                             })?;
                         }
                         // reset to default
-                        result_log = String::with_capacity(512);
+                        result_log.clear();
                     }
                     StdfRecord::WRR(wrr_rec) => {
                         result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
@@ -370,7 +370,37 @@ fn analyze_stdf_file(
             });
         });
 
-        // 2. test number should only appear once (warning)
+        // 2. each test should have corresponding TSR (warning)
+        tsr_id_tracker.iter().for_each(|(rec_code, tsr_set)| {
+            // get id set from test tracker, check for mismatch
+            let test_set = test_id_tracker.entry(*rec_code).or_default();
+            let mismatch_test: HashSet<&(u32, String)> = test_set.difference(tsr_set).collect();
+            let mismatch_tsr: HashSet<&(u32, String)> = tsr_set.difference(test_set).collect();
+            let has_mis_test = mismatch_test.len() > 1;
+            let has_mis_tsr = mismatch_tsr.len() > 1;
+
+            if has_mis_test || has_mis_tsr {
+                let rec_code = get_rec_name_from_code(*rec_code);
+                // print mismatched test records
+                if has_mis_test {
+                    analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
+                    mismatch_test.iter().for_each(|&(num, name)| {
+                        analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
+                    });
+                } else {
+                    analyze_rst += &format!("\nWarning: all {}s have matching TSR, but\n", rec_code);
+                }
+                // print mismatch TSR
+                if has_mis_tsr {
+                    analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
+                    mismatch_tsr.iter().for_each(|&(num, name)| {
+                        analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
+                    });
+                }
+            }
+        });
+
+        // 3. test number should only appear once (warning)
         test_id_tracker.iter().for_each(|(rec_code, id_set)| {
             let rec_code = get_rec_name_from_code(*rec_code);
             // create a hashmap with test num as key, vec of test name as value
@@ -393,7 +423,7 @@ fn analyze_stdf_file(
             });
         });
 
-        // 3. test number cannot be reused in multiple record types (error)
+        // 4. test number cannot be reused in multiple record types (error)
         {
             // create a 
             // a. (num, name) -> set of <rec_code> hashmap 
@@ -417,7 +447,7 @@ fn analyze_stdf_file(
             reverse_num_map.iter().for_each(|(num, rec_set)| {
                 if rec_set.len() > 1 {
                     analyze_rst += &format!(
-                        "\nError: test number [{}] is reused in {:?}, plots and statistics will be unreliable when selecting 'Number Only' as 'Test Identifier' in settings!\n",
+                        "\nError: test number [{}] is reused in {:?}!\n\nPlots and statistics will be unreliable when selecting 'Number Only' as 'Test Identifier' in settings!\n",
                         num,
                         rec_set
                             .iter()
@@ -430,7 +460,7 @@ fn analyze_stdf_file(
             reverse_id_map.iter().for_each(|(&(num, name), rec_set)| {
                 if rec_set.len() > 1 {
                     analyze_rst += &format!(
-                        "\nError: test number + name [{}, \"{}\"] is reused in {:?}, plots and statistics will be unreliable!\n",
+                        "\nFatal: test number + name [{}, \"{}\"] is reused in {:?}!\n\nSTDF-Viewer cannot parse this file correctly, results will be unreliable!\n",
                         num, name,
                         rec_set
                             .iter()
@@ -440,8 +470,6 @@ fn analyze_stdf_file(
                 }
             });
         }
-
-        // 4. each test should have corresponding TSR (warning)
 
         result_log += &analyze_rst;
         result_log += &format!(
