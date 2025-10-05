@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Thu Oct 02 2025
+# Last Modified: Mon Oct 06 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -45,6 +45,7 @@ class HistoPlotConfig(BaseModel):
     show_boxp: bool = Field(True, alias="Show Boxplot")
     show_boxpol: bool = Field(True, alias="Show Boxplot Outlier")
     show_histobars: bool = Field(True, alias="Show Histogram Bars")
+    norm_histobars: bool = Field(False, alias="Normalize Histogram")
     bin_count: int = Field(30, alias="Bin Count")
     sigma_lines: str = Field("3, 6, 9", alias="δ Lines")
 
