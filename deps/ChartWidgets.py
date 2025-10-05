@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Wed Oct 01 2025
+# Last Modified: Sun Oct 05 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -125,6 +125,19 @@ def prepareBinRectList(binCenter: np.ndarray,
         rectList.append( (QRectF(left, top, width, height), 
                           (isHBIN, bin_num)) )
     return rectList
+
+
+def getAxisRange(minList, maxList, padding = 0.15):
+    a_min = np.nanmin(minList)
+    a_max = np.nanmax(maxList)
+    if a_min == a_max:
+        a_min -= 1
+        a_max += 1
+    else:
+        pad = padding * (a_max - a_min)
+        a_min -= pad
+        a_max += pad
+    return (a_min, a_max)
 
 
 class PlotMenu(QMenu):
@@ -660,17 +673,8 @@ class TrendChart(GraphicViewWithMenu):
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
-        self.y_min = np.nanmin(y_min_list)
-        self.y_max = np.nanmax(y_max_list)
-        # add 15% padding
-        padding = 0.15 * (self.y_max - self.y_min)
-        self.y_min -= padding
-        self.y_max += padding
-        # it's common that y_min == y_max for FTR
-        # in this case we need to manually assign y limits
-        if self.y_min == self.y_max:
-            self.y_min -= 1
-            self.y_max += 1
+        # add 15% padding to y lim range
+        self.y_min, self.y_max = getAxisRange(y_min_list, y_max_list)
         # call draw() if valid
         self.draw()
         
@@ -766,11 +770,7 @@ class TrendChart(GraphicViewWithMenu):
                 addFileLabel(pitem, fid)
             pitem.setClipToView(True)
             # set range and limits
-            x_min = min(x_min_list)
-            x_max = max(x_max_list)
-            oh = 0.02 * (x_max - x_min)
-            x_min -= oh
-            x_max += oh
+            x_min, x_max = getAxisRange(x_min_list, x_max_list, 0.02)
             # view.setAutoPan()
             view.setRange(xRange=(x_min, x_max), 
                           yRange=(self.y_min, self.y_max),
