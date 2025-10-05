@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Oct 05 2025
+# Last Modified: Mon Oct 06 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -870,6 +870,8 @@ class HistoChart(TrendChart):
                 # to ensure the following operation is on valid data
                 continue
             bar_base = 0
+            # track bin_width of all sites
+            bin_width_list = []
             # xaxis tick labels
             ticks = []
             for site, data_per_site in sitesData.items():
@@ -888,9 +890,11 @@ class HistoChart(TrendChart):
                  tipData) = prepareHistoData(x, y, 
                                             settings.histo.bin_count, 
                                             bar_base)
+                bin_width_list.append(bin_width)
                 site_info = "All Site" if site == -1 else f"Site {site}"
-                # use normalized hist for better display
-                # hist = hist / hist.max()
+                # use normalized hist if enabled
+                if settings.histo.norm_histobars and hist.max() != 0:
+                    hist = hist / hist.max()
                 item = SVBarGraphItem(x0=bar_base, y0=edges, 
                                       width=hist, height=bin_width, 
                                       brush=siteColor, name=site_info)
@@ -929,11 +933,14 @@ class HistoChart(TrendChart):
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
+            # set min range to avoid zoom too much
+            minZoomRange = 4 * min(bin_width_list)
             view.setRange(xRange=(0, bar_base), 
                           yRange=(self.y_min, self.y_max),
                           padding=0.0)
             view.setLimits(xMin=0, xMax=bar_base+0.5,
-                           yMin=self.y_min, yMax=self.y_max)
+                           yMin=self.y_min, yMax=self.y_max,
+                           minYRange=minZoomRange)
             # add to layout
             self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
             # link current viewbox to previous, 
@@ -999,14 +1006,14 @@ class BinChart(GraphicViewWithMenu):
                 # draw horizontal bars, use `ind` instead of `bin_num` as y
                 y = np.arange(len(numList))
                 height = 0.8
-                bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
                 rectList = prepareBinRectList(y, cntList, height, isHBIN, numList)
-                bar.setRectDutList(rectList)
                 # show name (tick), bin number and count in hover tip
                 ticks = [[binTicks[n] for n in numList]]
                 tipData = [(f"{name[1]}\nBin: {n}", cnt) 
                            for (name, n, cnt) 
                            in zip(ticks[0], numList, cntList)]
+                bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
+                bar.setRectDutList(rectList)
                 bar.setTipData(tipData)
                 bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
                 pitem.addItem(bar)
@@ -1020,7 +1027,7 @@ class BinChart(GraphicViewWithMenu):
                 y_max = len(numList)
                 view_bin.setLimits(xMin=0, xMax=x_max, 
                                    yMin=-1, yMax=y_max, 
-                                   minXRange=2, minYRange=4)
+                                   minYRange=4)
                 view_bin.setRange(xRange=(0, x_max), 
                                   yRange=(-1, y_max),
                                   padding=0.0)
