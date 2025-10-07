@@ -26,7 +26,7 @@
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QMenu, QAction
-from PyQt5.QtCore import Qt, QPoint, QRectF
+from PyQt5.QtCore import Qt, QPoint, QPointF, QRectF, QLineF
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.functions as fn
@@ -618,63 +618,39 @@ class WaferViewBox(TrendViewBox):
         return list(dataSet)
 
 
-class SigmaRegion(QtWidgets.QGraphicsRectItem):
-    def __init__(self, region: tuple[int, float, float, float, float], isVertical = True):
+class HistoLineGroup(QtWidgets.QGraphicsItemGroup):
+    '''
+    Draw finite lines that are perpendicular to axis for histogram, such as mean, median and sigma lines.
+    '''
+    def __init__(self, base: float, length: float, isVertical = True):
         '''
-        region:         Tuple of (n, avg, stddev, base, height), in data coords.
-        isVertical:     If True, using y = base, y = base + height, x = -n*stddev, x = n*stddev to draw a rect.
-        color:          Tuple of (R, G, B, A).
+        base:           x/y of the starting point
+        length:         Length of finite lines
+        isVertical:     If True, `base` is on y axis.
         '''
+        super().__init__(parent = None)
+        self._base = base
+        self._length = length
         self._isVertical = isVertical
-        n, avg, stddev, base, height = region
-        # QRectF coords is different than data coords, x+ towards right, y+ towards down,
-        # which means:
-        # right = left + width
-        # bottom = top + height
-        # 
-        # we need to switch top and bottom to draw correct rect on data coords,
-        # and noted that "top" of rect is actually the bottom line
-        if isVertical:
-            # top should be "base + height", but use "base"
-            l, t, w, h = avg - n * stddev, base, 2 * n * stddev, height
-        else:
-            # top should be "avg + n * stddev", but use "avg - n * stddev"
-            l, t, w, h = base, avg - n * stddev, height, 2 * n * stddev
-        rect = QRectF(l, t, w, h)
-        super().__init__(rect)
-        self.setBrush(QtGui.QBrush(Qt.BrushStyle.NoBrush))
-        self.setPen(QtGui.QPen(Qt.PenStyle.NoPen))
-        # larger the n, lower it goes
-        self.setZValue(-1 * n)
+        self._textItems = []
         
-        # gray dash border
-        self._borderPen = QtGui.QPen(QtGui.QColor(128, 128, 128))
-        self._borderPen.setCosmetic(True)
-        self._borderPen.setWidth(2)
-        self._borderPen.setStyle(Qt.PenStyle.DashDotLine)
-        
-        # add label texts
-        self.labelNeg = pg.TextItem(f"-{'' if n == 1 else n}σ", anchor=(1, 0))
-        self.labelPos = pg.TextItem(f"{''  if n == 1 else n}σ", anchor=(0, 0) if isVertical else (1, 1))
-        self.labelNeg.setPos(self.rect().bottomLeft() if isVertical else self.rect().topRight())
-        self.labelPos.setPos(self.rect().bottomRight() if isVertical else self.rect().bottomRight())
-        self.labelNeg.setParentItem(self)
-        self.labelPos.setParentItem(self)
-        
-    def paint(self, painter, option, widget = None):
-        painter.setPen(self.pen())
-        painter.setBrush(self.brush())
-        painter.drawRect(self.rect())
-
-        # draw only vertical dashed borders
-        painter.setPen(self._borderPen)
-        r = self.rect()
+    def addLine(self, pos: float, pen: QtGui.QPen, label: str, labelAnchor = (1, 1)):
         if self._isVertical:
-            painter.drawLine(r.topLeft(), r.bottomLeft())
-            painter.drawLine(r.topRight(), r.bottomRight())
+            # pos is on x axis
+            x1, y1, x2, y2 = pos, self._base, pos, self._base + self._length
         else:
-            painter.drawLine(r.topLeft(), r.topRight())
-            painter.drawLine(r.bottomLeft(), r.bottomRight())
+            # pos is on y axis
+            x1, y1, x2, y2 = self._base, pos, self._base + self._length, pos
+            
+        lineItem = QtWidgets.QGraphicsLineItem(QLineF(x1, y1, x2, y2))
+        lineItem.setPen(pen)
+        self.addToGroup(lineItem)
+                
+        # add label texts
+        textItem = pg.TextItem(text=label, color=pen.color(), anchor=labelAnchor)
+        textItem.setPos(QPointF(x2, y2))
+        textItem.setParentItem(self)
+        self._textItems.append(textItem)        
 
 
 class TrendChart(GraphicViewWithMenu):
@@ -904,6 +880,11 @@ class SVBarGraphItem(pg.BarGraphItem):
 
 
 class HistoChart(TrendChart):
+    def __init__(self):
+        super().__init__()
+        self.sigmaPen = pg.mkPen(cosmetic=True, width=3, color=(100, 100, 100))
+        self.sigmaPen.setStyle(Qt.PenStyle.DashDotLine)
+        
     def draw(self):
         settings = ss.getSetting()
         # add title
@@ -966,24 +947,33 @@ class HistoChart(TrendChart):
                 # set the bar base of histogram of next site
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
-                # mean
+                # add lines
+                isVertical = False  #TODO replace with settings
+                lines = HistoLineGroup(bar_base, inc, isVertical)
                 mean = data_per_site["Mean"]
-                if settings.histo.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
-                    pitem.addLine(y=mean, pen=self.meanPen, name=f"Mean_site{site}", label="x̅ = {value:0.3f}",
-                                  labelOpts={"position":0.9, "color": self.meanPen.color(), "movable": True})
-                # median
                 median = data_per_site["Median"]
-                if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
-                    pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
-                                  labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
-                # sigma lines
                 stddev = data_per_site["SDev"]
+                # use different anchor to avoid text overlap
+                if isVertical:
+                    meanAnc, medianAnc = ((1, 0), (0, 0)) if mean < median else ((0, 0), (1, 0))
+                    negSigAnc, posSigAnc = (1, 0), (0, 0)
+                else:
+                    meanAnc, medianAnc = ((1, 0), (1, 1)) if mean < median else ((1, 1), (1, 0))
+                    negSigAnc, posSigAnc = (1, 0), (1, 1)
+                # mean
+                if settings.histo.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
+                    lines.addLine(mean, self.meanPen, f"x̅ = {settings.getFloatFormat()}" % mean, meanAnc)
+                # median
+                if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
+                    lines.addLine(median, self.medianPen, f"x̃ = {settings.getFloatFormat()}" % median, medianAnc)
+                # sigma lines
                 sigmaList = settings.histo.get_sigma_list()
                 if len(sigmaList) > 0 and stddev != 0 and ~np.isnan(stddev) and ~np.isinf(stddev):
                     for n in sigmaList:
                         if n == 0: continue
-                        sigreg = SigmaRegion((n, mean, stddev, bar_base, inc), False)
-                        view.addItem(sigreg)
+                        lines.addLine(mean-n*stddev, self.sigmaPen, f"-{'' if n == 1 else n}σ", negSigAnc)
+                        lines.addLine(mean+n*stddev, self.sigmaPen, f"{''  if n == 1 else n}σ", posSigAnc)
+                view.addItem(lines)
                 # update bar base for other sites
                 bar_base += inc
             # add test limits and specs
