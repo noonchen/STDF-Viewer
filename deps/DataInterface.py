@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Mon Oct 06 2025
+# Last Modified: Tue Oct 07 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -748,6 +748,7 @@ class DataInterface:
             nestSiteData["Max"] = test_site_fid.pop("Max")
             nestSiteData["Mean"] = test_site_fid.pop("Mean")
             nestSiteData["Median"] = test_site_fid.pop("Median")
+            nestSiteData["SDev"] = test_site_fid.pop("SDev")
             # filter out nan from dataList
             dataOrig = test_site_fid.pop("dataList")
             validMask = ~np.isnan(dataOrig)

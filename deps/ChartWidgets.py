@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Mon Oct 06 2025
+# Last Modified: Wed Oct 08 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -618,6 +618,65 @@ class WaferViewBox(TrendViewBox):
         return list(dataSet)
 
 
+class SigmaRegion(QtWidgets.QGraphicsRectItem):
+    def __init__(self, region: tuple[int, float, float, float, float], isVertical = True):
+        '''
+        region:         Tuple of (n, avg, stddev, base, height), in data coords.
+        isVertical:     If True, using y = base, y = base + height, x = -n*stddev, x = n*stddev to draw a rect.
+        color:          Tuple of (R, G, B, A).
+        '''
+        self._isVertical = isVertical
+        n, avg, stddev, base, height = region
+        # QRectF coords is different than data coords, x+ towards right, y+ towards down,
+        # which means:
+        # right = left + width
+        # bottom = top + height
+        # 
+        # we need to switch top and bottom to draw correct rect on data coords,
+        # and noted that "top" of rect is actually the bottom line
+        if isVertical:
+            # top should be "base + height", but use "base"
+            l, t, w, h = avg - n * stddev, base, 2 * n * stddev, height
+        else:
+            # top should be "avg + n * stddev", but use "avg - n * stddev"
+            l, t, w, h = base, avg - n * stddev, height, 2 * n * stddev
+        rect = QRectF(l, t, w, h)
+        super().__init__(rect)
+        self.setBrush(QtGui.QBrush(Qt.BrushStyle.NoBrush))
+        self.setPen(QtGui.QPen(Qt.PenStyle.NoPen))
+        # larger the n, lower it goes
+        self.setZValue(-1 * n)
+        
+        # gray dash border
+        self._borderPen = QtGui.QPen(QtGui.QColor(128, 128, 128))
+        self._borderPen.setCosmetic(True)
+        self._borderPen.setWidth(2)
+        self._borderPen.setStyle(Qt.PenStyle.DashDotLine)
+        
+        # add label texts
+        self.labelNeg = pg.TextItem(f"-{'' if n == 1 else n}σ", anchor=(1, 0))
+        self.labelPos = pg.TextItem(f"{''  if n == 1 else n}σ", anchor=(0, 0) if isVertical else (1, 1))
+        self.labelNeg.setPos(self.rect().bottomLeft() if isVertical else self.rect().topRight())
+        self.labelPos.setPos(self.rect().bottomRight() if isVertical else self.rect().bottomRight())
+        self.labelNeg.setParentItem(self)
+        self.labelPos.setParentItem(self)
+        
+    def paint(self, painter, option, widget = None):
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        painter.drawRect(self.rect())
+
+        # draw only vertical dashed borders
+        painter.setPen(self._borderPen)
+        r = self.rect()
+        if self._isVertical:
+            painter.drawLine(r.topLeft(), r.bottomLeft())
+            painter.drawLine(r.topRight(), r.bottomRight())
+        else:
+            painter.drawLine(r.topLeft(), r.topRight())
+            painter.drawLine(r.bottomLeft(), r.bottomRight())
+
+
 class TrendChart(GraphicViewWithMenu):
     def __init__(self):
         super().__init__(800, 400)
@@ -895,17 +954,18 @@ class HistoChart(TrendChart):
                 # use normalized hist if enabled
                 if settings.histo.norm_histobars and hist.max() != 0:
                     hist = hist / hist.max()
-                item = SVBarGraphItem(x0=bar_base, y0=edges, 
-                                      width=hist, height=bin_width, 
-                                      brush=siteColor, name=site_info)
-                item.setRectDutList(rectDutList)
-                item.setTipData(tipData)
-                item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
-                pitem.addItem(item)
+                # show bars if enabled
+                if settings.histo.show_histobars:
+                    item = SVBarGraphItem(x0=bar_base, y0=edges, 
+                                        width=hist, height=bin_width, 
+                                        brush=siteColor, name=site_info)
+                    item.setRectDutList(rectDutList)
+                    item.setTipData(tipData)
+                    item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
+                    pitem.addItem(item)
                 # set the bar base of histogram of next site
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
-                bar_base += inc
                 # mean
                 mean = data_per_site["Mean"]
                 if settings.histo.show_mean and ~np.isnan(mean) and ~np.isinf(mean):
@@ -915,7 +975,17 @@ class HistoChart(TrendChart):
                 median = data_per_site["Median"]
                 if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
-                                  labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})                
+                                  labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
+                # sigma lines
+                stddev = data_per_site["SDev"]
+                sigmaList = settings.histo.get_sigma_list()
+                if len(sigmaList) > 0 and stddev != 0 and ~np.isnan(stddev) and ~np.isinf(stddev):
+                    for n in sigmaList:
+                        if n == 0: continue
+                        sigreg = SigmaRegion((n, mean, stddev, bar_base, inc), False)
+                        view.addItem(sigreg)
+                # update bar base for other sites
+                bar_base += inc
             # add test limits and specs
             for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.histo.show_lolim), 
                                               ("HLimit", "High Limit", self.hilimitPen, settings.histo.show_hilim), 

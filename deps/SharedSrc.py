@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Mon Oct 06 2025
+# Last Modified: Tue Oct 07 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -48,6 +48,13 @@ class HistoPlotConfig(BaseModel):
     norm_histobars: bool = Field(False, alias="Normalize Histogram")
     bin_count: int = Field(30, alias="Bin Count")
     sigma_lines: str = Field("3, 6, 9", alias="δ Lines")
+    
+    def get_sigma_list(self):
+        try:
+            rst = [abs(int(i)) for i in self.sigma_lines.split(",")]
+        except ValueError:
+            rst = []
+        return rst
 
 
 class PPQQPlotConfig(BaseModel):
