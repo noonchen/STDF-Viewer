@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Wed Oct 08 2025
+# Last Modified: Thu Oct 09 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -1019,13 +1019,20 @@ class HistoChart(TrendChart):
             # labels and file id
             unit = infoDict["Unit"]
             pitem.getAxis(tickAxis).setTicks([ticks])
-            if isFirstPlot:
+            if isFirstPlot and not isVertical:
+                # horizontal mode, add axis label to first plot
                 pitem.getAxis(valueAxis).setLabel(self.test_name + f" ({unit})" if unit else "")
             else:
                 pitem.getAxis(valueAxis).setStyle(showValues=False)
+            if not isFirstPlot:
                 view.__getattribute__(linkAttr)(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
+        
+        # vertical mode, show axis of last plot, loop ends
+        if isVertical:
+            pitem.getAxis(valueAxis).setStyle(showValues=True)
+            pitem.getAxis(valueAxis).setLabel(self.test_name + f" ({unit})" if unit else "")
 
 
 class BinChart(GraphicViewWithMenu):
@@ -1041,6 +1048,7 @@ class BinChart(GraphicViewWithMenu):
         
         settings = ss.getSetting()
         self.validData = True
+        isVertical = settings.gen.vert_bar
         row = 0
         (head, site) = binData["HS"]
         hs_info = f" - Head {head} - " + f"All Site" if site == -1 else f"Site {site}"
@@ -1059,7 +1067,7 @@ class BinChart(GraphicViewWithMenu):
             binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
             self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
                                      row=row, col=0, 
-                                     rowspan=1, colspan=num_files, 
+                                     rowspan=1, colspan=1 if isVertical else num_files, 
                                      size="20pt")
             row += 1
             # iterate thru all files
@@ -1067,51 +1075,73 @@ class BinChart(GraphicViewWithMenu):
                 isFirstPlot = len(tmpVbList) == 0
                 view_bin = BinViewBox()
                 view_bin.setFileID(fid)
-                view_bin.invertY(True)
+                # in horizontal mode, invert y axis to put Bin0 at top
+                view_bin.invertY(not isVertical)
                 pitem = pg.PlotItem(viewBox=view_bin)
                 binStats = hsbin[fid]
                 # get data for barGraph
                 numList = sorted(binTicks.keys())
                 cntList = np.array([binStats.get(n, 0) for n in numList])
                 colorList = [binColorDict[n] for n in numList]
-                # draw horizontal bars, use `ind` instead of `bin_num` as y
-                y = np.arange(len(numList))
-                height = 0.8
-                rectList = prepareBinRectList(y, cntList, height, isHBIN, numList)
+                # draw bars, use `ind` instead of `bin_num`
+                tickInd = np.arange(len(numList))
+                binWidth = 0.8
+                rectList = prepareBinRectList(tickInd, cntList, binWidth, isHBIN, numList)
                 # show name (tick), bin number and count in hover tip
                 ticks = [[binTicks[n] for n in numList]]
                 tipData = [(f"{name[1]}\nBin: {n}", cnt) 
                            for (name, n, cnt) 
                            in zip(ticks[0], numList, cntList)]
-                bar = SVBarGraphItem(x0=0, y=y, width=cntList, height=height, brushes=colorList)
+                cnt_max = max(cntList) * 1.15
+                ind_max = len(numList)
+                if isVertical:
+                    barArg = dict(y0=0, x=tickInd, height=cntList, width=binWidth)
+                    layoutArg = dict(row=row, col=0, rowspan=1, colspan=1)
+                    rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
+                    limitArg = dict(yMin=0, yMax=cnt_max, 
+                                    xMin=-1, xMax=ind_max, minXRange=4)
+                    # each fid takes a single row in vertical mode
+                    row += 1
+                    tickAxis = "bottom"
+                    valueAxis = "left"
+                    linkAttr = "setXLink"
+                else:
+                    barArg = dict(x0=0, y=tickInd, width=cntList, height=binWidth)
+                    layoutArg = dict(row=row, col=fid, rowspan=1, colspan=1)
+                    rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
+                    limitArg = dict(xMin=0, xMax=cnt_max, 
+                                    yMin=-1, yMax=ind_max, minYRange=4)
+                    tickAxis = "left"
+                    valueAxis = "bottom"
+                    linkAttr = "setYLink"
+                bar = SVBarGraphItem(**barArg, brushes=colorList)
                 bar.setRectDutList(rectList)
                 bar.setTipData(tipData)
                 bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
                 pitem.addItem(bar)
-                # set ticks to y
-                pitem.getAxis("left").setTicks(ticks)
-                pitem.getAxis("bottom").setLabel(f"{binType} Count" 
+                # set ticks
+                pitem.getAxis(tickAxis).setTicks(ticks)
+                pitem.getAxis(valueAxis).setLabel(f"{binType} Count" 
                                                  if num_files == 1 
                                                  else f"{binType} Count in File {fid}")
                 # set visible range
-                x_max = max(cntList) * 1.15
-                y_max = len(numList)
-                view_bin.setLimits(xMin=0, xMax=x_max, 
-                                   yMin=-1, yMax=y_max, 
-                                   minYRange=4)
-                view_bin.setRange(xRange=(0, x_max), 
-                                  yRange=(-1, y_max),
-                                  padding=0.0)
+                view_bin.setRange(**rangeArg, padding=0.0)
+                view_bin.setLimits(**limitArg)
                 # add them to the same row
-                self.plotlayout.addItem(pitem, row=row, col=fid, rowspan=1, colspan=1)
-                # for 2nd+ plots
+                self.plotlayout.addItem(pitem, **layoutArg)
+                if isFirstPlot and not isVertical:
+                    pitem.getAxis(tickAxis).show()
+                else:
+                    pitem.getAxis(tickAxis).hide()
                 if not isFirstPlot:
-                    pitem.getAxis("left").hide()
-                    view_bin.setYLink(tmpVbList[0])
+                    view_bin.__getattribute__(linkAttr)(tmpVbList[0])
                 tmpVbList.append(view_bin)
                 # this list is for storing all
                 # view boxes from HBIN/SBIN plot
                 self.view_list.append(view_bin)
+            # vertical mode, show axis of last plot
+            if isVertical:
+                pitem.getAxis(tickAxis).show()
             row += 1
 
 
