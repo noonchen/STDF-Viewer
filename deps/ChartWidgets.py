@@ -777,18 +777,7 @@ class TrendChart(GraphicViewWithMenu):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.trend.show_hispec)]:
-                lim = infoDict[key]
-                pos = 0.8 if key.endswith("Spec") else 0.2
-                anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
-                    pitem.addLine(y=lim, pen=pen, name=name, 
-                                label=f"{name} = {{value:0.2f}}", 
-                                labelOpts={"position":pos, "color": pen.color(), 
-                                            "movable": True, "anchors": anchors})
+            self.addLimitsToPlot(infoDict, pitem)
             # dynamic limits
             for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim), 
                                                  (dyH, "Dynamic High Limit", self.hilimitPen, settings.trend.show_hilim)]:
@@ -822,6 +811,21 @@ class TrendChart(GraphicViewWithMenu):
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
+            
+    def addLimitsToPlot(self, infoDict: dict, pitem: pg.PlotDataItem):
+        settings = ss.getSetting()
+        for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+                                            ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
+                                            ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec), 
+                                            ("HSpec", "High Spec", self.hispecPen, settings.trend.show_hispec)]:
+            lim = infoDict[key]
+            pos = 0.8 if key.endswith("Spec") else 0.2
+            anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
+            if enabled and ~np.isnan(lim) and ~np.isinf(lim):
+                pitem.addLine(y=lim, pen=pen, name=name, 
+                            label=f"{name} = {{value:0.2f}}", 
+                            labelOpts={"position":pos, "color": pen.color(), 
+                                        "movable": True, "anchors": anchors})
 
 
 class SVBarGraphItem(pg.BarGraphItem):
@@ -977,18 +981,7 @@ class HistoChart(TrendChart):
                 # update bar base for other sites
                 bar_base += inc
             # add test limits and specs
-            for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.histo.show_lolim), 
-                                              ("HLimit", "High Limit", self.hilimitPen, settings.histo.show_hilim), 
-                                              ("LSpec", "Low Spec", self.lospecPen, settings.histo.show_lospec), 
-                                              ("HSpec", "High Spec", self.hispecPen, settings.histo.show_hispec)]:
-                lim = infoDict[key]
-                pos = 0.8 if key.endswith("Spec") else 0.2
-                anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
-                if enabled and ~np.isnan(lim) and ~np.isinf(lim):
-                    pitem.addLine(y=lim, pen=pen, name=name, 
-                                label=f"{name} = {{value:0.2f}}", 
-                                labelOpts={"position":pos, "color": pen.color(), 
-                                            "movable": True, "anchors": anchors})
+            self.addLimitsToPlot(infoDict, pitem)
             
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
