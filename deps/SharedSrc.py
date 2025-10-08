@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Tue Oct 07 2025
+# Last Modified: Wed Oct 08 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -106,6 +106,7 @@ class GeneralConfig(BaseModel):
     sort_tlist: str = Field("Original", alias="Sort TestList")
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
     hide_inf: bool = Field(True, alias="Hide Infinite Value")
+    vert_bar: bool = Field(False, alias="Vertical BarGraph")
     gen_db_idx: bool = Field(False, alias="Create DB Index")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},

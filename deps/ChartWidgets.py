@@ -812,7 +812,7 @@ class TrendChart(GraphicViewWithMenu):
             # append view for counting plots
             self.view_list.append(view)
             
-    def addLimitsToPlot(self, infoDict: dict, pitem: pg.PlotDataItem):
+    def addLimitsToPlot(self, infoDict: dict, pitem: pg.PlotItem, vertical: bool = False):
         settings = ss.getSetting()
         for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
                                             ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
@@ -822,10 +822,10 @@ class TrendChart(GraphicViewWithMenu):
             pos = 0.8 if key.endswith("Spec") else 0.2
             anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
             if enabled and ~np.isnan(lim) and ~np.isinf(lim):
-                pitem.addLine(y=lim, pen=pen, name=name, 
-                            label=f"{name} = {{value:0.2f}}", 
-                            labelOpts={"position":pos, "color": pen.color(), 
-                                        "movable": True, "anchors": anchors})
+                arg = dict(x=lim) if vertical else dict(y=lim)
+                labelOpts = dict(position=pos, color=pen.color(), 
+                                 movable=True, anchors=anchors, rotateAxis=(1, 0))
+                pitem.addLine(**arg, pen=pen, name=name, label=f"{name} = {{value:0.2f}}", labelOpts=labelOpts)
 
 
 class SVBarGraphItem(pg.BarGraphItem):
@@ -891,9 +891,11 @@ class HistoChart(TrendChart):
         
     def draw(self):
         settings = ss.getSetting()
+        isVertical = settings.gen.vert_bar
+
         # add title
         self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(self.testInfo),
+                                 rowspan=1, colspan=1 if isVertical else len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
         for fid in sorted(self.testInfo.keys()):
@@ -941,9 +943,11 @@ class HistoChart(TrendChart):
                     hist = hist / hist.max()
                 # show bars if enabled
                 if settings.histo.show_histobars:
-                    item = SVBarGraphItem(x0=bar_base, y0=edges, 
-                                        width=hist, height=bin_width, 
-                                        brush=siteColor, name=site_info)
+                    if isVertical:
+                        barArg = dict(y0=bar_base, x0=edges, height=hist, width=bin_width)
+                    else:
+                        barArg = dict(x0=bar_base, y0=edges, width=hist, height=bin_width)
+                    item = SVBarGraphItem(**barArg, brush=siteColor, name=site_info)
                     item.setRectDutList(rectDutList)
                     item.setTipData(tipData)
                     item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
@@ -952,7 +956,6 @@ class HistoChart(TrendChart):
                 inc = 1.2 * hist.max()
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 # add lines
-                isVertical = False  #TODO replace with settings
                 lines = HistoLineGroup(bar_base, inc, isVertical)
                 mean = data_per_site["Mean"]
                 median = data_per_site["Median"]
@@ -981,31 +984,46 @@ class HistoChart(TrendChart):
                 # update bar base for other sites
                 bar_base += inc
             # add test limits and specs
-            self.addLimitsToPlot(infoDict, pitem)
+            self.addLimitsToPlot(infoDict, pitem, isVertical)
             
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 addFileLabel(pitem, fid)
             # set min range to avoid zoom too much
             minZoomRange = 4 * min(bin_width_list)
-            view.setRange(xRange=(0, bar_base), 
-                          yRange=(self.y_min, self.y_max),
-                          padding=0.0)
-            view.setLimits(xMin=0, xMax=bar_base+0.5,
-                           yMin=self.y_min, yMax=self.y_max,
-                           minYRange=minZoomRange)
+            if isVertical:
+                layoutArg = dict(row=fid + 1, col=0, rowspan=1, colspan=1)
+                rangeArg = dict(yRange=(0, bar_base), xRange=(self.y_min, self.y_max))
+                limitArg = dict(yMin=0, yMax=bar_base+0.5,
+                                xMin=self.y_min, xMax=self.y_max,
+                                minXRange=minZoomRange)
+                tickAxis = "left"
+                valueAxis = "bottom"
+                linkAttr = "setXLink"
+            else:
+                layoutArg = dict(row=1, col=fid, rowspan=1, colspan=1)
+                rangeArg = dict(xRange=(0, bar_base), yRange=(self.y_min, self.y_max))
+                limitArg = dict(xMin=0, xMax=bar_base+0.5,
+                                yMin=self.y_min, yMax=self.y_max,
+                                minYRange=minZoomRange)
+                tickAxis = "bottom"
+                valueAxis = "left"
+                linkAttr = "setYLink"
+            
+            view.setRange(**rangeArg, padding=0.0)
+            view.setLimits(**limitArg)
             # add to layout
-            self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
+            self.plotlayout.addItem(pitem, **layoutArg)
             # link current viewbox to previous, 
             # show axis but hide value 2nd+ plots
             # labels and file id
             unit = infoDict["Unit"]
-            pitem.getAxis("bottom").setTicks([ticks])
+            pitem.getAxis(tickAxis).setTicks([ticks])
             if isFirstPlot:
-                pitem.getAxis("left").setLabel(self.test_name + f" ({unit})" if unit else "")
+                pitem.getAxis(valueAxis).setLabel(self.test_name + f" ({unit})" if unit else "")
             else:
-                pitem.getAxis("left").setStyle(showValues=False)
-                view.setYLink(self.view_list[0])
+                pitem.getAxis(valueAxis).setStyle(showValues=False)
+                view.__getattribute__(linkAttr)(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
 
