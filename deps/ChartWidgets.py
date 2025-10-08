@@ -1051,7 +1051,7 @@ class BinChart(GraphicViewWithMenu):
         isVertical = settings.gen.vert_bar
         row = 0
         (head, site) = binData["HS"]
-        hs_info = f" - Head {head} - " + f"All Site" if site == -1 else f"Site {site}"
+        hs_info = f" - Head {head} - " + (f"All Site" if site == -1 else f"Site {site}")
         # create two plot items for HBIN & SBIN
         for binType in ["HBIN", "SBIN"]:
             hsbin = binData[binType]
