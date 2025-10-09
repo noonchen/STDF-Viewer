@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Thu Oct 09 2025
+# Last Modified: Fri Oct 10 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -888,6 +888,8 @@ class HistoChart(TrendChart):
         super().__init__()
         self.sigmaPen = pg.mkPen(cosmetic=True, width=3, color=(100, 100, 100))
         self.sigmaPen.setStyle(Qt.PenStyle.DashDotLine)
+        self.gaussPen = pg.mkPen(cosmetic=True, width=4.5, color=(255, 0, 0))
+        self.gaussPen.setStyle(Qt.PenStyle.DashLine)
         
     def draw(self):
         settings = ss.getSetting()
@@ -973,13 +975,21 @@ class HistoChart(TrendChart):
                 # median
                 if settings.histo.show_median and ~np.isnan(median) and ~np.isinf(median):
                     lines.addLine(median, self.medianPen, f"x̃ = {settings.getFloatFormat()}" % median, medianAnc)
-                # sigma lines
-                sigmaList = settings.histo.get_sigma_list()
-                if len(sigmaList) > 0 and stddev != 0 and ~np.isnan(stddev) and ~np.isinf(stddev):
-                    for n in sigmaList:
-                        if n == 0: continue
-                        lines.addLine(mean-n*stddev, self.sigmaPen, f"-{'' if n == 1 else n}σ", negSigAnc)
-                        lines.addLine(mean+n*stddev, self.sigmaPen, f"{''  if n == 1 else n}σ", posSigAnc)
+                if stddev != 0 and ~np.isnan(stddev) and ~np.isinf(stddev):
+                    # gaussian fit
+                    if settings.histo.show_gaussfit:
+                        gauss_x = np.linspace(mean - stddev * 10, mean + stddev * 10, 1000)
+                        gauss_y = max(hist) * np.exp( -0.5 * (gauss_x - mean)**2 / stddev**2 )
+                        if not isVertical:
+                            gauss_x, gauss_y = gauss_y, gauss_x
+                        pitem.plot(x=gauss_x, y=gauss_y, pen=self.gaussPen)
+                    # sigma lines
+                    sigmaList = settings.histo.get_sigma_list()
+                    if len(sigmaList) > 0:
+                        for n in sigmaList:
+                            if n == 0: continue
+                            lines.addLine(mean-n*stddev, self.sigmaPen, f"-{'' if n == 1 else n}σ", negSigAnc)
+                            lines.addLine(mean+n*stddev, self.sigmaPen, f"{''  if n == 1 else n}σ", posSigAnc)
                 view.addItem(lines)
                 # update bar base for other sites
                 bar_base += inc
