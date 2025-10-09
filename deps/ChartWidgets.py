@@ -994,18 +994,18 @@ class HistoChart(TrendChart):
             if isVertical:
                 layoutArg = dict(row=fid + 1, col=0, rowspan=1, colspan=1)
                 rangeArg = dict(yRange=(0, bar_base), xRange=(self.y_min, self.y_max))
-                limitArg = dict(yMin=0, yMax=bar_base+0.5,
+                limitArg = dict(yMin=0, yMax=bar_base,
                                 xMin=self.y_min, xMax=self.y_max,
-                                minXRange=minZoomRange)
+                                minXRange=minZoomRange, maxYRange=inc)
                 tickAxis = "left"
                 valueAxis = "bottom"
                 linkAttr = "setXLink"
             else:
                 layoutArg = dict(row=1, col=fid, rowspan=1, colspan=1)
                 rangeArg = dict(xRange=(0, bar_base), yRange=(self.y_min, self.y_max))
-                limitArg = dict(xMin=0, xMax=bar_base+0.5,
+                limitArg = dict(xMin=0, xMax=bar_base,
                                 yMin=self.y_min, yMax=self.y_max,
-                                minYRange=minZoomRange)
+                                minYRange=minZoomRange, maxXRange=inc)
                 tickAxis = "bottom"
                 valueAxis = "left"
                 linkAttr = "setYLink"
@@ -1099,7 +1099,8 @@ class BinChart(GraphicViewWithMenu):
                     layoutArg = dict(row=row, col=0, rowspan=1, colspan=1)
                     rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
                     limitArg = dict(yMin=0, yMax=cnt_max, 
-                                    xMin=-1, xMax=ind_max, minXRange=4)
+                                    xMin=-1, xMax=ind_max, 
+                                    minXRange=4, minYRange=3)
                     # each fid takes a single row in vertical mode
                     row += 1
                     tickAxis = "bottom"
@@ -1110,7 +1111,8 @@ class BinChart(GraphicViewWithMenu):
                     layoutArg = dict(row=row, col=fid, rowspan=1, colspan=1)
                     rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
                     limitArg = dict(xMin=0, xMax=cnt_max, 
-                                    yMin=-1, yMax=ind_max, minYRange=4)
+                                    yMin=-1, yMax=ind_max, 
+                                    minYRange=4, minXRange=3)
                     tickAxis = "left"
                     valueAxis = "bottom"
                     linkAttr = "setYLink"
