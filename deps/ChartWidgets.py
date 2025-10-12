@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Oct 12 2025
+# Last Modified: Mon Oct 13 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -40,13 +40,16 @@ pg.setConfigOptions(foreground='k', background='w', antialias=False)
 
 def prepareHistoData(dutList: np.ndarray, 
                      dataList: np.ndarray, 
-                     binCount: int, 
-                     rectBaseLevel: int, 
-                     horizontalBar: bool = True):
+                     rectBaseLevel: int):
     '''
     returns hist, bin left edges, bin width, [(rect, duts)], tipData
     '''
-    ffmt = ss.getSetting().getFloatFormat()
+    settings = ss.getSetting()
+    ffmt = settings.getFloatFormat()
+    binCount = settings.histo.bin_count
+    normalize = settings.histo.norm_histobars
+    horizontalBar = not settings.gen.vert_bar
+    
     hist, edges = np.histogram(dataList, bins=binCount)
     bin_width = edges[1]-edges[0]
     # get left edges
@@ -54,6 +57,14 @@ def prepareHistoData(dutList: np.ndarray,
     # np.histogram is left-close-right-open, except the last bin
     # np.digitize should be right=False, use left edges to force close the rightmost bin
     bin_ind = np.digitize(dataList, edges, right=False)
+    
+    # get tip data for hovering display before normalization
+    tipData = [("[{}, {})".format(ffmt % e, 
+                                  ffmt % (e + bin_width)), h) 
+               for (h, e) in zip(hist, edges)]
+    # use normalized hist if enabled
+    if normalize and hist.max() != 0:
+        hist = hist / hist.max()
     # bin index -> dut index list
     bin_dut_dict = {}
     for ind, dut in zip(bin_ind, dutList):
@@ -61,14 +72,7 @@ def prepareHistoData(dutList: np.ndarray,
         bin_dut_dict.setdefault(ind-1, []).append(dut)
     # list of (rect, duts) for data picking
     rectDutList = []
-    # list of tip data for hovering display
-    tipData = []
     for ind, (h, e) in enumerate(zip(hist, edges)):
-        # tipData must be the same length of hist/edges,
-        # add data even if h == 0
-        tipData.append( ("[{}, {})".format(ffmt % e, 
-                                           ffmt % (e + bin_width)), 
-                         h) )
         if h == 0:
             continue
         duts = bin_dut_dict[ind]
@@ -80,7 +84,7 @@ def prepareHistoData(dutList: np.ndarray,
             height  = bin_width
         else:
             left    = e
-            top     = rectBaseLevel + h
+            top     = rectBaseLevel     # Qt top + height = bottom
             width   = bin_width
             height  = h
         
@@ -112,7 +116,7 @@ def prepareBinRectList(binCenter: np.ndarray,
             height  = binWidth
         else:
             left    = edge
-            top     = cnt
+            top     = 0
             width   = binWidth
             height  = cnt
 
@@ -312,6 +316,10 @@ class StdfViewrViewBox(pg.ViewBox):
         self.enablePickMode = False
         # file id is for showing dut data only
         self.fileID = 0
+        # showing text info of selection or highlights, default hidden
+        self.selectionInfo = ClickableText("", size="10pt", color="#000000", justify="left")
+        self.selectionInfo.setParentItem(self)
+        self.selectionInfo.anchor(itemPos=(0, 1), parentPos=(0, 1), offset=(10, -10))
     
     def setFileID(self, fid: int):
         self.fileID = fid
@@ -444,6 +452,22 @@ class TrendViewBox(StdfViewrViewBox):
         self.hlpoints.clear()
         pointSet = self._getSelectedPoints(coordBox)
         self.slpoints.addPoints(pos=pointSet)
+        # get all selected points, rm dups before calculating statistics
+        slx, sly = self.slpoints.getData()
+        _, uniqueIdx = np.unique(slx, return_index = True)
+        # cache friendly sort
+        uniqueY = sly[np.sort(uniqueIdx)]
+        # calc stats
+        mean = np.min(uniqueY)
+        median = np.median(uniqueY)
+        stddev = np.std(uniqueY)
+        
+        ffmt = ss.getSetting().getFloatFormat()
+        self.selectionInfo.setText("Points selected: {}\n\
+                                   Average: {}\n\
+                                   Median: {}\n\
+                                   St. Dev.: {}".format(
+            len(uniqueY), ffmt % mean, ffmt % median, ffmt % stddev))
     
     def highlightitemsWithin(self, coordBox: QRectF):
         pointSet = self._getSelectedPoints(coordBox)
@@ -453,6 +477,7 @@ class TrendViewBox(StdfViewrViewBox):
         
     def clearSelections(self):
         self.slpoints.clear()
+        self.selectionInfo.setText("")
     
     def getSelectedDataForDutTable(self):
         dataSet = set()
@@ -548,14 +573,12 @@ class SVBarViewBox(StdfViewrViewBox):
         '''
         rects = []
         for item in self.addedItems:
+            if not isinstance(item, SVBarGraphItem):
+                continue
+            
             if item.isVisible() and item.name() not in ["_selection", 
                                                         "_highlight"]:
-                if isinstance(item, SVBarGraphItem):
-                    rectList = item.getRectDutList()
-                else:
-                    continue
-                
-                for rectTup in rectList:
+                for rectTup in item.getRectDutList():
                     if coordBox.intersects(rectTup[0]):
                         rects.append(rectTup)
         return rects
@@ -564,6 +587,28 @@ class SVBarViewBox(StdfViewrViewBox):
         self.hlbars.clear()
         newRects = self._getSelectedRects(coordBox)
         self.slbars.addRects(newRects)
+        self.showSelectedBarInfo()
+        
+    def showSelectedBarInfo(self):
+        # get all selected bars
+        slr = self.slbars.getRects()
+        if not slr:
+            self.selectionInfo.setText("")
+            return
+        
+        dutIndexArray = set()
+        _ = [dutIndexArray.update(l) for (_, l) in slr]
+        dutIndexArray = np.sort(list(dutIndexArray))
+        # # instead of shows array directly, split it into 
+        # # consecutive number groups
+        # splitAt = np.where(np.diff(dutIndexArray) != 1)[0] + 1
+        # ngroup = np.split(dutIndexArray, splitAt)
+        # groupStr = ",".join(f"{g[0]}-{g[-1]}" if len(g) > 1 else f"{g[0]}" for g in ngroup)
+        
+        self.selectionInfo.setText("Bars selected: {}\n\
+                                   DUT count: {}".format(
+                                       len(slr), 
+                                       dutIndexArray.size))
     
     def highlightitemsWithin(self, coordBox: QRectF):
         newRects = self._getSelectedRects(coordBox)
@@ -572,6 +617,7 @@ class SVBarViewBox(StdfViewrViewBox):
     
     def clearSelections(self):
         self.slbars.clear()
+        self.selectionInfo.setText("")
     
     def getSelectedDataForDutTable(self) -> list:
         dataSet = set()
@@ -581,6 +627,9 @@ class SVBarViewBox(StdfViewrViewBox):
 
 
 class BinViewBox(SVBarViewBox):
+    def showSelectedBarInfo(self):
+        self.selectionInfo.setText("hahahaha")
+    
     def getSelectedDataForDutTable(self) -> list:
         '''
         For BinChart, return [(fid, isHBIN, bins)]
@@ -675,7 +724,7 @@ class HistoLineGroup(QtWidgets.QGraphicsItemGroup):
         textItem = pg.TextItem(text=label, color=pen.color(), anchor=labelAnchor)
         textItem.setPos(QPointF(x2, y2))
         textItem.setParentItem(self)
-        self._textItems.append(textItem)        
+        self._textItems.append(textItem)
 
 
 class TrendChart(GraphicViewWithMenu):
@@ -970,14 +1019,9 @@ class HistoChart(TrendChart):
                  edges, 
                  bin_width, 
                  rectDutList, 
-                 tipData) = prepareHistoData(x, y, 
-                                            settings.histo.bin_count, 
-                                            bar_base)
+                 tipData) = prepareHistoData(x, y, bar_base)
                 bin_width_list.append(bin_width)
                 site_info = "All Site" if site == -1 else f"Site {site}"
-                # use normalized hist if enabled
-                if settings.histo.norm_histobars and hist.max() != 0:
-                    hist = hist / hist.max()
                 # show bars if enabled
                 if settings.histo.show_histobars:
                     if isVertical:
@@ -1041,7 +1085,7 @@ class HistoChart(TrendChart):
                 rangeArg = dict(yRange=(0, bar_base), xRange=(self.y_min, self.y_max))
                 limitArg = dict(yMin=0, yMax=bar_base,
                                 xMin=self.y_min, xMax=self.y_max,
-                                minXRange=minZoomRange, maxYRange=inc)
+                                minXRange=minZoomRange, maxYRange=bar_base)
                 tickAxis = "left"
                 valueAxis = "bottom"
                 linkAttr = "setXLink"
@@ -1050,7 +1094,7 @@ class HistoChart(TrendChart):
                 rangeArg = dict(xRange=(0, bar_base), yRange=(self.y_min, self.y_max))
                 limitArg = dict(xMin=0, xMax=bar_base,
                                 yMin=self.y_min, yMax=self.y_max,
-                                minYRange=minZoomRange, maxXRange=inc)
+                                minYRange=minZoomRange, maxXRange=bar_base)
                 tickAxis = "bottom"
                 valueAxis = "left"
                 linkAttr = "setYLink"
@@ -1131,7 +1175,9 @@ class BinChart(GraphicViewWithMenu):
                 # draw bars, use `ind` instead of `bin_num`
                 tickInd = np.arange(len(numList))
                 binWidth = 0.8
-                rectList = prepareBinRectList(tickInd, cntList, binWidth, isHBIN, numList)
+                rectList = prepareBinRectList(tickInd, cntList, 
+                                              binWidth, isHBIN, 
+                                              numList, not settings.gen.vert_bar)
                 # show name (tick), bin number and count in hover tip
                 ticks = [[binTicks[n] for n in numList]]
                 tipData = [(f"{name[1]}\nBin: {n}", cnt) 
