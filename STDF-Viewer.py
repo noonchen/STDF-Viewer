@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Oct 06 2025
+# Last Modified: Sun Oct 12 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1071,6 +1071,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if tabType == tab.Trend:
             tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
             tchart = TrendChart()
+            tchart.setFileNames(self.data_interface.getFileNames())
             tchart.setData(tdata)
             if tchart.validData:
                 tchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)
@@ -1079,6 +1080,7 @@ class MyWindow(QtWidgets.QMainWindow):
         elif tabType == tab.Histo:
             tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
             hchart = HistoChart()
+            hchart.setFileNames(self.data_interface.getFileNames())
             hchart.setData(tdata)
             if hchart.validData:
                 hchart.setShowDutSignal(self.signals.showDutDataSignal_TrendHisto)

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Tue Oct 07 2025
+# Last Modified: Sun Oct 12 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -29,6 +29,8 @@ class DataInterface:
     def __init__(self):
         self.DatabaseFetcher = DatabaseFetcher()
         self.file_paths = []
+        self.file_names = []
+        self.file_sizes = []
         self.num_files = 0
         self.dbPath = ""
         self.dbConnected = False
@@ -58,6 +60,10 @@ class DataInterface:
         self.dbConnected = True
         self.file_paths = self.DatabaseFetcher.file_paths
         self.num_files = self.DatabaseFetcher.num_files
+        # get file name and size str for display
+        add_i_ifmany_then_join = lambda l, sz: "\n".join(l if sz < 2 else (f"#{i+1} → {e}" for i, e in enumerate(l)))
+        self.file_names = [add_i_ifmany_then_join(map(os.path.basename, fg), len(fg)) for fg in self.file_paths]
+        self.file_sizes = [add_i_ifmany_then_join(map(get_file_size, fg), len(fg)) for fg in self.file_paths]
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
@@ -82,6 +88,10 @@ class DataInterface:
             self.DatabaseFetcher.closeDB()
         
         
+    def getFileNames(self) -> list:
+        return self.file_names
+    
+    
     def getFileMetaData(self) -> list:
         metaDataList = []
         # if database is not exist,
@@ -89,10 +99,9 @@ class DataInterface:
         if not self.dbConnected:
             return metaDataList
         # some basic os info
-        add_i_ifmany = lambda l: l if len(l) < 2 else [f"#{i+1} → {e}" for i, e in enumerate(l)]
-        metaDataList.append(["File Name: ", *list(["\n".join(add_i_ifmany(list(map(os.path.basename, fg)))) for fg in self.file_paths]) ])
-        metaDataList.append(["Directory Path: ", *list([os.path.dirname(fg[0]) for fg in self.file_paths]) ])
-        metaDataList.append(["File Size: ", *list(["\n".join(add_i_ifmany(list(map(get_file_size, fg)))) for fg in self.file_paths]) ])
+        metaDataList.append(["File Name: ", *self.file_names ])
+        metaDataList.append(["Directory Path: ", *(os.path.dirname(fg[0]) for fg in self.file_paths) ])
+        metaDataList.append(["File Size: ", *self.file_sizes ])
         # dut summary
         dutCntDict = self.DatabaseFetcher.getDUTCountDict()
         metaDataList.append(["Yield: ", *[f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?" for (p, f) in zip(dutCntDict["Pass"], dutCntDict["Failed"])] ])

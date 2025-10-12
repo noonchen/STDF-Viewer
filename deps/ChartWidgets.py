@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Fri Oct 10 2025
+# Last Modified: Sun Oct 12 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -36,12 +36,6 @@ from pyqtgraph.graphicsItems.ScatterPlotItem import drawSymbol
 import deps.SharedSrc as ss
 
 pg.setConfigOptions(foreground='k', background='w', antialias=False)
-
-
-def addFileLabel(parent, fid: int, yoffset = -50):
-    file_text = pg.LabelItem(f"File {fid}", size="15pt", color="#000000", anchor=(1, 0))
-    file_text.setParentItem(parent)
-    file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(0, yoffset))
 
 
 def prepareHistoData(dutList: np.ndarray, 
@@ -138,6 +132,37 @@ def getAxisRange(minList, maxList, padding = 0.15):
         a_min -= pad
         a_max += pad
     return (a_min, a_max)
+
+
+class ClickableText(pg.LabelItem):
+    def __init__(self, text, **kwargs):
+        super().__init__(text, **kwargs)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.firstText = text
+        self.secondText = ""
+        self.current_text = text
+        
+    def setText(self, text, **args):
+        text = str(text).replace('\n', '<br>')
+        return super().setText(text, **args)
+
+    def setSecondText(self, text: str):
+        if isinstance(text, str) and text:
+            self.secondText = text
+    
+    def mousePressEvent(self, event):
+        if not self.secondText:
+            event.ignore()
+            return
+            
+        # Toggle text on click
+        if self.current_text == self.firstText:
+            self.current_text = self.secondText
+        else:
+            self.current_text = self.firstText
+        
+        self.setText(self.current_text)
+        event.accept()
 
 
 class PlotMenu(QMenu):
@@ -669,6 +694,16 @@ class TrendChart(GraphicViewWithMenu):
         self.y_min = np.nan
         self.y_max = np.nan
         self.validData = False
+        self.fileNames = []
+        
+    def setFileNames(self, names: list):
+        self.fileNames = names
+    
+    def addFileLabel(self, parent, fid: int):
+        file_text = ClickableText(f"File {fid}", size="15pt", color="#000000", justify="right")
+        file_text.setSecondText(self.fileNames[fid] if fid < len(self.fileNames) else "")
+        file_text.setParentItem(parent)
+        file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(-10, -10))
         
     def setData(self, dataDict: dict):
         '''
@@ -791,7 +826,7 @@ class TrendChart(GraphicViewWithMenu):
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
-                addFileLabel(pitem, fid)
+                self.addFileLabel(view, fid)
             pitem.setClipToView(True)
             # set range and limits
             x_min, x_max = getAxisRange(x_min_list, x_max_list, 0.02)
@@ -998,7 +1033,7 @@ class HistoChart(TrendChart):
             
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
-                addFileLabel(pitem, fid)
+                self.addFileLabel(view, fid)
             # set min range to avoid zoom too much
             minZoomRange = 4 * min(bin_width_list)
             if isVertical:
