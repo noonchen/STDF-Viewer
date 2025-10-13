@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Mon Oct 13 2025
+# Last Modified: Tue Oct 14 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -121,7 +121,7 @@ def prepareBinRectList(binCenter: np.ndarray,
             height  = cnt
 
         rectList.append( (QRectF(left, top, width, height), 
-                          (isHBIN, bin_num)) )
+                          (isHBIN, bin_num, cnt)) )
     return rectList
 
 
@@ -587,15 +587,15 @@ class SVBarViewBox(StdfViewrViewBox):
         self.hlbars.clear()
         newRects = self._getSelectedRects(coordBox)
         self.slbars.addRects(newRects)
-        self.showSelectedBarInfo()
         
-    def showSelectedBarInfo(self):
-        # get all selected bars
+        # get all selected bars for displaying info
         slr = self.slbars.getRects()
         if not slr:
             self.selectionInfo.setText("")
             return
+        self.showSelectedBarInfo(slr)
         
+    def showSelectedBarInfo(self, slr: list):
         dutIndexArray = set()
         _ = [dutIndexArray.update(l) for (_, l) in slr]
         dutIndexArray = np.sort(list(dutIndexArray))
@@ -627,16 +627,19 @@ class SVBarViewBox(StdfViewrViewBox):
 
 
 class BinViewBox(SVBarViewBox):
-    def showSelectedBarInfo(self):
-        self.selectionInfo.setText("hahahaha")
+    def showSelectedBarInfo(self, slr: list):
+        total = 0
+        for _, (_, _, cnt) in self.slbars.getRects():
+            total += cnt
+        self.selectionInfo.setText("Bars selected: {}\n\
+                                   DUT count: {}".format(len(slr), total))
     
     def getSelectedDataForDutTable(self) -> list:
         '''
         For BinChart, return [(fid, isHBIN, bins)]
         '''
         tmp = {}
-        for _, binTup in self.slbars.getRects():
-            isHBIN, bin_num = binTup
+        for _, (isHBIN, bin_num, _) in self.slbars.getRects():
             tmp.setdefault( (self.fileID, isHBIN), []).append(bin_num)
         return [(fid, isHBIN, bins) 
                 for (fid, isHBIN), bins 
