@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 3rd 2022
 # -----
-# Last Modified: Sat Dec 03 2022
+# Last Modified: Sun Oct 12 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -90,7 +90,7 @@ class MergePanel(QDialog):
     def onAddFiles(self):
         files, _ = QFileDialog.getOpenFileNames(self, 
                                                 caption=self.tr("Select STDF Files To Open"), 
-                                                directory=getSetting().recentFolder, 
+                                                directory=getSetting().gen.recent_dir, 
                                                 filter=self.tr(FILE_FILTER),)
         if len(files) == 0:
             return
