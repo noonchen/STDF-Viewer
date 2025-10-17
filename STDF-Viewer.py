@@ -1391,7 +1391,7 @@ def run():
     app.setStyle('Fusion')
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
     app.setWindowIcon(getIcon("App"))
-    pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
+    pathFromArgs = [[item] for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
     window.show()
     if pathFromArgs:
