@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Sep 14 2025
+# Last Modified: Tue Oct 07 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -183,12 +183,8 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.ppqqBtn.setIcon(getIcon("tab_ppqq"))
         self.settingsUI.colorBtn.setIcon(getIcon("ColorPalette"))
         # hide not implemented functions
-        self.settingsUI.showMean_histo.setHidden(True)
-        self.settingsUI.showMedian_histo.setHidden(True)
         self.settingsUI.showBoxp_histo.setHidden(True)
         self.settingsUI.showBpOutlier_histo.setHidden(True)
-        self.settingsUI.showBar_histo.setDisabled(True)
-        self.settingsUI.sigmaCombobox.setHidden(True)
                 
         
     def initWithParentParams(self):

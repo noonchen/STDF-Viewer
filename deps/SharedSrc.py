@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Thu Oct 02 2025
+# Last Modified: Fri Oct 10 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -45,8 +45,17 @@ class HistoPlotConfig(BaseModel):
     show_boxp: bool = Field(True, alias="Show Boxplot")
     show_boxpol: bool = Field(True, alias="Show Boxplot Outlier")
     show_histobars: bool = Field(True, alias="Show Histogram Bars")
+    show_gaussfit: bool = Field(True, alias="Show Gaussian Fit")
+    norm_histobars: bool = Field(False, alias="Normalize Histogram")
     bin_count: int = Field(30, alias="Bin Count")
     sigma_lines: str = Field("3, 6, 9", alias="δ Lines")
+    
+    def get_sigma_list(self):
+        try:
+            rst = [abs(int(i)) for i in self.sigma_lines.split(",")]
+        except ValueError:
+            rst = []
+        return rst
 
 
 class PPQQPlotConfig(BaseModel):
@@ -98,6 +107,7 @@ class GeneralConfig(BaseModel):
     sort_tlist: str = Field("Original", alias="Sort TestList")
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
     hide_inf: bool = Field(True, alias="Hide Infinite Value")
+    vert_bar: bool = Field(False, alias="Vertical BarGraph")
     gen_db_idx: bool = Field(False, alias="Create DB Index")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
