@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Fri Oct 10 2025
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -121,7 +121,7 @@ class GeneralConfig(BaseModel):
         for i, symbol in v.items():
             try:
                 i_num = int(i)
-            except:
+            except ValueError:
                 continue
             
             if not isValidSymbol(symbol):
@@ -633,30 +633,33 @@ def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
         return (test_num, pmr, test_name)
 
 
-def openFileInOS(filepath: str):
+def openOrRevealFileInOS(filepath: str, openf = True):
     # https://stackoverflow.com/a/435669
-    filepath = os.path.normpath(filepath)
-    if platform.system() == 'Darwin':       # macOS
-        subprocess.call(('open', filepath))
-    elif platform.system() == 'Windows':    # Windows
-        subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-    else:                                   # linux variants
-        subprocess.call(('xdg-open', filepath))
-
-
-def revealFile(filepath: str):
     filepath = os.path.normpath(filepath)
     if not os.path.exists(filepath):
         return
-    
+
+    flags = 0
     if platform.system() == 'Darwin':       # macOS
-        subprocess.call(('open', '-R', filepath))
+        args = (
+            ('open', filepath) if openf else 
+            ('open', '-R', filepath)
+            )
+        
     elif platform.system() == 'Windows':    # Windows
-        subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+        args = (
+            f'cmd /c start "" "{filepath}"' if openf else 
+            f'explorer /select,"{filepath}"'
+            )
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+        
     else:                                   # linux variants
-        subprocess.call(('xdg-open', os.path.dirname(filepath)))
+        args = (
+            ('xdg-open', filepath) if openf else 
+            ('xdg-open', os.path.dirname(filepath))
+            )
+        
+    subprocess.call(args, creationflags = flags)    # nosec
 
 
 def get_file_size(p: str) -> str:
@@ -755,9 +758,9 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
     msgbox.setDefaultButton(okBtn)
     msgbox.exec_()
     if msgbox.clickedButton() == revealBtn:
-        revealFile(outPath)
+        openOrRevealFileInOS(outPath, False)
     elif msgbox.clickedButton() == openBtn:
-        openFileInOS(outPath)
+        openOrRevealFileInOS(outPath, True)
     
 
 def validateSession(dbPath: str):
