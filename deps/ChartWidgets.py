@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Tue Oct 14 2025
+# Last Modified: Sat Oct 18 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -1194,7 +1194,7 @@ class BinChart(GraphicViewWithMenu):
                     rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
                     limitArg = dict(yMin=0, yMax=cnt_max, 
                                     xMin=-1, xMax=ind_max, 
-                                    minXRange=4, minYRange=3)
+                                    minXRange=min(4, ind_max+1), minYRange=min(3, cnt_max))
                     # each fid takes a single row in vertical mode
                     row += 1
                     tickAxis = "bottom"
@@ -1206,7 +1206,7 @@ class BinChart(GraphicViewWithMenu):
                     rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
                     limitArg = dict(xMin=0, xMax=cnt_max, 
                                     yMin=-1, yMax=ind_max, 
-                                    minYRange=4, minXRange=3)
+                                    minYRange=min(4, ind_max+1), minXRange=min(3, cnt_max))
                     tickAxis = "left"
                     valueAxis = "bottom"
                     linkAttr = "setYLink"
