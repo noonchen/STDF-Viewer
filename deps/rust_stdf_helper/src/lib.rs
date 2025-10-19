@@ -651,6 +651,7 @@ fn generate_database(
         // start another thread for updating stop signal
         // and sending progress back to python
         let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
+            let mut stop_cur_thread = false;
             loop {
                 let current_progress = total_progress_copy.load(Ordering::Relaxed);
                 // sleep for 100ms
@@ -663,13 +664,12 @@ fn generate_database(
                             .call_method1(intern!(py, "emit"), (current_progress,))?;
                     }
                     if is_valid_stop {
-                        global_stop_copy.store(
-                            stop_flag
-                                .bind(py)
-                                .getattr(intern!(py, "stop"))?
-                                .extract::<bool>()?,
-                            Ordering::Relaxed,
-                        );
+                        let stop_from_py = stop_flag
+                            .bind(py)
+                            .getattr(intern!(py, "stop"))?
+                            .extract::<bool>()?;
+                        global_stop_copy.store(stop_from_py, Ordering::Relaxed);
+                        stop_cur_thread |= stop_from_py;
                     };
                     Ok(())
                 }) {
@@ -678,7 +678,8 @@ fn generate_database(
                     println!("{}", py_e);
                     break;
                 }
-                if current_progress == 10000 {
+                stop_cur_thread |= current_progress == 10000;
+                if stop_cur_thread {
                     break;
                 }
             }
