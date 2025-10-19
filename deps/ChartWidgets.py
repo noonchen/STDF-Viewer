@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Oct 19 2025
+# Last Modified: Mon Oct 20 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -26,7 +26,7 @@
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QMenu, QAction
-from PyQt5.QtCore import Qt, QPoint, QPointF, QRectF, QLineF, QSize
+from PyQt5.QtCore import Qt, QPoint, QPointF, QRectF, QLineF
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.functions as fn
@@ -1127,6 +1127,60 @@ class HistoChart(TrendChart):
             pitem.getAxis(valueAxis).setLabel(self.test_name + f" ({unit})" if unit else "")
 
 
+class AxisItemRotText(pg.AxisItem):
+    def setTicksAngle(self, angleInDeg: float):
+        self._angle = angleInDeg
+        self._height_updated = False
+    
+    def drawPicture(self, p: QtGui.QPainter, axisSpec, tickSpecs, textSpecs: list[tuple[QRectF, int, str]]):
+        p.setRenderHint(p.RenderHint.Antialiasing, False)
+        p.setRenderHint(p.RenderHint.TextAntialiasing, True)
+
+        ## draw long line along axis
+        pen, p1, p2 = axisSpec
+        p.setPen(pen)
+        p.drawLine(p1, p2)
+
+        ## draw ticks
+        for pen, p1, p2 in tickSpecs:
+            p.setPen(pen)
+            p.drawLine(p1, p2)
+
+        # Draw all text
+        if self.style['tickFont'] is not None:
+            p.setFont(self.style['tickFont'])
+        p.setPen(self.textPen())
+        bounding = self.boundingRect().toAlignedRect()
+        p.setClipRect(bounding)
+        
+        # from https://github.com/pyqtgraph/pyqtgraph/issues/322#issuecomment-503541303
+        max_width = 0
+        max_height = 0
+        self._angle = self._angle % 90
+
+        for rect, flags, text in textSpecs:
+            p.save()  # save the painter state
+
+            p.translate(rect.center())   # move coordinate system to center of text rect
+            p.rotate(self._angle)  # rotate text
+            p.translate(-rect.center())  # revert coordinate system
+
+            x_offset = np.ceil(np.fabs(np.sin(np.deg2rad(self._angle)) * rect.width()))
+            if self._angle < 0:
+                x_offset = -x_offset
+            p.translate(x_offset/2, 0)  # Move the coordinate system (relatively) downwards
+
+            p.drawText(rect, flags, text)
+            p.restore()  # restore the painter state
+            offset = np.fabs(x_offset)
+            max_width = offset if max_width < offset else max_width
+
+        #  Adjust the height
+        if not self._height_updated:
+            self.setHeight(self.height() + max_width)
+            self._height_updated = True
+
+
 class BinChartGenerator:
     def __init__(self):
         self.validData = False
@@ -1194,7 +1248,6 @@ class BinChartGenerator:
             view_bin.setFileID(fid)
             # in horizontal mode, invert y axis to put Bin0 at top
             view_bin.invertY(not self.isVertical)
-            pitem = pg.PlotItem(viewBox=view_bin)
             binStats = hsbin[fid]
             # get data for barGraph
             numList = sorted(binTicks.keys())
@@ -1237,8 +1290,10 @@ class BinChartGenerator:
             bar.setRectDutList(rectList)
             bar.setTipData(tipData)
             bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
+            pitem = pg.PlotItem(viewBox=view_bin, axisItems={tickAxis: AxisItemRotText(tickAxis)})
             pitem.addItem(bar)
             # set ticks
+            pitem.getAxis(tickAxis).setTicksAngle(30)
             pitem.getAxis(tickAxis).setTicks(ticks)
             pitem.getAxis(valueAxis).setLabel(f"{binType} Count" 
                                                 if num_files == 1 
