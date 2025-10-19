@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Oct 12 2025
+# Last Modified: Sun Oct 19 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1099,11 +1099,13 @@ class MyWindow(QtWidgets.QMainWindow):
             # one site per binchart
             for site in selectSites:
                 bdata = self.data_interface.getBinChartData(head, site)
-                bchart = BinChart()
-                bchart.setBinData(bdata)
-                if bchart.validData:
-                    bchart.setShowDutSignal(self.signals.showDutDataSignal_Bin)
-                    bcharts.append(bchart)
+                bchartgen = BinChartGenerator()
+                bchartgen.setBinData(bdata)
+                if bchartgen.validData:
+                    for isHBIN in [True, False]:
+                        gvm = bchartgen.genGraphicView(isHBIN)
+                        gvm.setShowDutSignal(self.signals.showDutDataSignal_Bin)
+                        bcharts.append(gvm)
             return bcharts
         
         return None
