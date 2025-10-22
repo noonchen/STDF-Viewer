@@ -111,14 +111,15 @@ class DutSortFilter(QSortFilterProxyModel):
         self.dutIndexInd = 0
         self.fidColInd = 1
         self.pidColInd = 2
-        self.hsColInd = 3
-        self.tcntColInd = 4
-        self.ttimColInd = 5
-        self.hbinColInd = 6
-        self.sbinColInd = 7
-        self.widColInd = 8
-        self.xyColInd = 9
-        self.flagColInd = 10
+        self.ptxtColInd = 3
+        self.hsColInd = 4
+        self.tcntColInd = 5
+        self.ttimColInd = 6
+        self.hbinColInd = 7
+        self.sbinColInd = 8
+        self.widColInd = 9
+        self.xyColInd = 10
+        self.flagColInd = 11
         
     
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:

@@ -726,8 +726,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_dut.setQuery(QtSql.QSqlQuery(DUT_SUMMARY_QUERY, self.db_dut))
         
         for column in range(0, header.count()):
-            if column in [2, 3, header.count()-1]:
-                # PartID, Head-Site and DUT Flag
+            if column in [2, 3, 4, header.count()-1]:
+                # PartID, Part Text, Head-Site and DUT Flag
                 # column may be too long to display
                 mode = QHeaderView.ResizeMode.ResizeToContents
             else:
@@ -741,6 +741,19 @@ class MyWindow(QtWidgets.QMainWindow):
             self.ui.dutInfoTable.hideColumn(1)
         else:
             self.ui.dutInfoTable.showColumn(1)
+        
+        # hide Part Text column (column 3) if all values are empty
+        has_part_txt = False
+        for row in range(self.tmodel_dut.rowCount()):
+            part_txt = self.tmodel_dut.data(self.tmodel_dut.index(row, 3), Qt.ItemDataRole.DisplayRole)
+            if part_txt and part_txt.strip():
+                has_part_txt = True
+                break
+        
+        if not has_part_txt:
+            self.ui.dutInfoTable.hideColumn(3)
+        else:
+            self.ui.dutInfoTable.showColumn(3)
         # # show all rows
         # while self.tmodel_dut.canFetchMore():
         #     self.tmodel_dut.fetchMore()

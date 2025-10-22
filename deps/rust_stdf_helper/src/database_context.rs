@@ -77,6 +77,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         TestCount INTEGER,
                                                         TestTime INTEGER,
                                                         PartID TEXT,
+                                                        PART_TXT TEXT,
                                                         HBIN INTEGER,
                                                         SBIN INTEGER,
                                                         Flag INTEGER,
@@ -226,7 +227,7 @@ static INSERT_DUT: &str = "INSERT INTO
                                 (?,?,?,?);";
 
 static UPDATE_DUT: &str = "UPDATE Dut_Info SET 
-                                TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, 
+                                TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, PART_TXT=:PART_TXT,
                                 HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
                                 WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD,
                                 Supersede=:Supersede
