@@ -27,7 +27,7 @@
 from deps.SharedSrc import *
 from rust_stdf_helper import TestIDType
 # pyqt5
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import QTranslator
 from .ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
@@ -185,6 +185,25 @@ class stdfSettings(QtWidgets.QDialog):
         # hide not implemented functions
         self.settingsUI.showBoxp_histo.setHidden(True)
         self.settingsUI.showBpOutlier_histo.setHidden(True)
+        
+        self.setupVerticalBarUI()
+    
+    
+    def setupVerticalBarUI(self):
+        histo_page = self.settingsUI.Histo
+        scroll_area = None
+        for child in histo_page.children():
+            if isinstance(child, QtWidgets.QScrollArea):
+                scroll_area = child
+                break
+        
+        if scroll_area:
+            scroll_content = scroll_area.widget()
+            if scroll_content:
+                content_layout = scroll_content.layout()
+                if content_layout:
+                    self.vert_bar_checkbox = QtWidgets.QCheckBox("Vertical Bar Graph")
+                    content_layout.addWidget(self.vert_bar_checkbox, 4, 0, 1, 2)
                 
         
     def initWithParentParams(self):
@@ -220,6 +239,7 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_cpk.setText(str(settings.gen.cpk_thrsh))
         self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.gen.sort_tlist, 0))
         self.settingsUI.testIDTypecomboBox.setCurrentIndex(indexDic_testIdfy_reverse.get(settings.gen.id_type, 0))
+        self.vert_bar_checkbox.setChecked(settings.gen.vert_bar)
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
@@ -271,6 +291,7 @@ class stdfSettings(QtWidgets.QDialog):
         userSettings.gen.cpk_thrsh = float(self.settingsUI.lineEdit_cpk.text())
         userSettings.gen.sort_tlist = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
         userSettings.gen.id_type = indexDic_testIdfy[self.settingsUI.testIDTypecomboBox.currentIndex()]
+        userSettings.gen.vert_bar = self.vert_bar_checkbox.isChecked()
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
@@ -305,6 +326,8 @@ class stdfSettings(QtWidgets.QDialog):
             if (origSettings.trend != userSettings.trend) and (currentTab == tab.Trend): 
                 refreshTab = True
             if (origSettings.histo != userSettings.histo) and (currentTab == tab.Histo): 
+                refreshTab = True
+            if (origSettings.gen.vert_bar != userSettings.gen.vert_bar) and (currentTab == tab.Histo):
                 refreshTab = True
             if (origSettings.gen.file_symbols != userSettings.gen.file_symbols) and (currentTab in [tab.Trend, tab.PPQQ]):
                 refreshTab = True
