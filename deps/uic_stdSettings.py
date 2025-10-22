@@ -27,7 +27,7 @@
 from deps.SharedSrc import *
 from rust_stdf_helper import TestIDType
 # pyqt5
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import QTranslator
 from .ui.stdfViewer_settingsUI import Ui_Setting
 # pyside2
@@ -176,6 +176,8 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.histoBtn.clicked.connect(lambda: self.settingsUI.stackedWidget.setCurrentIndex(2))
         self.settingsUI.ppqqBtn.clicked.connect(lambda: self.settingsUI.stackedWidget.setCurrentIndex(3))
         self.settingsUI.colorBtn.clicked.connect(lambda: self.settingsUI.stackedWidget.setCurrentIndex(4))
+        
+        self.setupOutlierFilterUI()
         # set icon for buttons
         self.settingsUI.generalBtn.setIcon(getIcon("tab_info"))
         self.settingsUI.trendBtn.setIcon(getIcon("tab_trend"))
@@ -185,6 +187,50 @@ class stdfSettings(QtWidgets.QDialog):
         # hide not implemented functions
         self.settingsUI.showBoxp_histo.setHidden(True)
         self.settingsUI.showBpOutlier_histo.setHidden(True)
+    
+    
+    def setupOutlierFilterUI(self):
+        scroll_content = self.settingsUI.scrollAreaWidgetContents_2
+        grid_layout = self.settingsUI.gridLayout_3
+        
+        outlier_group = QtWidgets.QGroupBox("Outlier Filter", scroll_content)
+        outlier_group_layout = QtWidgets.QVBoxLayout(outlier_group)
+        
+        self.outlier_enabled = QtWidgets.QCheckBox("Enable Outlier Filter")
+        outlier_group_layout.addWidget(self.outlier_enabled)
+        
+        alpha_layout = QtWidgets.QHBoxLayout()
+        alpha_layout.addWidget(QtWidgets.QLabel("IQR Multiplier (α):"))
+        
+        self.alpha_spinbox = QtWidgets.QDoubleSpinBox()
+        self.alpha_spinbox.setMinimum(0.0)
+        self.alpha_spinbox.setMaximum(5.0)
+        self.alpha_spinbox.setSingleStep(0.1)
+        self.alpha_spinbox.setValue(1.5)
+        self.alpha_spinbox.setMaximumWidth(80)
+        alpha_layout.addWidget(self.alpha_spinbox)
+        
+        self.alpha_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.alpha_slider.setMinimum(0)
+        self.alpha_slider.setMaximum(50)
+        self.alpha_slider.setSingleStep(1)
+        self.alpha_slider.setValue(15)
+        alpha_layout.addWidget(self.alpha_slider)
+        
+        outlier_group_layout.addLayout(alpha_layout)
+        
+        self.show_removed = QtWidgets.QCheckBox("Show Removed DUT Count")
+        self.show_removed.setChecked(True)
+        outlier_group_layout.addWidget(self.show_removed)
+        
+        self.alpha_slider.valueChanged.connect(
+            lambda v: self.alpha_spinbox.setValue(v / 10.0)
+        )
+        self.alpha_spinbox.valueChanged.connect(
+            lambda v: self.alpha_slider.setValue(int(v * 10))
+        )
+        
+        grid_layout.addWidget(outlier_group, 18, 0, 1, 2)
                 
         
     def initWithParentParams(self):
@@ -220,6 +266,10 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_cpk.setText(str(settings.gen.cpk_thrsh))
         self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.gen.sort_tlist, 0))
         self.settingsUI.testIDTypecomboBox.setCurrentIndex(indexDic_testIdfy_reverse.get(settings.gen.id_type, 0))
+        # outlier filter
+        self.outlier_enabled.setChecked(settings.outlier.enabled)
+        self.alpha_spinbox.setValue(settings.outlier.alpha)
+        self.show_removed.setChecked(settings.outlier.show_removed_count)
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
@@ -271,6 +321,10 @@ class stdfSettings(QtWidgets.QDialog):
         userSettings.gen.cpk_thrsh = float(self.settingsUI.lineEdit_cpk.text())
         userSettings.gen.sort_tlist = indexDic_sortby[self.settingsUI.sortTestListComboBox.currentIndex()]
         userSettings.gen.id_type = indexDic_testIdfy[self.settingsUI.testIDTypecomboBox.currentIndex()]
+        # outlier filter
+        userSettings.outlier.enabled = self.outlier_enabled.isChecked()
+        userSettings.outlier.alpha = self.alpha_spinbox.value()
+        userSettings.outlier.show_removed_count = self.show_removed.isChecked()
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
@@ -305,6 +359,8 @@ class stdfSettings(QtWidgets.QDialog):
             if (origSettings.trend != userSettings.trend) and (currentTab == tab.Trend): 
                 refreshTab = True
             if (origSettings.histo != userSettings.histo) and (currentTab == tab.Histo): 
+                refreshTab = True
+            if (origSettings.outlier != userSettings.outlier) and (currentTab == tab.Histo):
                 refreshTab = True
             if (origSettings.gen.file_symbols != userSettings.gen.file_symbols) and (currentTab in [tab.Trend, tab.PPQQ]):
                 refreshTab = True
