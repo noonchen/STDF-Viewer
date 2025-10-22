@@ -63,6 +63,19 @@ class PPQQPlotConfig(BaseModel):
     axis_mode: str = Field("X: Original; Y: Theoretical", alias="Axis Mode")
 
 
+class OutlierFilterConfig(BaseModel):
+    enabled: bool = Field(False, alias="Enable Outlier Filter")
+    alpha: float = Field(1.5, alias="IQR Multiplier (α)")
+    show_removed_count: bool = Field(True, alias="Show Removed Count")
+    
+    @field_validator("alpha")
+    @classmethod
+    def validate_alpha(cls, v: float):
+        if v < 0:
+            raise ValueError("Alpha must be non-negative")
+        return v
+
+
 class ColorSettingConfig(BaseModel):
     site_colors: dict[int, str] = Field(
         default_factory=lambda: {
@@ -142,6 +155,7 @@ class SettingParams(BaseModel):
     histo: HistoPlotConfig = Field(default_factory=HistoPlotConfig, alias="Histo Plot")
     ppqq: PPQQPlotConfig = Field(default_factory=PPQQPlotConfig, alias="PP/QQ Plot")
     color: ColorSettingConfig = Field(default_factory=ColorSettingConfig, alias="Color Setting")
+    outlier: OutlierFilterConfig = Field(default_factory=OutlierFilterConfig, alias="Outlier Filter")
 
     class Config:
         validate_by_name = True  # allow dumping with field names
@@ -152,6 +166,7 @@ class SettingParams(BaseModel):
         self.trend = new.trend
         self.histo = new.histo
         self.ppqq = new.ppqq
+        self.outlier = new.outlier
         # need to merge instead of replacing
         self.color.site_colors.update(new.color.site_colors)
         self.color.sbin_colors.update(new.color.sbin_colors)
@@ -252,6 +267,67 @@ def getLoadedFontNames() -> list:
 
 
 isMac = platform.system() == 'Darwin'
+
+
+def detect_outliers_iqr(data: np.ndarray, 
+                       alpha: float = 1.5) -> tuple[np.ndarray, np.ndarray, dict]:
+    """
+    Detect outliers using IQR method.
+    
+    Parameters:
+    -----------
+    data : np.ndarray
+        Numeric data array (can contain NaN/Inf)
+    alpha : float
+        IQR multiplier for outlier threshold (default: 1.5)
+        - alpha = 0: disable filtering (return all as inliers)
+        - alpha < 1.5: aggressive filtering
+        - alpha >= 1.5: conservative filtering
+    
+    Returns:
+    --------
+    inlier_mask : np.ndarray (bool)
+        Boolean mask where True = inlier, False = outlier
+    outlier_mask : np.ndarray (bool)
+        Boolean mask where True = outlier, False = inlier
+    stats : dict
+        Dictionary containing Q1, Q3, IQR, lower_bound, upper_bound, 
+        outlier_count, inlier_count
+    """
+    valid_mask = np.isfinite(data)
+    valid_data = data[valid_mask]
+    
+    if len(valid_data) == 0 or alpha == 0:
+        return valid_mask, ~valid_mask, {
+            'Q1': np.nan, 'Q3': np.nan, 'IQR': np.nan,
+            'lower_bound': np.nan, 'upper_bound': np.nan,
+            'outlier_count': 0, 'inlier_count': len(data)
+        }
+    
+    Q1 = np.percentile(valid_data, 25)
+    Q3 = np.percentile(valid_data, 75)
+    IQR = Q3 - Q1
+    
+    lower_bound = Q1 - alpha * IQR
+    upper_bound = Q3 + alpha * IQR
+    
+    outlier_mask = np.zeros(len(data), dtype=bool)
+    outlier_mask[valid_mask] = (valid_data < lower_bound) | (valid_data > upper_bound)
+    
+    outlier_mask |= ~valid_mask
+    inlier_mask = ~outlier_mask
+    
+    stats = {
+        'Q1': Q1,
+        'Q3': Q3,
+        'IQR': IQR,
+        'lower_bound': lower_bound,
+        'upper_bound': upper_bound,
+        'outlier_count': np.sum(outlier_mask),
+        'inlier_count': np.sum(inlier_mask)
+    }
+    
+    return inlier_mask, outlier_mask, stats
 
 
 # icon related

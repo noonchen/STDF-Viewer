@@ -1,6 +1,6 @@
 #
 # ChartWidgets.py - STDF Viewer
-# 
+#
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
@@ -12,12 +12,12 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
@@ -38,18 +38,28 @@ import deps.SharedSrc as ss
 pg.setConfigOptions(foreground='k', background='w', antialias=False)
 
 
-def prepareHistoData(dutList: np.ndarray, 
-                     dataList: np.ndarray, 
-                     rectBaseLevel: int):
+def prepareHistoData(dutList: np.ndarray,
+                     dataList: np.ndarray,
+                     rectBaseLevel: int,
+                     apply_outlier_filter: bool = False):
     '''
-    returns hist, bin left edges, bin width, [(rect, duts)], tipData
+    returns hist, bin left edges, bin width, [(rect, duts)], tipData, filter_stats
     '''
     settings = ss.getSetting()
+
+    filter_stats = None
+    if apply_outlier_filter and settings.outlier.enabled:
+        alpha = settings.outlier.alpha
+        inlier_mask, __, filter_stats = ss.detect_outliers_iqr(dataList, alpha)
+
+        dutList = dutList[inlier_mask]
+        dataList = dataList[inlier_mask]
+
     ffmt = settings.getFloatFormat()
     binCount = settings.histo.bin_count
     normalize = settings.histo.norm_histobars
     horizontalBar = not settings.gen.vert_bar
-    
+
     hist, edges = np.histogram(dataList, bins=binCount)
     bin_width = edges[1]-edges[0]
     # get left edges
@@ -57,10 +67,10 @@ def prepareHistoData(dutList: np.ndarray,
     # np.histogram is left-close-right-open, except the last bin
     # np.digitize should be right=False, use left edges to force close the rightmost bin
     bin_ind = np.digitize(dataList, edges, right=False)
-    
+
     # get tip data for hovering display before normalization
-    tipData = [("[{}, {})".format(ffmt % e, 
-                                  ffmt % (e + bin_width)), h) 
+    tipData = [("[{}, {})".format(ffmt % e,
+                                  ffmt % (e + bin_width)), h)
                for (h, e) in zip(hist, edges)]
     # use normalized hist if enabled
     if normalize and hist.max() != 0:
@@ -76,7 +86,7 @@ def prepareHistoData(dutList: np.ndarray,
         if h == 0:
             continue
         duts = bin_dut_dict[ind]
-        
+
         if horizontalBar:
             left    = rectBaseLevel
             top     = e
@@ -87,28 +97,28 @@ def prepareHistoData(dutList: np.ndarray,
             top     = rectBaseLevel     # Qt top + height = bottom
             width   = bin_width
             height  = h
-        
-        rectDutList.append( (QRectF(left, top, width, height), 
+
+        rectDutList.append( (QRectF(left, top, width, height),
                              duts) )
-    return hist, edges, bin_width, rectDutList, tipData
+    return hist, edges, bin_width, rectDutList, tipData, filter_stats
 
 
-def prepareBinRectList(binCenter: np.ndarray, 
-                       binCnt: np.ndarray, 
-                       binWidth: float, 
-                       isHBIN: bool, 
+def prepareBinRectList(binCenter: np.ndarray,
+                       binCnt: np.ndarray,
+                       binWidth: float,
+                       isHBIN: bool,
                        binNumList: np.ndarray,
                        horizontalBar: bool = True):
     '''
     return [(rect, (isHBIN, bin_num))]
     '''
     rectList = []
-    
+
     for center, cnt, bin_num in zip(binCenter, binCnt, binNumList):
         if cnt == 0:
             continue
         edge = center - binWidth/2
-        
+
         if horizontalBar:
             left    = 0
             top     = edge
@@ -120,7 +130,7 @@ def prepareBinRectList(binCenter: np.ndarray,
             width   = binWidth
             height  = cnt
 
-        rectList.append( (QRectF(left, top, width, height), 
+        rectList.append( (QRectF(left, top, width, height),
                           (isHBIN, bin_num, cnt)) )
     return rectList
 
@@ -145,7 +155,7 @@ class ClickableText(pg.LabelItem):
         self.firstText = text
         self.secondText = ""
         self.current_text = text
-        
+
     def setText(self, text, **args):
         text = str(text).replace('\n', '<br>')
         return super().setText(text, **args)
@@ -153,18 +163,18 @@ class ClickableText(pg.LabelItem):
     def setSecondText(self, text: str):
         if isinstance(text, str) and text:
             self.secondText = text
-    
+
     def mousePressEvent(self, event):
         if not self.secondText:
             event.ignore()
             return
-            
+
         # Toggle text on click
         if self.current_text == self.firstText:
             self.current_text = self.secondText
         else:
             self.current_text = self.firstText
-        
+
         self.setText(self.current_text)
         event.accept()
 
@@ -191,25 +201,25 @@ class PlotMenu(QMenu):
                          self.pickMode,
                          self.clearSelection,
                          self.showDutData])
-        
+
     def connectRestore(self, restoreMethod):
         self.restoreMode.triggered.connect(restoreMethod)
-        
+
     def connectScale(self, scaleMethod):
         self.scaleMode.triggered.connect(scaleMethod)
-        
+
     def connectPan(self, panMethod):
         self.panMode.triggered.connect(panMethod)
-        
+
     def connectPick(self, pickMethod):
         self.pickMode.triggered.connect(pickMethod)
-        
+
     def connectClearSelection(self, clearSelectionMethod):
         self.clearSelection.triggered.connect(clearSelectionMethod)
-    
+
     def connectShowDut(self, showDutMethod):
         self.showDutData.triggered.connect(showDutMethod)
-        
+
     def uncheckOthers(self, currentName: str):
         for n, act in [("scale", self.scaleMode), ("pan", self.panMode), ("pick", self.pickMode)]:
             if n != currentName:
@@ -219,22 +229,22 @@ class PlotMenu(QMenu):
 class GraphicViewWithMenu(pg.GraphicsView):
     def __init__(self, minWidth=800, minHeight=400):
         super().__init__()
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, 
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
                            QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.setMinimumWidth(minWidth)
         self.setMinimumHeight(minHeight)
         self.plotlayout = pg.GraphicsLayout()
         self.setCentralWidget(self.plotlayout)
         self.menu = PlotMenu()
-        # storing all viewboxes for changing 
+        # storing all viewboxes for changing
         # options
         self.view_list = []
         self.connectActions()
         self.showDutSignal = None
-        
+
     def setShowDutSignal(self, signal):
         self.showDutSignal = signal
-    
+
     def mousePressEvent(self, ev: QtGui.QMouseEvent):
         if ev.button() == Qt.MouseButton.RightButton:
             ev.accept()
@@ -247,7 +257,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
         export = self.sceneObj.contextMenu[0]
         if export not in self.menu.actions() and len(self.view_list) > 0:
             # export dialog is usually triggered from a viewbox
-            # but in our case, menu is shown in GraphicView, 
+            # but in our case, menu is shown in GraphicView,
             # we don't have a MouseClickEvent that contains a viewbox
             # As a workaround, manually assign a viewbox to `contextMenuItem`
             # ao that the export dialog have somethings to display
@@ -255,7 +265,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
             self.menu.addSeparator()
             self.menu.addAction(export)
         self.menu.popup(ev.screenPos().toPoint())
-        
+
     def connectActions(self):
         self.menu.connectRestore(self.onRestoreMode)
         self.menu.connectPan(self.onPanMode)
@@ -263,14 +273,14 @@ class GraphicViewWithMenu(pg.GraphicsView):
         self.menu.connectPick(self.onPickMode)
         self.menu.connectClearSelection(self.onClearSel)
         self.menu.connectShowDut(self.onShowDut)
-    
+
     def onRestoreMode(self):
         for view in self.view_list:
             view.enableAutoRange()
-    
+
     def onScaleMode(self):
         self.menu.uncheckOthers("scale")
-        # if action is checked twice, 
+        # if action is checked twice,
         # it will appear as unchecked...
         self.menu.scaleMode.setChecked(True)
         for view in self.view_list:
@@ -295,7 +305,7 @@ class GraphicViewWithMenu(pg.GraphicsView):
     def onClearSel(self):
         for view in self.view_list:
             view.clearSelections()
-    
+
     def onShowDut(self):
         selectedData = []
         for view in self.view_list:
@@ -320,25 +330,25 @@ class StdfViewrViewBox(pg.ViewBox):
         self.selectionInfo = ClickableText("", size="10pt", color="#000000", justify="left")
         self.selectionInfo.setParentItem(self)
         self.selectionInfo.anchor(itemPos=(0, 1), parentPos=(0, 1), offset=(10, -10))
-    
+
     def setFileID(self, fid: int):
         self.fileID = fid
-    
+
     def wheelEvent(self, ev, axis=None):
         if self.enableWheelScale:
             super().wheelEvent(ev, axis)
         else:
             ev.ignore()
-    
+
     def mouseDragEvent(self, ev, axis=None):
         # view box handle left button only, middlebutton?
-        if ev.button() not in [Qt.MouseButton.LeftButton, 
+        if ev.button() not in [Qt.MouseButton.LeftButton,
                                Qt.MouseButton.MiddleButton]:
             return
-        
+
         ev.accept()
         pos = ev.pos()
-        
+
         if self.state['mouseMode'] == pg.ViewBox.RectMode and axis is None:
             pixelBox = QRectF(Point(ev.buttonDownPos(ev.button())), Point(pos))
             coordBox = self.childGroup.mapRectFromParent(pixelBox)
@@ -376,27 +386,27 @@ class StdfViewrViewBox(pg.ViewBox):
 
             x = tr.x() if mask[0] == 1 else None
             y = tr.y() if mask[1] == 1 else None
-            
+
             self._resetTarget()
             if x is not None or y is not None:
                 self.translateBy(x=x, y=y)
             self.sigRangeChangedManually.emit(self.state['mouseEnabled'])
-            
+
     def updateScaleBox(self, coordBox):
         self.rbScaleBox.setPos(coordBox.topLeft())
         tr = QtGui.QTransform.fromScale(coordBox.width(), coordBox.height())
         self.rbScaleBox.setTransform(tr)
-        self.rbScaleBox.show()    
-    
+        self.rbScaleBox.show()
+
     def selectItemsWithin(self, coordBox: QRectF):
         print("`selectItemsWithin` should be overrided", coordBox)
-    
+
     def highlightitemsWithin(self, coordBox: QRectF):
         print("`highlightitemsWithin` should be overrided", coordBox)
-        
+
     def clearSelections(self):
         print("`clearSelections` should be overrided")
-    
+
     def getSelectedDataForDutTable(self) -> list:
         print("`getSelectedDataForDutTable` should be overrided")
         return []
@@ -409,7 +419,7 @@ class TrendViewBox(StdfViewrViewBox):
     '''
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
-        # add scatter item for displaying 
+        # add scatter item for displaying
         # highlighted and selected point in pick mode
         self.hlpoints = pg.ScatterPlotItem(brush="#111111", size=10, name="_highlight")
         self.slpoints = pg.ScatterPlotItem(brush="#CC0000", size=10, name="_selection")
@@ -418,7 +428,7 @@ class TrendViewBox(StdfViewrViewBox):
         self.slpoints.setZValue(999)
         self.addItem(self.hlpoints)
         self.addItem(self.slpoints)
-    
+
     def _getSelectedPoints(self, coordBox: QRectF) -> set:
         pointSet = set()
         for item in self.addedItems:
@@ -430,8 +440,8 @@ class TrendViewBox(StdfViewrViewBox):
                 scatter = item
             else:
                 continue
-            
-            if (scatter.isVisible() and scatter.name() not in ["_selection", 
+
+            if (scatter.isVisible() and scatter.name() not in ["_selection",
                                                                "_highlight"]):
                 xData, yData = scatter.getData()
                 # get mask from xy selection range
@@ -446,7 +456,7 @@ class TrendViewBox(StdfViewrViewBox):
                 for x, y in zip(xData[mask], yData[mask]):
                     pointSet.add( (x, y) )
         return pointSet
-    
+
     def selectItemsWithin(self, coordBox: QRectF):
         # clear highlight points when drag event is finished
         self.hlpoints.clear()
@@ -461,24 +471,24 @@ class TrendViewBox(StdfViewrViewBox):
         mean = np.min(uniqueY)
         median = np.median(uniqueY)
         stddev = np.std(uniqueY)
-        
+
         ffmt = ss.getSetting().getFloatFormat()
         self.selectionInfo.setText("Points selected: {}\n\
                                    Average: {}\n\
                                    Median: {}\n\
                                    St. Dev.: {}".format(
             len(uniqueY), ffmt % mean, ffmt % median, ffmt % stddev))
-    
+
     def highlightitemsWithin(self, coordBox: QRectF):
         pointSet = self._getSelectedPoints(coordBox)
         # remove previous and add new points
         self.hlpoints.clear()
         self.hlpoints.addPoints(pos=pointSet)
-        
+
     def clearSelections(self):
         self.slpoints.clear()
         self.selectionInfo.setText("")
-    
+
     def getSelectedDataForDutTable(self):
         dataSet = set()
         dutIndexArray, _ = self.slpoints.getData()
@@ -510,34 +520,34 @@ class RectItem(pg.GraphicsObject):
 
     def name(self):
         return self.opts["name"]
-    
+
     def addRects(self, rects: list):
         for r in rects:
             if r not in self._rects:
                 self._rects.append(r)
         self._generate_picture()
         self.informViewBoundsChanged()
-    
+
     def getRects(self):
         return self._rects
-    
+
     def clear(self):
         self.picture = QtGui.QPicture()
         self._rects = []
         self._generate_picture()
         self.informViewBoundsChanged()
-    
+
     def _generate_picture(self):
         if self.opts["pen"] is None:
             pen = pg.mkPen(None)
         else:
             pen = pg.mkPen(self.opts["pen"])
-        
+
         if self.opts["brush"] is None:
             brush = pg.mkBrush(None)
         else:
             brush = pg.mkBrush(self.opts["brush"])
-            
+
         painter = QtGui.QPainter(self.picture)
         painter.setPen(pen)
         painter.setBrush(brush)
@@ -558,7 +568,7 @@ class SVBarViewBox(StdfViewrViewBox):
         self.hlbars = RectItem(pen="#111111",
                                brush="#111111",
                                name="_highlight")
-        self.slbars = RectItem(pen={"color": "#CC0000", 
+        self.slbars = RectItem(pen={"color": "#CC0000",
                                     "width": 5},
                                brush=None,
                                name="_selection")
@@ -566,7 +576,7 @@ class SVBarViewBox(StdfViewrViewBox):
         self.slbars.setZValue(999)
         self.addItem(self.hlbars)
         self.addItem(self.slbars)
-        
+
     def _getSelectedRects(self, coordBox: QRectF) -> list:
         '''
         returns [(QRectF, duts)]
@@ -575,50 +585,50 @@ class SVBarViewBox(StdfViewrViewBox):
         for item in self.addedItems:
             if not isinstance(item, SVBarGraphItem):
                 continue
-            
-            if item.isVisible() and item.name() not in ["_selection", 
+
+            if item.isVisible() and item.name() not in ["_selection",
                                                         "_highlight"]:
                 for rectTup in item.getRectDutList():
                     if coordBox.intersects(rectTup[0]):
                         rects.append(rectTup)
         return rects
-    
+
     def selectItemsWithin(self, coordBox: QRectF):
         self.hlbars.clear()
         newRects = self._getSelectedRects(coordBox)
         self.slbars.addRects(newRects)
-        
+
         # get all selected bars for displaying info
         slr = self.slbars.getRects()
         if not slr:
             self.selectionInfo.setText("")
             return
         self.showSelectedBarInfo(slr)
-        
+
     def showSelectedBarInfo(self, slr: list):
         dutIndexArray = set()
         _ = [dutIndexArray.update(l) for (_, l) in slr]
         dutIndexArray = np.sort(list(dutIndexArray))
-        # # instead of shows array directly, split it into 
+        # # instead of shows array directly, split it into
         # # consecutive number groups
         # splitAt = np.where(np.diff(dutIndexArray) != 1)[0] + 1
         # ngroup = np.split(dutIndexArray, splitAt)
         # groupStr = ",".join(f"{g[0]}-{g[-1]}" if len(g) > 1 else f"{g[0]}" for g in ngroup)
-        
+
         self.selectionInfo.setText("Bars selected: {}\n\
                                    DUT count: {}".format(
-                                       len(slr), 
+                                       len(slr),
                                        dutIndexArray.size))
-    
+
     def highlightitemsWithin(self, coordBox: QRectF):
         newRects = self._getSelectedRects(coordBox)
         self.hlbars.clear()
         self.hlbars.addRects(newRects)
-    
+
     def clearSelections(self):
         self.slbars.clear()
         self.selectionInfo.setText("")
-    
+
     def getSelectedDataForDutTable(self) -> list:
         dataSet = set()
         for _, duts in self.slbars.getRects():
@@ -633,7 +643,7 @@ class BinViewBox(SVBarViewBox):
             total += cnt
         self.selectionInfo.setText("Bars selected: {}\n\
                                    DUT count: {}".format(len(slr), total))
-    
+
     def getSelectedDataForDutTable(self) -> list:
         '''
         For BinChart, return [(fid, isHBIN, bins)]
@@ -641,8 +651,8 @@ class BinViewBox(SVBarViewBox):
         tmp = {}
         for _, (isHBIN, bin_num, _) in self.slbars.getRects():
             tmp.setdefault( (self.fileID, isHBIN), []).append(bin_num)
-        return [(fid, isHBIN, bins) 
-                for (fid, isHBIN), bins 
+        return [(fid, isHBIN, bins)
+                for (fid, isHBIN), bins
                 in tmp.items()]
 
 
@@ -656,18 +666,18 @@ class WaferViewBox(TrendViewBox):
         # remove scatter items in super() init
         self.removeItem(self.hlpoints)
         self.removeItem(self.slpoints)
-        # add scatter item for displaying 
+        # add scatter item for displaying
         # highlighted and selected point in pick mode
-        self.hlpoints = pg.ScatterPlotItem(symbol="h", 
-                                           pen=None, 
-                                           size=0.95, 
-                                           pxMode=False, 
-                                           brush="#111111", 
+        self.hlpoints = pg.ScatterPlotItem(symbol="h",
+                                           pen=None,
+                                           size=0.95,
+                                           pxMode=False,
+                                           brush="#111111",
                                            name="_highlight")
-        self.slpoints = pg.ScatterPlotItem(symbol="h", 
-                                           pen=None, 
-                                           size=0.95, 
-                                           pxMode=False, 
+        self.slpoints = pg.ScatterPlotItem(symbol="h",
+                                           pen=None,
+                                           size=0.95,
+                                           pxMode=False,
                                            brush="#CC0000",
                                            name="_selection")
         # set z value for them stay at the top
@@ -675,22 +685,22 @@ class WaferViewBox(TrendViewBox):
         self.slpoints.setZValue(999)
         self.addItem(self.hlpoints)
         self.addItem(self.slpoints)
-        # file id and waferIndex is 
+        # file id and waferIndex is
         # for showing dut data
         self.waferInd = -1
-        
+
     def setWaferIndex(self, ind: int):
         self.waferInd = ind
-        
+
     def getSelectedDataForDutTable(self):
         # (waferInd, fid, (x, y))
         dataSet = set()
         xData, yData = self.slpoints.getData()
         # remove duplicates
-        _ = [dataSet.add((self.waferInd, 
-                          self.fileID, 
-                          (int(x), int(y)))) 
-             for x, y 
+        _ = [dataSet.add((self.waferInd,
+                          self.fileID,
+                          (int(x), int(y))))
+             for x, y
              in zip(xData, yData)]
         return list(dataSet)
 
@@ -710,7 +720,7 @@ class HistoLineGroup(QtWidgets.QGraphicsItemGroup):
         self._length = length
         self._isVertical = isVertical
         self._textItems = []
-        
+
     def addLine(self, pos: float, pen: QtGui.QPen, label: str, labelAnchor = (1, 1)):
         if self._isVertical:
             # pos is on x axis
@@ -718,11 +728,11 @@ class HistoLineGroup(QtWidgets.QGraphicsItemGroup):
         else:
             # pos is on y axis
             x1, y1, x2, y2 = self._base, pos, self._base + self._length, pos
-            
+
         lineItem = QtWidgets.QGraphicsLineItem(QLineF(x1, y1, x2, y2))
         lineItem.setPen(pen)
         self.addToGroup(lineItem)
-                
+
         # add label texts
         textItem = pg.TextItem(text=label, color=pen.color(), anchor=labelAnchor)
         textItem.setPos(QPointF(x2, y2))
@@ -747,25 +757,25 @@ class TrendChart(GraphicViewWithMenu):
         self.y_max = np.nan
         self.validData = False
         self.fileNames = []
-        
+
     def setFileNames(self, names: list):
         self.fileNames = names
-    
+
     def addFileLabel(self, parent, fid: int):
         file_text = ClickableText(f"File {fid}", size="15pt", color="#000000", justify="right")
         file_text.setSecondText(self.fileNames[fid] if fid < len(self.fileNames) else "")
         file_text.setParentItem(parent)
         file_text.anchor(itemPos=(1, 1), parentPos=(1, 1), offset=(-10, -10))
-        
+
     def setData(self, dataDict: dict):
         '''
         Store info and data, calculate y axis limits for plotting
         '''
         self.testInfo: dict = dataDict["TestInfo"]
-        # testData  key: fid, 
+        # testData  key: fid,
         #           value: a dict with site number as key and value: testDataDict of this site
         self.testData: dict = dataDict["Data"]
-        # get display limit of y axis, should be 
+        # get display limit of y axis, should be
         # the max|min of (lim, spec, data)
         y_min_list = []
         y_max_list = []
@@ -774,7 +784,7 @@ class TrendChart(GraphicViewWithMenu):
             d_file = self.testData[fid]
             if len(i_file) == 0:
                 # this file doesn't contain
-                # current test, 
+                # current test,
                 continue
             self.test_num = i_file["TEST_NUM"]
             self.test_name = i_file["TEST_NAME"]
@@ -789,9 +799,9 @@ class TrendChart(GraphicViewWithMenu):
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
                 # at least one site data should be valid
-                self.validData |= (~np.isnan(d_site["Min"]) and 
+                self.validData |= (~np.isnan(d_site["Min"]) and
                                    ~np.isnan(d_site["Max"]))
-        # validData means the valid data exists, 
+        # validData means the valid data exists,
         # set the flag to True and put it in top GUI
         if not self.validData:
             return
@@ -799,11 +809,11 @@ class TrendChart(GraphicViewWithMenu):
         self.y_min, self.y_max = getAxisRange(y_min_list, y_max_list)
         # call draw() if valid
         self.draw()
-        
+
     def draw(self):
         settings = ss.getSetting()
         # add title
-        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0,
                                  rowspan=1, colspan=len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
@@ -819,7 +829,7 @@ class TrendChart(GraphicViewWithMenu):
             sitesData = self.testData[fid]
             infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
-                # skip this file if: 
+                # skip this file if:
                 #  - test is not in this file (empty sitesData)
                 #  - no data found in selected sites (test value is empty array)
                 # to ensure the following operation is on valid data
@@ -832,7 +842,7 @@ class TrendChart(GraphicViewWithMenu):
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
                 if len(x) == 0 or len(y) == 0:
-                    # skip this site that contains 
+                    # skip this site that contains
                     # no data
                     continue
                 x_min_list.append(np.nanmin(x))
@@ -843,11 +853,11 @@ class TrendChart(GraphicViewWithMenu):
                 siteColor = settings.color.site_colors[site]
                 # test value
                 site_info = "All Site" if site == -1 else f"Site {site}"
-                pdi = pg.PlotDataItem(x=x, y=y, pen=None, 
-                                      symbol=fsymbol, symbolPen="k", 
-                                      symbolSize=8, symbolBrush=siteColor, 
+                pdi = pg.PlotDataItem(x=x, y=y, pen=None,
+                                      symbol=fsymbol, symbolPen="k",
+                                      symbolSize=8, symbolBrush=siteColor,
                                       name=f"{site_info}")
-                pdi.scatter.opts.update(hoverable=True, 
+                pdi.scatter.opts.update(hoverable=True,
                                         tip=f"{site_info}\nDUTIndex: {{x:.0f}}\nValue: {{y:.3g}}".format,
                                         hoverSymbol="+",
                                         hoverSize=12,
@@ -866,7 +876,7 @@ class TrendChart(GraphicViewWithMenu):
             # add test limits and specs
             self.addLimitsToPlot(infoDict, pitem)
             # dynamic limits
-            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim), 
+            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim),
                                                  (dyH, "Dynamic High Limit", self.hilimitPen, settings.trend.show_hilim)]:
                 if enabled and len(dyDict) > 0:
                     x = np.array(sorted(dyDict.keys()))
@@ -883,7 +893,7 @@ class TrendChart(GraphicViewWithMenu):
             # set range and limits
             x_min, x_max = getAxisRange(x_min_list, x_max_list, 0.02)
             # view.setAutoPan()
-            view.setRange(xRange=(x_min, x_max), 
+            view.setRange(xRange=(x_min, x_max),
                           yRange=(self.y_min, self.y_max),
                           padding=0.0)
             view.setLimits(xMin=x_min, xMax=x_max,      # avoid blank area
@@ -898,19 +908,19 @@ class TrendChart(GraphicViewWithMenu):
                 view.setYLink(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-            
+
     def addLimitsToPlot(self, infoDict: dict, pitem: pg.PlotItem, vertical: bool = False):
         settings = ss.getSetting()
-        for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim), 
-                                            ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim), 
-                                            ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec), 
+        for (key, name, pen, enabled) in [("LLimit", "Low Limit", self.lolimitPen, settings.trend.show_lolim),
+                                            ("HLimit", "High Limit", self.hilimitPen, settings.trend.show_hilim),
+                                            ("LSpec", "Low Spec", self.lospecPen, settings.trend.show_lospec),
                                             ("HSpec", "High Spec", self.hispecPen, settings.trend.show_hispec)]:
             lim = infoDict[key]
             pos = 0.8 if key.endswith("Spec") else 0.2
             anchors = [(0.5, 0), (0.5, 0)] if key.startswith("L") else [(0.5, 1), (0.5, 1)]
             if enabled and ~np.isnan(lim) and ~np.isinf(lim):
                 arg = dict(x=lim) if vertical else dict(y=lim)
-                labelOpts = dict(position=pos, color=pen.color(), 
+                labelOpts = dict(position=pos, color=pen.color(),
                                  movable=True, anchors=anchors, rotateAxis=(1, 0))
                 pitem.addLine(**arg, pen=pen, name=name, label=f"{name} = {{value:0.2f}}", labelOpts=labelOpts)
 
@@ -924,13 +934,13 @@ class SVBarGraphItem(pg.BarGraphItem):
         self.rectDutList = []
         self.opts['tip'] = None
         self._toolTipCleared = True
-        
+
     def setRectDutList(self, rdl: list):
         self.rectDutList = rdl
-        
+
     def getRectDutList(self):
         return self.rectDutList
-    
+
     def setHoverTipFunction(self, tipFunc):
         # tipFunc(arg1, arg2):
         # arg1: str, bar description
@@ -938,12 +948,12 @@ class SVBarGraphItem(pg.BarGraphItem):
         #
         # the value of args are get from `tipData`
         self.opts['tip'] = tipFunc
-    
+
     def setTipData(self, tipData: list):
-        # a list of (description, height/count) 
+        # a list of (description, height/count)
         # using same order of bar data (x0, y0, etc.)
         self.tipData = tipData
-    
+
     def hoverEvent(self, ev):
         hoveredRectIdx = []
         if not ev.exit:
@@ -952,7 +962,7 @@ class SVBarGraphItem(pg.BarGraphItem):
             for idx, rect in enumerate(self._rectarray.instances()):
                 if rect.contains(ev.pos()):
                     hoveredRectIdx.append(idx)
-        
+
         # Show information about hovered points in a tool tip
         vb = self.getViewBox()
         if vb is not None and self.opts['tip'] is not None and len(self.tipData) > 0:
@@ -977,13 +987,13 @@ class HistoChart(TrendChart):
         self.sigmaPen.setStyle(Qt.PenStyle.DashDotLine)
         self.gaussPen = pg.mkPen(cosmetic=True, width=4.5, color=(255, 0, 0))
         self.gaussPen.setStyle(Qt.PenStyle.DashLine)
-        
+
     def draw(self):
         settings = ss.getSetting()
         isVertical = settings.gen.vert_bar
 
         # add title
-        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
+        self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0,
                                  rowspan=1, colspan=1 if isVertical else len(self.testInfo),
                                  size="20pt")
         # create same number of viewboxes as file counts
@@ -999,7 +1009,7 @@ class HistoChart(TrendChart):
             sitesData = self.testData[fid]
             infoDict = self.testInfo[fid]
             if len(sitesData) == 0 or len(infoDict) == 0:
-                # skip this file if: 
+                # skip this file if:
                 #  - test is not in this file (empty sitesData)
                 #  - no data found in selected sites (test value is empty array)
                 # to ensure the following operation is on valid data
@@ -1013,16 +1023,17 @@ class HistoChart(TrendChart):
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
                 if len(x) == 0 or len(y) == 0:
-                    # skip this site that contains 
+                    # skip this site that contains
                     # no data
                     continue
                 siteColor = settings.color.site_colors[site]
-                # calculate bin edges and histo counts                
-                (hist, 
-                 edges, 
-                 bin_width, 
-                 rectDutList, 
-                 tipData) = prepareHistoData(x, y, bar_base)
+                # calculate bin edges and histo counts
+                (hist,
+                 edges,
+                 bin_width,
+                 rectDutList,
+                 tipData,
+                 filter_stats) = prepareHistoData(x, y, bar_base, apply_outlier_filter=True)
                 bin_width_list.append(bin_width)
                 site_info = "All Site" if site == -1 else f"Site {site}"
                 # show bars if enabled
@@ -1036,8 +1047,27 @@ class HistoChart(TrendChart):
                     item.setTipData(tipData)
                     item.setHoverTipFunction("Range: {}\nDUT Count: {}".format)
                     pitem.addItem(item)
+
                 # set the bar base of histogram of next site
                 inc = 1.2 * hist.max()
+
+                if filter_stats and settings.outlier.show_removed_count:
+                    removed = filter_stats['outlier_count']
+                    total = filter_stats['inlier_count'] + removed
+                    if removed > 0:
+                        filter_text = f"Outliers Removed: {removed}/{total} ({100*removed/total:.1f}%) [α={settings.outlier.alpha}]"
+                        text_item = pg.TextItem(
+                            filter_text,
+                            anchor=(1, 1) if isVertical else (0, 0),
+                            color='#CC0000',
+                            fill=pg.mkBrush(255, 255, 255, 200)
+                        )
+                        pitem.addItem(text_item)
+                        if isVertical:
+                            text_item.setPos(self.y_max, bar_base + inc * 0.95)
+                        else:
+                            text_item.setPos(bar_base + inc * 0.05, self.y_max)
+
                 ticks.append((bar_base + 0.5 * inc, site_info))
                 # add lines
                 lines = HistoLineGroup(bar_base, inc, isVertical)
@@ -1077,7 +1107,7 @@ class HistoChart(TrendChart):
                 bar_base += inc
             # add test limits and specs
             self.addLimitsToPlot(infoDict, pitem, isVertical)
-            
+
             if len(self.testInfo) > 1:
                 # only add if there are multiple files
                 self.addFileLabel(view, fid)
@@ -1101,12 +1131,12 @@ class HistoChart(TrendChart):
                 tickAxis = "bottom"
                 valueAxis = "left"
                 linkAttr = "setYLink"
-            
+
             view.setRange(**rangeArg, padding=0.0)
             view.setLimits(**limitArg)
             # add to layout
             self.plotlayout.addItem(pitem, **layoutArg)
-            # link current viewbox to previous, 
+            # link current viewbox to previous,
             # show axis but hide value 2nd+ plots
             # labels and file id
             unit = infoDict["Unit"]
@@ -1120,7 +1150,7 @@ class HistoChart(TrendChart):
                 view.__getattribute__(linkAttr)(self.view_list[0])
             # append view for counting plots
             self.view_list.append(view)
-        
+
         # vertical mode, show axis of last plot, loop ends
         if isVertical:
             pitem.getAxis(valueAxis).setStyle(showValues=True)
@@ -1131,13 +1161,13 @@ class BinChart(GraphicViewWithMenu):
     def __init__(self):
         super().__init__(800, 800)
         self.validData = False
-        
+
     def setBinData(self, binData: dict):
-        if not all([k in binData for k in ["HS", 
-                                           "HBIN", "SBIN", 
+        if not all([k in binData for k in ["HS",
+                                           "HBIN", "SBIN",
                                            "HBIN_Ticks", "SBIN_Ticks"]]):
             return
-        
+
         settings = ss.getSetting()
         self.validData = True
         isVertical = settings.gen.vert_bar
@@ -1151,15 +1181,15 @@ class BinChart(GraphicViewWithMenu):
             isHBIN = True if binType == "HBIN" else False
             num_files = len(hsbin)
             # use a list to track viewbox count in
-            # a single plot, used for Y-link and 
+            # a single plot, used for Y-link and
             # hide axis
             tmpVbList = []
             binColorDict = settings.color.hbin_colors if isHBIN else settings.color.sbin_colors
             # add title
             binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
-            self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
-                                     row=row, col=0, 
-                                     rowspan=1, colspan=1 if isVertical else num_files, 
+            self.plotlayout.addLabel(f"{binTypeName}{hs_info}",
+                                     row=row, col=0,
+                                     rowspan=1, colspan=1 if isVertical else num_files,
                                      size="20pt")
             row += 1
             # iterate thru all files
@@ -1178,13 +1208,13 @@ class BinChart(GraphicViewWithMenu):
                 # draw bars, use `ind` instead of `bin_num`
                 tickInd = np.arange(len(numList))
                 binWidth = 0.8
-                rectList = prepareBinRectList(tickInd, cntList, 
-                                              binWidth, isHBIN, 
+                rectList = prepareBinRectList(tickInd, cntList,
+                                              binWidth, isHBIN,
                                               numList, not settings.gen.vert_bar)
                 # show name (tick), bin number and count in hover tip
                 ticks = [[binTicks[n] for n in numList]]
-                tipData = [(f"{name[1]}\nBin: {n}", cnt) 
-                           for (name, n, cnt) 
+                tipData = [(f"{name[1]}\nBin: {n}", cnt)
+                           for (name, n, cnt)
                            in zip(ticks[0], numList, cntList)]
                 cnt_max = max(cntList) * 1.15
                 ind_max = len(numList)
@@ -1192,8 +1222,8 @@ class BinChart(GraphicViewWithMenu):
                     barArg = dict(y0=0, x=tickInd, height=cntList, width=binWidth)
                     layoutArg = dict(row=row, col=0, rowspan=1, colspan=1)
                     rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
-                    limitArg = dict(yMin=0, yMax=cnt_max, 
-                                    xMin=-1, xMax=ind_max, 
+                    limitArg = dict(yMin=0, yMax=cnt_max,
+                                    xMin=-1, xMax=ind_max,
                                     minXRange=4, minYRange=3)
                     # each fid takes a single row in vertical mode
                     row += 1
@@ -1204,8 +1234,8 @@ class BinChart(GraphicViewWithMenu):
                     barArg = dict(x0=0, y=tickInd, width=cntList, height=binWidth)
                     layoutArg = dict(row=row, col=fid, rowspan=1, colspan=1)
                     rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
-                    limitArg = dict(xMin=0, xMax=cnt_max, 
-                                    yMin=-1, yMax=ind_max, 
+                    limitArg = dict(xMin=0, xMax=cnt_max,
+                                    yMin=-1, yMax=ind_max,
                                     minYRange=4, minXRange=3)
                     tickAxis = "left"
                     valueAxis = "bottom"
@@ -1217,8 +1247,8 @@ class BinChart(GraphicViewWithMenu):
                 pitem.addItem(bar)
                 # set ticks
                 pitem.getAxis(tickAxis).setTicks(ticks)
-                pitem.getAxis(valueAxis).setLabel(f"{binType} Count" 
-                                                 if num_files == 1 
+                pitem.getAxis(valueAxis).setLabel(f"{binType} Count"
+                                                 if num_files == 1
                                                  else f"{binType} Count in File {fid}")
                 # set visible range
                 view_bin.setRange(**rangeArg, padding=0.0)
@@ -1259,17 +1289,17 @@ class WaferBlock(pg.ItemSample):
             p.translate(10, 15)
             drawSymbol(p, symbol, 20, fn.mkPen(opts['pen']),
                        fn.mkBrush(opts['brush']))
-    
+
 
 class WaferMap(GraphicViewWithMenu):
     def __init__(self):
         super().__init__(600, 500)
         self.validData = False
-        
+
     def setWaferData(self, waferData: dict):
         if len(waferData) == 0 or len(waferData["Statistic"]) == 0:
             return
-        
+
         settings = ss.getSetting()
         self.validData = True
         waferInd, fid = waferData["ID"]
@@ -1282,13 +1312,13 @@ class WaferMap(GraphicViewWithMenu):
         pitem_legend = pg.PlotItem(viewBox=view_legend, enableMenu=False)
         pitem_legend.getAxis("left").hide()
         pitem_legend.getAxis("bottom").hide()
-        legend = pitem_legend.addLegend(offset=(10, 10), 
-                                        verSpacing=5, 
+        legend = pitem_legend.addLegend(offset=(10, 10),
+                                        verSpacing=5,
                                         labelTextSize="15pt")
         xyData = waferData["Data"]
         stackColorMap = pg.ColorMap(pos=None, color=["#00EE00", "#EEEE00", "#EE0000"])
         sortedKeys = sorted(xyData.keys())
-        
+
         for num in sortedKeys:
             xyDict = xyData[num]
             # for stack map, num = fail counts
@@ -1302,7 +1332,7 @@ class WaferMap(GraphicViewWithMenu):
                 (sbinName, sbinCnt, percent) = waferData["Statistic"][num]
                 tipFunc = f"XY: ({{x:.0f}}, {{y:.0f}})\nSBIN {num}\nBin Name: {sbinName}".format
                 legendString = f"SBIN {num} - {sbinName}\n[{sbinCnt} - {percent:.1f}%]"
-            
+
             spi = pg.ScatterPlotItem(
                 symbol="s",
                 pen=None,
@@ -1316,19 +1346,19 @@ class WaferMap(GraphicViewWithMenu):
             spi.addPoints(x=xyDict["x"], y=xyDict["y"], brush=color)
             pitem.addItem(spi)
             legend.addItem(WaferBlock(spi), spi.name())
-        
+
         (ratio, die_size, invertX, invertY, waferID, sites) = waferData["Info"]
         x_max, x_min, y_max, y_min = waferData["Bounds"]
-        waferView.setLimits(xMin=x_min-50, xMax=x_max+50, 
-                            yMin=y_min-50, yMax=y_max+50, 
-                            maxXRange=(x_max-x_min+100), 
+        waferView.setLimits(xMin=x_min-50, xMax=x_max+50,
+                            yMin=y_min-50, yMax=y_max+50,
+                            maxXRange=(x_max-x_min+100),
                             maxYRange=(y_max-y_min+100),
                             minXRange=2, minYRange=2)
-        waferView.setRange(xRange=(x_min-5, x_max+5), 
+        waferView.setRange(xRange=(x_min-5, x_max+5),
                             yRange=(y_min-5, y_max+5),
                             disableAutoRange=False)
         waferView.setAspectLocked(lock=True, ratio=ratio)
-        
+
         if invertX:
             waferView.invertX(True)
         if invertY:
@@ -1336,14 +1366,14 @@ class WaferMap(GraphicViewWithMenu):
         view_legend.autoRange()
         # title
         site_info = "All Site" if -1 in sites else f"Site {','.join(map(str, sites))}"
-        self.plotlayout.addLabel(f"{waferID} - {site_info}", row=0, col=0, 
+        self.plotlayout.addLabel(f"{waferID} - {site_info}", row=0, col=0,
                                  rowspan=1, colspan=2, size="20pt")
         # die size
         if die_size:
             dieSizeText = pg.LabelItem(die_size, size="12pt", color="#000000", anchor=(0, 0))
             dieSizeText.setParentItem(pitem)
             dieSizeText.anchor(itemPos=(0, 0), parentPos=(0, 0), offset=(30, 30))
-            
+
         # add map and axis
         self.plotlayout.addItem(pitem, row=1, col=0, rowspan=1, colspan=2)
         # add legend
@@ -1351,8 +1381,8 @@ class WaferMap(GraphicViewWithMenu):
         self.view_list.append(waferView)
 
 
-__all__ = ["TrendChart", 
-           "HistoChart", 
+__all__ = ["TrendChart",
+           "HistoChart",
            "BinChart",
            "WaferMap"
            ]
