@@ -1422,6 +1422,7 @@ fn on_prr_rec(
         prr_rec.num_test,
         prr_rec.test_t,
         prr_rec.part_id,
+        prr_rec.part_txt,
         prr_rec.hard_bin,
         prr_rec.soft_bin,
         prr_rec.part_flg[0],
