@@ -41,8 +41,8 @@ jobs:
         run: |
           uv pip install -U pip setuptools wheel meson ninja cython
 
-          curl -L -o numpy.zip https://github.com/numpy/numpy/archive/refs/tags/v2.3.4.zip
-          unzip -q numpy.zip
+          curl -L -o numpy.tar.gz https://github.com/numpy/numpy/releases/download/v2.3.4/numpy-2.3.4.tar.gz
+          tar -xzf numpy.tar.gz
 
           cd numpy-2.3.4
           uv run meson setup builddir --buildtype=release -Dblas=none -Dlapack=none
