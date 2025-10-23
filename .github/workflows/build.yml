@@ -28,7 +28,9 @@ jobs:
       - uses: astral-sh/setup-uv@v7
 
       - name: Install Python via uv
-        run: uv python install 3.13
+        run: |
+          uv python install 3.13
+          uv venv
 
       - name: Get appdmg for dmg build
         if: runner.os == 'macOS'
@@ -40,7 +42,7 @@ jobs:
           uv pip install -U pip setuptools wheel meson ninja cython
 
           curl -L -o numpy.zip https://github.com/numpy/numpy/archive/refs/tags/v2.3.4.zip
-          unzip numpy.zip
+          unzip -q numpy.zip
 
           cd numpy-2.3.4
           uv run meson setup builddir --buildtype=release -Dblas=none -Dlapack=none
