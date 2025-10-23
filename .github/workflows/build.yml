@@ -37,13 +37,16 @@ jobs:
       # install numpy
       - name: Install Numpy-No-ACC-Pack
         run: |
-          python -m pip install -U pip setuptools wheel meson ninja cython
+          uv pip install -U pip setuptools wheel meson ninja cython
+
           curl -L -o numpy.zip https://github.com/numpy/numpy/archive/refs/tags/v2.3.4.zip
           unzip numpy.zip
+
           cd numpy-2.3.4
-          python -m meson setup builddir --buildtype=release -Dblas=none -Dlapack=none
-          ninja -C builddir
-          python -m pip install ./builddir/dist/*.whl
+          uv run meson setup builddir --buildtype=release -Dblas=none -Dlapack=none
+          uv run ninja -C builddir
+          uv pip install ./builddir/dist/*.whl
+          uv run python -c "import numpy; print('NumPy version:', numpy.__version__)"
 
       # install other dependencies
       - name: Install dependencies
