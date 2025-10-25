@@ -19,65 +19,44 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [macos-11, windows-latest, ubuntu-latest]
+        os: [macos-11, windows-latest, ubuntu-22.04]
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: 3.9
-          architecture: x64
+      - uses: actions/checkout@v5
 
-      # setup rust env and build helper
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build Rust-STDF-Helper
-        uses: PyO3/maturin-action@v1
-        with:
-          target: x86_64
-          working-directory: ./deps/rust_stdf_helper
-          args: --release --out dist
-      
-      - name: Install Rust-STDF-Helper
-        working-directory: ./deps/rust_stdf_helper
+      # setup uv to handle dependencies
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Install Python via uv
         run: |
-          pip install rust_stdf_helper --no-index --find-links dist --force-reinstall
-          python -c "import rust_stdf_helper"
+          uv python install 3.13
+          uv venv
 
       - name: Get appdmg for dmg build
         if: runner.os == 'macOS'
         run: npm install -g appdmg
           
-      # install numpy
-      - name: Install numpy vanilla
-        if: runner.os == 'Windows'
-        run: |
-          pip install .github/workflows/numpy-1.21.5+vanilla-cp39-cp39-win_amd64.whl
-
-      - name: Install Numpy-No-ACC-Pack
-        if: runner.os == 'macOS' || runner.os == 'Linux'
-        run: |
-          pip install cython
-          cd .github/workflows/
-          unzip "numpy-1.22.1.zip" -d .
-          for d in */
-          do
-          echo ""
-          done
-          cd "$d"
-          NPY_BLAS_ORDER= NPY_LAPACK_ORDER= python setup.py build
-          python setup.py install
-
       # install other dependencies
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip3 install -U pyinstaller wheel pyinstaller-hooks-contrib
+          uv lock --refresh
+          uv sync --dev -v
+        
+      # install numpy
+      - name: Install Numpy-No-ACC-Pack
+        run: |
+          curl -L -o numpy.tar.gz https://github.com/numpy/numpy/releases/download/v2.3.4/numpy-2.3.4.tar.gz
+          tar -xzf numpy.tar.gz
+
+          uv pip install meson-python cython
+          uv pip install --force-reinstall --no-build-isolation ./numpy-2.3.4 -Csetup-args=-Dblas=none -Csetup-args=-Dlapack=none
+          uv run python -c "import numpy as np; print('NumPy version:', np.__version__); np.__config__.show()"
         
       - name: Freeze macOS app
         if: runner.os == 'macOS'
         working-directory: .
         run: |
-          pyinstaller build_tools/macos.spec
+          uv run pyinstaller build_tools/macos.spec
 
       - name: Freeze Linux app
         if: runner.os == 'Linux'
@@ -97,13 +76,13 @@ jobs:
             libxcb-randr0 \
             libxcb-shape0
           
-          xvfb-run pyinstaller build_tools/linux.spec
+          xvfb-run uv run pyinstaller build_tools/linux.spec
 
       - name: Freeze Windows app
         if: runner.os == 'Windows'
         working-directory: .
         run: |
-          pyinstaller build_tools\\windows.spec
+          uv run pyinstaller build_tools\\windows.spec
 
       # - name: Clean dist folder
       #   run: |
@@ -123,7 +102,7 @@ jobs:
 
           appdmg build_tools/STDF-Viewer-emptyDMG/dmg.json build_tools/STDF-Viewer-macos.dmg
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         name: Upload macOS app
         if: runner.os == 'macOS'
         with:
@@ -140,7 +119,7 @@ jobs:
           
           dpkg-deb -vD --build build_tools/STDF-Viewer-emptyDEB
       
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         name: Upload Linux app
         if: runner.os == 'Linux'
         with:
@@ -154,7 +133,7 @@ jobs:
           ls -R dist
           7z a -tzip STDF_Viewer_win.zip dist/
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         name: Upload Windows app
         if: runner.os == 'Windows'
         with:

@@ -66,6 +66,7 @@ __pycache__/
 .venv/
 __pycache__/
 *.pyc
+uv.lock
 
 Example Test.py
 Example Test-38-win32-64.json
