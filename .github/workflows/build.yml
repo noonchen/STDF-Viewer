@@ -44,15 +44,12 @@ jobs:
         
       # install numpy
       - name: Install Numpy-No-ACC-Pack
-        env:
-          NPY_BLAS_ORDER: ""
-          NPY_LAPACK_ORDER: ""
         run: |
           curl -L -o numpy.tar.gz https://github.com/numpy/numpy/releases/download/v2.3.4/numpy-2.3.4.tar.gz
           tar -xzf numpy.tar.gz
 
           uv pip install meson-python cython
-          uv pip install --force-reinstall --no-build-isolation ./numpy-2.3.4
+          uv pip install --force-reinstall --no-build-isolation ./numpy-2.3.4 -Csetup-args=-Dblas=none -Csetup-args=-Dlapack=none
           uv run python -c "import numpy as np; print('NumPy version:', np.__version__); np.__config__.show()"
         
       - name: Freeze macOS app
