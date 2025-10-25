@@ -21,3 +21,10 @@ rust_stdf_helper = { path = "./deps/rust_stdf_helper" }
 dev = [
     "pyinstaller>=6.16.0",
 ]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'win32' and platform_machine == 'x86_64'"
+]
