@@ -45,7 +45,7 @@ jobs:
           curl -L -o numpy.tar.gz https://github.com/numpy/numpy/releases/download/v2.3.4/numpy-2.3.4.tar.gz
           tar -xzf numpy.tar.gz
 
-          uv pip install mesonpy
+          uv pip install meson-python
           uv pip install --no-build-isolation ./numpy-2.3.4
           uv run python -c "import numpy; print('NumPy version:', numpy.__version__)"
 
