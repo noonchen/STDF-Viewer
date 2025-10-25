@@ -2,12 +2,16 @@
 name = "STDF-Viewer"
 version = "4.1.0"
 description = "STDF Viewer is a free, fast and powerful GUI tool to visualize STDF files"
+authors = [
+    { name = "Noon Chen", email = "chennoon233@foxmail.com" },
+]
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.3.4",
     "pydantic>=2.11.9",
     "pyqt5>=5.15.11",
+    "pyqt5-qt5<=5.15.2; sys_platform == 'Windows'", # 5.15.2 is latest to build on Windows, required for uv add compatability
     "pyqtgraph>=0.13.7",
     "tomlkit>=0.13.3",
     "xlsxwriter>=3.2.9",
