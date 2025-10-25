@@ -46,19 +46,19 @@ jobs:
           tar -xzf numpy.tar.gz
 
           uv pip install meson-python cython
-          uv pip install --no-build-isolation ./numpy-2.3.4
-          uv run python -c "import numpy; print('NumPy version:', numpy.__version__)"
+          uv pip -v install --no-build-isolation ./numpy-2.3.4
 
       # install other dependencies
       - name: Install dependencies
         run: |
-          uv sync
+          uv sync --dev -v
+          uv run python -c "import numpy; print('NumPy version:', numpy.__version__); np.__config__.show()"
         
       - name: Freeze macOS app
         if: runner.os == 'macOS'
         working-directory: .
         run: |
-          pyinstaller build_tools/macos.spec
+          uv run pyinstaller build_tools/macos.spec
 
       - name: Freeze Linux app
         if: runner.os == 'Linux'
@@ -78,13 +78,13 @@ jobs:
             libxcb-randr0 \
             libxcb-shape0
           
-          xvfb-run pyinstaller build_tools/linux.spec
+          xvfb-run uv run pyinstaller build_tools/linux.spec
 
       - name: Freeze Windows app
         if: runner.os == 'Windows'
         working-directory: .
         run: |
-          pyinstaller build_tools\\windows.spec
+          uv run pyinstaller build_tools\\windows.spec
 
       # - name: Clean dist folder
       #   run: |
