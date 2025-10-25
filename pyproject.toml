@@ -5,7 +5,7 @@ description = "STDF Viewer is a free, fast and powerful GUI tool to visualize ST
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "numpy>=2.3.3",
+    "numpy>=2.3.4",
     "pydantic>=2.11.9",
     "pyqt5>=5.15.11",
     "pyqtgraph>=0.13.7",

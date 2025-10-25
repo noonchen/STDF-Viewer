@@ -46,13 +46,13 @@ jobs:
           tar -xzf numpy.tar.gz
 
           uv pip install meson-python cython
-          uv pip -v install --no-build-isolation ./numpy-2.3.4
+          uv pip install --no-build-isolation ./numpy-2.3.4
 
       # install other dependencies
       - name: Install dependencies
         run: |
           uv sync --dev -v
-          uv run python -c "import numpy; print('NumPy version:', numpy.__version__); np.__config__.show()"
+          uv run python -c "import numpy as np; print('NumPy version:', np.__version__); np.__config__.show()"
         
       - name: Freeze macOS app
         if: runner.os == 'macOS'
