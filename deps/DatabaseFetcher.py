@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Sun Oct 19 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -861,7 +861,7 @@ class DatabaseFetcher:
         
         for fid, isHBIN, binList in selectedBin:
             binType = "HBIN" if isHBIN else "SBIN"
-            bin_condition = f"{binType} in ({(binList)})"
+            bin_condition = f"{binType} in ({','.join(map(str, binList))})"
             file_condition = f" AND Fid={fid}"
             sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {bin_condition}{file_condition}"
             
