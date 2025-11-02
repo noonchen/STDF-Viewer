@@ -131,33 +131,26 @@ class DutSortFilter(QSortFilterProxyModel):
             textLeft = self.sourceModel().data(left, Qt.ItemDataRole.DisplayRole)
             textRight = self.sourceModel().data(right, Qt.ItemDataRole.DisplayRole)
             try:
-                if (left.column() == DutTableColIndex.FileID or 
-                    left.column() == DutTableColIndex.PartID):
-                    # sort file id || part id
-                    return int(textLeft) < int(textRight)
+                match left.column():
+                    case DutTableColIndex.FileID | DutTableColIndex.PartID:
+                        # sort file id || part id
+                        return int(textLeft) < int(textRight)
                     
-                elif left.column() == DutTableColIndex.HeadSite:
-                    # sort head - site
-                    return getHS(textLeft) < getHS(textRight)
-                
-                elif left.column() == DutTableColIndex.TestCount:
-                    # sort test count
-                    return int(textLeft) < int(textRight)
-                
-                elif left.column() == DutTableColIndex.TestTime:
-                    # sort test time
-                    return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
-                
-                elif (left.column() == DutTableColIndex.HBIN or 
-                      left.column() == DutTableColIndex.SBIN):
-                    # sort hbin / sbin
-                    return int(textLeft.split(" ")[-1]) < int(textRight.split(" ")[-1])
+                    case DutTableColIndex.HeadSite:
+                        # sort head - site
+                        return getHS(textLeft) < getHS(textRight)
+                    
+                    case DutTableColIndex.TestCount:
+                        # sort test count
+                        return int(textLeft) < int(textRight)
 
-                elif (left.column() == DutTableColIndex.WaferID or 
-                      left.column() == DutTableColIndex.XYCOORD or 
-                      left.column() == DutTableColIndex.DutFlag):
-                    # sort flag, wafer id, (X, Y)
-                    pass
+                    case DutTableColIndex.TestTime:
+                        # sort test time
+                        return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
+                    
+                    case DutTableColIndex.HBIN | DutTableColIndex.SBIN:
+                        # sort hbin / sbin
+                        return int(textLeft.split(" ")[-1]) < int(textRight.split(" ")[-1])
                 
             except ValueError:
                 # use default string compare
@@ -231,7 +224,7 @@ class FlippedProxyModel(QAbstractProxyModel):
 
 
 # For normal tableView display
-class NormalProxyModel(QAbstractProxyModel):
+class NormalProxyModel(FlippedProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -246,18 +239,6 @@ class NormalProxyModel(QAbstractProxyModel):
 
     def rowCount(self, parent = QModelIndex()):
         return self.sourceModel().rowCount(parent)
-
-    def index(self, row, column, parent = QModelIndex()):
-        return self.createIndex(row, column)
-
-    def parent(self, index):
-        return QModelIndex()
-
-    def data(self, index, role):
-        return self.sourceModel().data(self.mapToSource(index), role)
-
-    def item(self, row, column) -> QtGui.QStandardItem:
-        return self.sourceModel().item(column, row)
     
     def headerData(self, section, orientation, role):
         return self.sourceModel().headerData(section, orientation, role)
@@ -387,146 +368,178 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
         ------------------------------
         dut info | test data
         '''
+        blankW = len(self.hheader_base)
+        blankH = len(self.vheader_base)
+        row, col = index.row(), index.column()
+        
         try:
-            # upper left corner contains no info
-            if index.row() < len(self.vheader_base) and index.column() < len(self.hheader_base):
-                # prevent fall below
-                return None
-            
-            # upper right corner contains test info
-            if index.row() < len(self.vheader_base):
-                if role == Qt.ItemDataRole.DisplayRole:
-                    test_index = index.column() - len(self.hheader_base)
-                    if index.row() == 0:
-                        # test number
-                        return "%d" % self.testInfo[self.testLists[test_index]][1]
-                    if index.row() == 1:
-                        # high limit
-                        hl = self.testInfo[self.testLists[test_index]][2]
-                        return "N/A" if np.isnan(hl) else self.floatFormat % hl
-                    if index.row() == 2:
-                        # low limit
-                        ll = self.testInfo[self.testLists[test_index]][3]
-                        return "N/A" if np.isnan(ll) else self.floatFormat % ll
-                    if index.row() == 3:
-                        # unit
-                        return self.testInfo[self.testLists[test_index]][4]
-                if role == Qt.ItemDataRole.BackgroundRole:
-                    return QtGui.QColor("#0F80FF7F")
-                if role == Qt.ItemDataRole.TextAlignmentRole:
-                    return Qt.AlignmentFlag.AlignCenter
-                return None
-
-            # lower left contains dut info
-            if index.row() >= len(self.vheader_base) and index.column() < len(self.hheader_base):
-                fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
-                fid = int(fileStr.strip("File"))
-                dutIndex = int(dutIndStr.strip("#"))
-                # dut info can be 3-element or 10-element
-                # depending on which table is using this model
-                dutInfoTup = self.dutInfoMap[fid][dutIndex]
-                # flag string is always the last element
-                flagStr = dutInfoTup[-1]
-                
-                if role == Qt.ItemDataRole.DisplayRole:
-                    return dutInfoTup[index.column()]
-
-                if role == Qt.ItemDataRole.ForegroundRole:
-                    if flagStr.startswith("Fail") or flagStr.startswith("Supersede"):
-                        # set to font color to white
-                        return QtGui.QColor(WHITE_COLOR)
-
-                if role == Qt.ItemDataRole.BackgroundRole:
-                    # mark fail row as red
-                    if flagStr.startswith("Fail"): return QtGui.QColor(FAIL_DUT_COLOR)
-                    # mark superseded row as gray
-                    elif flagStr.startswith("Supersede"): return QtGui.QColor(OVRD_DUT_COLOR)
-                    # mark unknown as orange
-                    elif flagStr.startswith("Unknown"): return QtGui.QColor(UNKN_DUT_COLOR)
-                
-                if role == Qt.ItemDataRole.FontRole:
-                    return self.font
-                if role == Qt.ItemDataRole.TextAlignmentRole:
-                    return Qt.AlignmentFlag.AlignCenter
-                if role == Qt.ItemDataRole.ToolTipRole:
-                    if not flagStr.startswith("Pass"): 
-                        # get flag number
-                        numStr = flagStr.split("-")[-1]
-                        tip = dut_flag_parser(numStr)
-                        if flagStr.startswith("Supersede"):
-                            tip = "This dut is replaced by other dut\n" + tip
-                        return tip
-                return None
-                    
-            # lower right contains test data
-            if index.row() >= len(self.vheader_base):
-                # get test data indexes
-                test_index = index.column() - len(self.hheader_base)
-                fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
-                fid = int(fileStr.strip("File"))
-                dutIndex = int(dutIndStr.strip("#"))
-                # dict is empty if current fid doesn't contains `self.testLists[test_index]`
-                data_test_file: dict = self.testData[self.testLists[test_index]][fid]
-                data_ind = self.dutIndMap[fid].get(dutIndex, -1)
-                
-                if role == Qt.ItemDataRole.DisplayRole:
-                    if data_ind == -1 or len(data_test_file) == 0:
-                        # test not exist in current file
-                        return "Not Tested"
-                    recHeader = data_test_file["recHeader"]
-                    if recHeader == REC.FTR:
-                        data = data_test_file["dataList"][data_ind]
-                        return "Not Tested" if np.isnan(data) or data < 0 else f"Test Flag: {int(data)}"
-                    elif recHeader == REC.PTR:
-                        data = data_test_file["dataList"][data_ind]
-                        return "Not Tested" if np.isnan(data) else self.floatFormat % data
-                    else:
-                        # MPR
-                        if data_test_file["dataList"].size == 0:
-                            # No PMR related and no test data in MPR, use test flag instead
-                            flag = data_test_file["flagList"][data_ind]
-                            return "Not Tested" if flag < 0 else f"Test Flag: {flag}"
-                        else:
-                            data = data_test_file["dataList"][data_ind]
-                            return "Not Tested" if np.isnan(data) else self.floatFormat % data
-                
-                if role == Qt.ItemDataRole.ForegroundRole:
-                    # only if failed
-                    if (data_ind != -1 and 
-                        len(data_test_file) != 0 and 
-                        not isPass(data_test_file["flagList"][data_ind])):
-                        return QtGui.QColor(WHITE_COLOR)
-                
-                if role == Qt.ItemDataRole.BackgroundRole:
-                    # only if failed
-                    if (data_ind != -1 and 
-                        len(data_test_file) != 0 and 
-                        not isPass(data_test_file["flagList"][data_ind])):
-                        return QtGui.QColor(FAIL_DUT_COLOR)
-                
-                if role == Qt.ItemDataRole.TextAlignmentRole:
-                    return Qt.AlignmentFlag.AlignCenter
-                
-                if role == Qt.ItemDataRole.ToolTipRole:
-                    if data_ind == -1 or len(data_test_file) == 0:
-                        return None
-                    recHeader = data_test_file["recHeader"]
-                    flag = data_test_file["flagList"][data_ind]
-                    flagTip = test_flag_parser(flag)
-                    if recHeader == REC.MPR:
-                        RTNStat = data_test_file["stateList"][data_ind]
-                        statTip = return_state_parser(RTNStat)
-                        return "\n".join([t for t in [statTip, flagTip] if t])
-                    else:
-                        # PTR & FTR
-                        if flagTip:
-                            return flagTip
+            if row < blankH:
+                if col < blankW:
+                    # upper left corner contains no info
+                    return None
+                else:
+                    # upper right corner contains test info
+                    return self.dataOfTestInfo(index, role)
+            else:
+                if col < blankW:
+                    # lower left contains dut info
+                    return self.dataOfDutInfo(index, role)
+                else:
+                    # lower right contains test data
+                    return self.dataOfTestData(index, role)
         
         except (IndexError, KeyError):
             pass
             
         return None
     
+    def dataOfTestInfo(self, index: QModelIndex, role: int):
+        match role:
+            case Qt.ItemDataRole.DisplayRole:
+                testIndex = index.column() - len(self.hheader_base)
+                infoTuple = self.testInfo[self.testLists[testIndex]]
+                
+                match index.row():
+                    case 0:
+                        # test number
+                        return "%d" % infoTuple[1]
+                    case 1:
+                        # high limit
+                        hl = infoTuple[2]
+                        return "N/A" if np.isnan(hl) else self.floatFormat % hl
+                    case 2:
+                        # low limit
+                        ll = infoTuple[3]
+                        return "N/A" if np.isnan(ll) else self.floatFormat % ll
+                    case 3:
+                        # unit
+                        return infoTuple[4]
+                
+            case Qt.ItemDataRole.BackgroundRole:
+                return QtGui.QColor("#0F80FF7F")
+            
+            case Qt.ItemDataRole.TextAlignmentRole:
+                return Qt.AlignmentFlag.AlignCenter
+            
+        return None
+    
+    def dataOfDutInfo(self, index: QModelIndex, role: int):
+        fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
+        fid = int(fileStr.strip("File"))
+        dutIndex = int(dutIndStr.strip("#"))
+        # dut info can be 3-element or 10-element
+        # depending on which table is using this model
+        dutInfoTup = self.dutInfoMap[fid][dutIndex]
+        # flag string is always the last element
+        flagStr = dutInfoTup[-1]
+        isDutFail = flagStr.startswith("Fail")
+        isDutRplc = flagStr.startswith("Supersede")
+        isDutUnkn = flagStr.startswith("Unknown")
+        
+        match role:
+            case Qt.ItemDataRole.DisplayRole:
+                return dutInfoTup[index.column()]
+
+            case Qt.ItemDataRole.ForegroundRole:
+                if isDutFail or isDutRplc:
+                    # set to font color to white
+                    return QtGui.QColor(WHITE_COLOR)
+
+            case Qt.ItemDataRole.BackgroundRole:
+                if isDutFail:
+                    # mark fail row as red
+                    return QtGui.QColor(FAIL_DUT_COLOR)
+                elif isDutRplc:
+                    # mark superseded row as gray
+                    return QtGui.QColor(OVRD_DUT_COLOR)
+                elif isDutUnkn:
+                    # mark unknown as orange
+                    return QtGui.QColor(UNKN_DUT_COLOR)
+        
+            case Qt.ItemDataRole.FontRole:
+                return self.font
+            
+            case Qt.ItemDataRole.TextAlignmentRole:
+                return Qt.AlignmentFlag.AlignCenter
+            
+            case Qt.ItemDataRole.ToolTipRole:
+                if isDutFail or isDutRplc or isDutUnkn: 
+                    # get flag number
+                    numStr = flagStr.split("-")[-1]
+                    tip = dut_flag_parser(numStr)
+                    if isDutRplc:
+                        tip = "This dut is replaced by other dut\n" + tip
+                    return tip
+        return None
+    
+    def dataOfTestData(self, index: QModelIndex, role: int):
+        # get test data indexes
+        test_index = index.column() - len(self.hheader_base)
+        fileStr, dutIndStr = self.vheader_ext[index.row() - len(self.vheader_base)].split(" ")
+        fid = int(fileStr.strip("File"))
+        dutIndex = int(dutIndStr.strip("#"))
+        # dict is empty if current fid doesn't contains `self.testLists[test_index]`
+        data_test_file: dict = self.testData[self.testLists[test_index]][fid]
+        data_ind = self.dutIndMap[fid].get(dutIndex, -1)
+        emptyTest = len(data_test_file) == 0
+        
+        match role:
+            case Qt.ItemDataRole.DisplayRole:
+                if data_ind == -1 or emptyTest:
+                    # test not exist in current file
+                    return "Not Tested"
+                
+                dataList = data_test_file["dataList"]
+                flagList = data_test_file["flagList"]
+                data = dataList[data_ind] if data_ind < len(dataList) else np.nan
+                match data_test_file["recHeader"]:
+                    case REC.FTR:
+                        return "Not Tested" if np.isnan(data) or data < 0 else f"Test Flag: {int(data)}"
+                    
+                    case REC.PTR:
+                        return "Not Tested" if np.isnan(data) else self.floatFormat % data
+                    
+                    case REC.MPR:
+                        # MPR
+                        if dataList.size == 0:
+                            # No PMR related and no test data in MPR, use test flag instead
+                            flag = flagList[data_ind]
+                            return "Not Tested" if flag < 0 else f"Test Flag: {flag}"
+                        else:
+                            return "Not Tested" if np.isnan(data) else self.floatFormat % data
+        
+            case Qt.ItemDataRole.ForegroundRole:
+                # only if failed
+                if (data_ind != -1 and 
+                    not emptyTest and 
+                    not isPass(data_test_file["flagList"][data_ind])):
+                    return QtGui.QColor(WHITE_COLOR)
+        
+            case Qt.ItemDataRole.BackgroundRole:
+                # only if failed
+                if (data_ind != -1 and 
+                    not emptyTest and 
+                    not isPass(data_test_file["flagList"][data_ind])):
+                    return QtGui.QColor(FAIL_DUT_COLOR)
+        
+            case Qt.ItemDataRole.TextAlignmentRole:
+                return Qt.AlignmentFlag.AlignCenter
+            
+            case Qt.ItemDataRole.ToolTipRole:
+                if data_ind == -1 or emptyTest:
+                    return None
+                
+                flag = data_test_file["flagList"][data_ind]
+                flagTip = test_flag_parser(flag)
+                
+                if data_test_file["recHeader"] == REC.MPR:
+                    RTNStat = data_test_file["stateList"][data_ind]
+                    statTip = return_state_parser(RTNStat)
+                    return "\n".join([t for t in [statTip, flagTip] if t])
+                else:
+                    return flagTip
+        return None
+        
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         if index.row() >= len(self.vheader_base):
             # dut info + data section
@@ -658,7 +671,7 @@ class TestStatisticTableModel(QtCore.QAbstractTableModel):
             return ""
 
 
-class BinWaferTableModel(QtCore.QAbstractTableModel):
+class BinWaferTableModel(TestStatisticTableModel):
     '''
     content: 2D list of tuple ("Display String", bin_number, isHBIN), 
             if bin_num is -1, indicating it's not related to HBIN or SBIN, 
@@ -667,29 +680,13 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
     '''
     def __init__(self):
         super().__init__()
-        self.content = []
-        self.hheader = []
-        self.vheader = []
         self.hbin_color = {}
         self.sbin_color = {}
-        self.colLen = 0
-        
-    def setContent(self, content: list):
-        self.content = content
         
     def setColorDict(self, hbin_color: dict, sbin_color: dict):
         self.hbin_color = hbin_color
         self.sbin_color = sbin_color
     
-    def setColumnCount(self, colLen: int):
-        self.colLen = colLen
-        
-    def setHHeader(self, hheader: list):
-        self.hheader = hheader
-        
-    def setVHeader(self, vheader: list):
-        self.vheader = vheader
-        
     def data(self, index: QModelIndex, role: int):
         try:
             item: tuple = self.content[index.row()][index.column()]
@@ -716,35 +713,8 @@ class BinWaferTableModel(QtCore.QAbstractTableModel):
                 return getProperFontColor(background)
         
         return None
-    
-    def flags(self, index: QModelIndex) -> Qt.ItemFlags:
-        try:
-            _ = self.content[index.row()][index.column()]
-            return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
-        except IndexError:
-            return Qt.ItemFlag.NoItemFlags
-        
-    def rowCount(self, parent=None) -> int:
-        return len(self.content)
-    
-    def columnCount(self, parent=None) -> int:
-        return self.colLen
-    
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        
-        if orientation == Qt.Orientation.Horizontal:
-            header = self.hheader
-        else:
-            header = self.vheader
-            
-        try:
-            return header[section]
-        except IndexError:
-            return ""
-        
-    
+
+
 class MergeTableModel(QtCore.QAbstractTableModel):
     '''
     For displaying STDF MIR records in merge panel
