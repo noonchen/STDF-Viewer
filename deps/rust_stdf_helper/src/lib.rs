@@ -97,6 +97,29 @@ impl<'py> IntoPyObject<'py> for TestIDType {
     }
 }
 
+// RAII to join threads
+struct ThreadJoiner<T> (Vec<std::thread::JoinHandle<T>>);
+
+impl<T> Drop for ThreadJoiner<T> {
+    fn drop(&mut self) {
+        for handle in self.0.drain(..) {
+            if let Err(e) = handle.join() {
+                println!("Join thread failed: {:?}", e);
+            }
+        }
+    }
+}
+
+// RAII to fill up progress bar
+struct ProgressBarFiller(Arc<AtomicU16>);
+
+impl Drop for ProgressBarFiller {
+    fn drop(&mut self) {
+        // write 10000 as the sign of complete...
+        self.0.store(10000u16, Ordering::Relaxed);
+    }
+}
+
 /// Analyze record types in a STDF file
 #[pyfunction]
 #[pyo3(name = "analyzeSTDF")]
@@ -651,6 +674,7 @@ fn generate_database(
         // start another thread for updating stop signal
         // and sending progress back to python
         let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
+            let mut stop_cur_thread = false;
             loop {
                 let current_progress = total_progress_copy.load(Ordering::Relaxed);
                 // sleep for 100ms
@@ -663,13 +687,12 @@ fn generate_database(
                             .call_method1(intern!(py, "emit"), (current_progress,))?;
                     }
                     if is_valid_stop {
-                        global_stop_copy.store(
-                            stop_flag
-                                .bind(py)
-                                .getattr(intern!(py, "stop"))?
-                                .extract::<bool>()?,
-                            Ordering::Relaxed,
-                        );
+                        let stop_from_py = stop_flag
+                            .bind(py)
+                            .getattr(intern!(py, "stop"))?
+                            .extract::<bool>()?;
+                        global_stop_copy.store(stop_from_py, Ordering::Relaxed);
+                        stop_cur_thread |= stop_from_py;
                     };
                     Ok(())
                 }) {
@@ -678,7 +701,8 @@ fn generate_database(
                     println!("{}", py_e);
                     break;
                 }
-                if current_progress == 10000 {
+                stop_cur_thread |= current_progress == 10000;
+                if stop_cur_thread {
                     break;
                 }
             }
@@ -688,6 +712,11 @@ fn generate_database(
     }
 
     py.detach(|| -> Result<(), StdfHelperError> {
+        // use RAII to join threads
+        let _joiner = ThreadJoiner(thread_handles);
+        // use RAII to fill bar and stop gil thread
+        let _filler = ProgressBarFiller(total_progress.clone());
+
         // initiate sqlite3 database
         let conn = match Connection::open(&dbpath) {
             Ok(conn) => conn,
@@ -741,13 +770,7 @@ fn generate_database(
         }
         // write HBR/SBR/TSR into database
         process_summary_data(&mut db_ctx, &mut record_tracker)?;
-        // write 10000 as the sign of complete...
-        total_progress.store(10000u16, Ordering::Relaxed);
 
-        // join threads
-        for handle in thread_handles {
-            handle.join().unwrap()?;
-        }
         // finalize database
         db_ctx.finalize(build_db_index)?;
         if let Err((_, err)) = conn.close() {
