@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Oct 19 2025
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -726,7 +726,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_dut.setQuery(QtSql.QSqlQuery(DUT_SUMMARY_QUERY, self.db_dut))
         
         for column in range(0, header.count()):
-            if column in [2, 3, header.count()-1]:
+            if column in [DutTableColIndex.PartID, 
+                          DutTableColIndex.HeadSite, 
+                          DutTableColIndex.DutFlag]:
                 # PartID, Head-Site and DUT Flag
                 # column may be too long to display
                 mode = QHeaderView.ResizeMode.ResizeToContents
@@ -735,15 +737,15 @@ class MyWindow(QtWidgets.QMainWindow):
             header.setSectionResizeMode(column, mode)
         
         # always hide dut index column
-        self.ui.dutInfoTable.hideColumn(0)
-        # hide file id column if 1 file is opened
-        if self.data_interface.num_files <= 1:
-            self.ui.dutInfoTable.hideColumn(1)
-        else:
-            self.ui.dutInfoTable.showColumn(1)
-        # # show all rows
-        # while self.tmodel_dut.canFetchMore():
-        #     self.tmodel_dut.fetchMore()
+        self.ui.dutInfoTable.hideColumn(DutTableColIndex.DutIndex)
+        # hide other columns under specific condition
+        for hideCond, col in [(self.data_interface.num_files <= 1, DutTableColIndex.FileID),
+                              (self.data_interface.noWaferID, DutTableColIndex.WaferID),
+                              (self.data_interface.noWaferXY, DutTableColIndex.XYCOORD)]:
+            if hideCond:
+                self.ui.dutInfoTable.hideColumn(col)
+            else:
+                self.ui.dutInfoTable.showColumn(col)
         
         
     def updateGDR_DTR_Table(self):
