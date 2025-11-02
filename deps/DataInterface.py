@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Oct 12 2025
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -50,7 +50,7 @@ class DataInterface:
         self.completeWaferList = []
         # cache test pin list and names for MPR
         self.pinInfoDictCache = {}
-        
+
         
     def loadDatabase(self):
         if not os.path.isfile(self.dbPath):
@@ -80,6 +80,9 @@ class DataInterface:
         # for UI display
         self.completeTestList = self.DatabaseFetcher.getTestItemsList()
         self.completeWaferList = self.DatabaseFetcher.getWaferList()
+        # for dut summary
+        self.noWaferID = self.DatabaseFetcher.isDutInfoColumnEmpty("WaferIndex")
+        self.noWaferXY = self.DatabaseFetcher.isDutInfoColumnEmpty("XCOORD")
         
         
     def close(self):

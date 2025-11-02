@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Thu Dec 08 2022
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -28,6 +28,7 @@ from PyQt5 import QtCore, QtWidgets, QtGui, QtSql
 from PyQt5.QtWidgets import QStyledItemDelegate
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, QAbstractProxyModel
 from deps.SharedSrc import *
+from enum import IntEnum
 import numpy as np
 
 
@@ -104,21 +105,24 @@ def getHS(text: str):
     return head << 8 | site
 
 
+class DutTableColIndex(IntEnum):
+    DutIndex = 0
+    FileID = 1
+    PartID = 2
+    HeadSite = 3
+    TestCount = 4
+    TestTime = 5
+    HBIN = 6
+    SBIN = 7
+    WaferID = 8
+    XYCOORD = 9
+    DutFlag = 10
+
+
 class DutSortFilter(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.hsFilterString = QtCore.QRegularExpression(r".*")
-        self.dutIndexInd = 0
-        self.fidColInd = 1
-        self.pidColInd = 2
-        self.hsColInd = 3
-        self.tcntColInd = 4
-        self.ttimColInd = 5
-        self.hbinColInd = 6
-        self.sbinColInd = 7
-        self.widColInd = 8
-        self.xyColInd = 9
-        self.flagColInd = 10
         
     
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
@@ -127,31 +131,31 @@ class DutSortFilter(QSortFilterProxyModel):
             textLeft = self.sourceModel().data(left, Qt.ItemDataRole.DisplayRole)
             textRight = self.sourceModel().data(right, Qt.ItemDataRole.DisplayRole)
             try:
-                if (left.column() == self.fidColInd or 
-                    left.column() == self.pidColInd):
+                if (left.column() == DutTableColIndex.FileID or 
+                    left.column() == DutTableColIndex.PartID):
                     # sort file id || part id
                     return int(textLeft) < int(textRight)
                     
-                elif left.column() == self.hsColInd:
+                elif left.column() == DutTableColIndex.HeadSite:
                     # sort head - site
                     return getHS(textLeft) < getHS(textRight)
                 
-                elif left.column() == self.tcntColInd:
+                elif left.column() == DutTableColIndex.TestCount:
                     # sort test count
                     return int(textLeft) < int(textRight)
                 
-                elif left.column() == self.ttimColInd:
+                elif left.column() == DutTableColIndex.TestTime:
                     # sort test time
                     return int(textLeft.strip("ms")) < int(textRight.strip("ms"))
                 
-                elif (left.column() == self.hbinColInd or 
-                      left.column() == self.sbinColInd):
+                elif (left.column() == DutTableColIndex.HBIN or 
+                      left.column() == DutTableColIndex.SBIN):
                     # sort hbin / sbin
                     return int(textLeft.split(" ")[-1]) < int(textRight.split(" ")[-1])
 
-                elif (left.column() == self.widColInd or 
-                      left.column() == self.xyColInd or 
-                      left.column() == self.flagColInd):
+                elif (left.column() == DutTableColIndex.WaferID or 
+                      left.column() == DutTableColIndex.XYCOORD or 
+                      left.column() == DutTableColIndex.DutFlag):
                     # sort flag, wafer id, (X, Y)
                     pass
                 
@@ -180,7 +184,7 @@ class DutSortFilter(QSortFilterProxyModel):
 
     
     def filterAcceptsRow(self, source_row: int, source_parent: QtCore.QModelIndex) -> bool:
-        hsIndex = self.sourceModel().index(source_row, self.hsColInd, source_parent)
+        hsIndex = self.sourceModel().index(source_row, DutTableColIndex.HeadSite, source_parent)
         
         hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex, Qt.ItemDataRole.DisplayRole)).hasMatch()
         
@@ -828,5 +832,6 @@ __all__ = ["StyleDelegateForTable_List", "DutSortFilter",
            "ColorSqlQueryModel", "DatalogSqlQueryModel", 
            "TestDataTableModel", "TestStatisticTableModel", 
            "BinWaferTableModel", "MergeTableModel", 
+           "DutTableColIndex"
            ]
 

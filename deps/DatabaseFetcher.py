@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Oct 19 2025
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -83,6 +83,22 @@ class DatabaseFetcher:
             file_paths.append(d[fid])
         self.file_paths = file_paths
         
+    
+    def isDutInfoColumnEmpty(self, columnName: str) -> bool:
+        '''return True if the given column of Dut_Info table has no valid value'''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+
+        sql = f'''SELECT EXISTS (
+                    SELECT 1 
+                    FROM Dut_Info 
+                    WHERE {columnName} IS NOT NULL 
+                        AND 
+                        (typeof({columnName}) != 'text' OR trim({columnName}) != "")
+                    )'''
+        
+        validDataExist = self.cursor.execute(sql).fetchone()[0]
+        return not validDataExist
+    
     
     @property
     def num_files(self):
