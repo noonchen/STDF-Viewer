@@ -1137,25 +1137,23 @@ class MyWindow(QtWidgets.QMainWindow):
     def getDatalogForReport(self):
         # this table uses sql query model
         model = self.tmodel_datalog
-        
-        # # method 1: store complete data in a list
-        # while model.canFetchMore():
-        #     model.fetchMore()
 
-        # datalog = []
-        # for row in range(model.rowCount()):
-        #     datalogRow = []
-        #     for col in range(model.columnCount()):
-        #         d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
-        #         datalogRow.append(d if isinstance(d, str) else "")
-        #     datalog.append(datalogRow)
-        # return datalog
-        
-        # method 2: use generator
+        # Generator: yield whatever rows are currently in the model, then
+        # call fetchMore() and yield again, repeating until the underlying
+        # query is exhausted.
+        #
+        # The previous "while canFetchMore(): fetchMore(); yield rows..."
+        # shape silently produced an empty Export sheet whenever the entire
+        # query result fit in QSqlQueryModel's initial prefetch batch
+        # (default 256 rows). In that case canFetchMore() is already False
+        # by the time this method runs, so the outer loop never entered
+        # and zero rows were ever yielded. DTR/GDR records in a single
+        # STDF file are almost always well under 256, which is why issue
+        # #177 manifested as a blank GDR & DTR Summary sheet while the
+        # converter (DatabaseFetcher.getDTR_GDRs, which runs the SQL
+        # directly) produced the expected output.
         row = 0
-        while model.canFetchMore():
-            model.fetchMore()
-            
+        while True:
             while row < model.rowCount():
                 datalogRow = []
                 for col in range(model.columnCount()):
@@ -1163,6 +1161,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
                 row += 1
                 yield datalogRow
+            if not model.canFetchMore():
+                break
+            model.fetchMore()
     
     
     def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
