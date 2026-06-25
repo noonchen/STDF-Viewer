@@ -1152,10 +1152,10 @@ class MyWindow(QtWidgets.QMainWindow):
         # return datalog
         
         # method 2: use generator
+        # Yield whatever rows are currently in the model, then call fetchMore()
+        # and yield again, repeating until the underlying query is exhausted.
         row = 0
-        while model.canFetchMore():
-            model.fetchMore()
-            
+        while True:
             while row < model.rowCount():
                 datalogRow = []
                 for col in range(model.columnCount()):
@@ -1163,6 +1163,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
                 row += 1
                 yield datalogRow
+            if not model.canFetchMore():
+                break
+            model.fetchMore()
     
     
     def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
