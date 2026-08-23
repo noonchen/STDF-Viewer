@@ -1,5 +1,4 @@
 use core::f64;
-use crossbeam_channel;
 use numpy::ndarray::{Array1, Zip};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -20,13 +19,15 @@ use std::sync::Arc;
 use std::{thread, time, vec};
 
 mod database_context;
+mod db_ops;
 mod resources;
 mod rust_functions;
 mod statistic_functions;
 use database_context::DataBaseCtx;
+use db_ops::{DbMessage, DbOp};
 use rust_functions::{
-    get_fields_from_code, get_file_size, process_incoming_record, process_summary_data,
-    write_json_to_sheet, RecordTracker, TestIDType,
+    get_fields_from_code, get_file_size, process_record_view, write_json_to_sheet, RecordTracker,
+    TestIDType,
 };
 
 #[derive(Debug)]
@@ -110,13 +111,17 @@ impl<T> Drop for ThreadJoiner<T> {
     }
 }
 
-// RAII to fill up progress bar
-struct ProgressBarFiller(Arc<AtomicU16>);
+// RAII to fill up progress bar and generate done signal
+struct ProgressBarFiller {
+    progress: Arc<AtomicU16>,
+    done: Arc<AtomicBool>,
+}
 
 impl Drop for ProgressBarFiller {
     fn drop(&mut self) {
-        // write 10000 as the sign of complete...
-        self.0.store(10000u16, Ordering::Relaxed);
+        // mark progress completes
+        self.progress.store(10000u16, Ordering::Relaxed);
+        self.done.store(true, Ordering::Relaxed);
     }
 }
 
@@ -245,12 +250,12 @@ fn analyze_stdf_file(
                         // track all bin numbers appear in PRR
                         test_bin_tracker
                             .entry(REC_HBR)
-                            .or_insert_with(HashMap::new)
+                            .or_default()
                             .entry(prr_view.hard_bin())
                             .or_insert(false);
                         test_bin_tracker
                             .entry(REC_SBR)
-                            .or_insert_with(HashMap::new)
+                            .or_default()
                             .entry(prr_view.soft_bin())
                             .or_insert(false);
                         // send or print result_log at PRR
@@ -435,7 +440,7 @@ fn analyze_stdf_file(
                 // print mismatched test records
                 if has_mis_test {
                     analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
-                    mismatch_test.sort_by(|&a, &b| a.0.cmp(&b.0));
+                    mismatch_test.sort_by_key(|&a| a.0);
                     mismatch_test.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
@@ -445,7 +450,7 @@ fn analyze_stdf_file(
                 // print mismatch TSR
                 if has_mis_tsr {
                     analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
-                    mismatch_tsr.sort_by(|&a, &b| a.0.cmp(&b.0));
+                    mismatch_tsr.sort_by_key(|&a| a.0);
                     mismatch_tsr.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
@@ -594,7 +599,10 @@ fn generate_database(
     //
     // do nothing if empty file group detected
     let num_groups = stdf_paths.len();
-    if stdf_paths.iter().map(|v| v.is_empty()).any(|b| b) {
+    if num_groups == 0 {
+        return Err(PyValueError::new_err("No STDF files provided"));
+    }
+    if stdf_paths.iter().any(|v| v.is_empty()) {
         return Err(PyValueError::new_err("Empty STDF file group detected"));
     }
 
@@ -617,9 +625,18 @@ fn generate_database(
     let progress_signal: Py<PyAny> = progress_signal.into();
     let stop_flag: Py<PyAny> = stop_flag.into();
 
-    // prepare channel for multithreading communication
-    const CHANNEL_CAP: usize = 16_384;
-    let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
+    // Channel payload is now a batch of `DbOp`s.
+    const OPS_PER_BATCH: usize = 128;
+    const CHANNEL_CAP: usize = 64;
+    let (tx, rx) = crossbeam_channel::bounded::<DbMessage>(CHANNEL_CAP);
+
+    // Shared control/state between workers, writer, and the GIL progress thread.
+    let global_stop = Arc::new(AtomicBool::new(false));
+    let fgroup_done = Arc::new(AtomicBool::new(false));
+    let total_progress = Arc::new(AtomicU16::new(0));
+    let progress_values: Vec<Arc<AtomicU16>> = (0..num_groups)
+        .map(|_| Arc::new(AtomicU16::new(0)))
+        .collect();
 
     let mut thread_handles = vec![];
     let mut thread_txes = Vec::with_capacity(num_groups);
@@ -629,77 +646,108 @@ fn generate_database(
         .count();
     thread_txes.push(tx);
 
-    // sending parsing work to
-    // other threads.
-    // one file group per thread
-    for (fid, (fgroups, thread_tx)) in stdf_paths
-        .clone()
-        .into_iter()
-        .zip(thread_txes.into_iter())
-        .enumerate()
-    {
+    // Each thread handles one parsing/tracking task of one file group.
+    for (fid, (fgroups, thread_tx)) in stdf_paths.clone().into_iter().zip(thread_txes).enumerate() {
+        let worker_stop = global_stop.clone();
+        let worker_progress = progress_values[fid].clone();
         let handle = thread::spawn(move || -> Result<(), StdfHelperError> {
             let num_files = fgroups.len();
+            let mut record_tracker = RecordTracker::new(test_id_type);
+            let mut ops: Vec<DbOp> = Vec::with_capacity(OPS_PER_BATCH);
+
             // loop fpath in a group in vector order,
             // this step CANNOT be parallel, since
             // superseded flag must overwrite all the
             // DUTs in the previous files
             for (sub_fid, fpath) in fgroups.iter().enumerate() {
-                let file_size = get_file_size(fpath)? as f32;
+                if worker_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let file_size = match get_file_size(fpath) {
+                    Ok(size) => size as f32,
+                    Err(e) => {
+                        let msg = format!("Cannot get file size:\n{}\n\nMessage:\n{}", fpath, e);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
+                    }
+                };
                 if file_size == 0.0 {
-                    return Err(StdfHelperError {
-                        msg: format!("Empty file detected!\n\n{}", fpath),
-                    });
+                    let msg = format!("Empty file detected!\n\n{}", fpath);
+                    let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                    return Ok(());
                 }
                 let mut stdf_reader = match StdfReader::new(fpath) {
                     Ok(r) => r,
                     Err(e) => {
-                        return Err(StdfHelperError {
-                            msg: format!("Cannot parse this file:\n{}\n\nMessage:\n{}", fpath, e),
-                        })
+                        let msg = format!("Cannot parse this file:\n{}\n\nMessage:\n{}", fpath, e);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
                     }
                 };
-                // parse in the reader thread so the CPU-heavy decode runs in
-                // parallel across groups; view iter reuses one buffer (no per-
-                // record alloc) and only the owned parsed record crosses the channel
+                // Parse with the zero-copy view iterator and keep all
+                // RecordTracker bookkeeping in this worker thread.
+                // Only DbOp batches cross the channel.
                 let mut view_iter = stdf_reader.get_rawdata_view_iter();
                 while let Some(raw_view) = view_iter.next() {
+                    if worker_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+
                     let raw_view = match raw_view {
                         Ok(r) => r,
                         Err(_) => {
                             // there is only one error, that is
-                            // unexpected EOF, we just sliently
+                            // unexpected EOF, we just silently
                             // stop here
                             break;
                         }
                     };
+
                     // calculate the reading progress in each thread
                     let progress_x100 = 10000.0
                         * (raw_view.offset as f32 / file_size + sub_fid as f32)
                         / num_files as f32;
-                    let byte_order = raw_view.byte_order;
-                    let parsed_rec = StdfRecord::from(&raw_view);
-                    // send
-                    if thread_tx
-                        .send((fid, sub_fid, progress_x100, byte_order, parsed_rec))
-                        .is_err()
-                    {
-                        break;
+                    worker_progress.store(progress_x100 as u16, Ordering::Relaxed);
+
+                    let rec_view: StdfRecordView = (&raw_view).into();
+                    if let Err(e) = process_record_view(
+                        &mut record_tracker,
+                        fid,
+                        sub_fid,
+                        raw_view.byte_order,
+                        rec_view,
+                        &mut ops,
+                    ) {
+                        let msg = format!("File[{}]: {}", fid, e.msg);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
+                    }
+
+                    if ops.len() >= OPS_PER_BATCH {
+                        let batch = std::mem::replace(&mut ops, Vec::with_capacity(OPS_PER_BATCH));
+                        if thread_tx.send(DbMessage::Batch(batch)).is_err() {
+                            // Writer is gone (stop or error). Stop reading.
+                            return Ok(());
+                        }
                     }
                 }
+            }
+
+            // Group EOF: emit HBR/SBR/TSR summaries, then flush any partial
+            // batch. Channel FIFO preserves operation order for this fid.
+            record_tracker.append_summary_ops(&mut ops);
+            if !ops.is_empty() && thread_tx.send(DbMessage::Batch(ops)).is_err() {
+                return Ok(());
             }
             Ok(())
         });
         thread_handles.push(handle);
     }
 
-    // create some atomic var for data communication between threads
-    let global_stop = Arc::new(AtomicBool::new(false));
-    // only need to hold a number <= 10000, u16 should be enough
-    let total_progress = Arc::new(AtomicU16::new(0));
-
     let global_stop_copy = global_stop.clone();
     let total_progress_copy = total_progress.clone();
+    let progress_values_copy = progress_values.clone();
+    let fgroup_done_copy = fgroup_done.clone();
 
     if is_valid_progress_signal || is_valid_stop {
         // start another thread for updating stop signal
@@ -707,9 +755,17 @@ fn generate_database(
         let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
             let mut stop_cur_thread = false;
             loop {
-                let current_progress = total_progress_copy.load(Ordering::Relaxed);
-                // sleep for 100ms
-                thread::sleep(time::Duration::from_millis(100));
+                let done = fgroup_done_copy.load(Ordering::Relaxed);
+                let current_progress: u16 = if done || num_groups == 0 {
+                    10000
+                } else {
+                    (progress_values_copy
+                        .iter()
+                        .map(|p| p.load(Ordering::Relaxed) as u32)
+                        .sum::<u32>()
+                        / num_groups as u32) as u16
+                };
+                total_progress_copy.store(current_progress, Ordering::Relaxed);
                 // access python object inside a gil block
                 if let Err(py_e) = Python::attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
@@ -732,10 +788,12 @@ fn generate_database(
                     println!("{}", py_e);
                     break;
                 }
-                stop_cur_thread |= current_progress == 10000;
-                if stop_cur_thread {
+                // exit when file group parsing is finished or the user stopped.
+                if done || stop_cur_thread {
                     break;
                 }
+                // sleep for 100ms
+                thread::sleep(time::Duration::from_millis(100));
             }
             Ok(())
         });
@@ -746,7 +804,10 @@ fn generate_database(
         // use RAII to join threads
         let _joiner = ThreadJoiner(thread_handles);
         // use RAII to fill bar and stop gil thread
-        let _filler = ProgressBarFiller(total_progress.clone());
+        let _filler = ProgressBarFiller {
+            progress: total_progress.clone(),
+            done: fgroup_done.clone(),
+        };
 
         // initiate sqlite3 database
         let conn = match Connection::open(&dbpath) {
@@ -762,45 +823,33 @@ fn generate_database(
             }
         }
 
-        let mut record_tracker = RecordTracker::new(test_id_type);
-        let mut progress_tracker = vec![0.0f32; num_groups];
-        let mut transaction_count_up = 0;
-        // process and write database in main thread
-        for (fid, sub_fid, progress_x100, byte_order, parsed_rec) in rx {
-            // record is already parsed in the reader thread; offset/data_len are
-            // unused by process_incoming_record
-            let rec_info = (fid, sub_fid, byte_order, 0u64, 0usize, parsed_rec);
-            process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
-
-            if is_valid_progress_signal {
-                // main thread will calculate the `total progress`
-                if let Some(v) = progress_tracker.get_mut(fid) {
-                    *v = progress_x100;
-                };
-                total_progress.store(
-                    (progress_tracker.iter().sum::<f32>() / num_groups as f32) as u16,
-                    Ordering::Relaxed,
-                );
-            }
-
-            if is_valid_stop && global_stop.load(Ordering::Relaxed) {
-                break;
-            }
-
-            // commit and begin a new transaction after fixed number of records
-            transaction_count_up += 1;
-            if transaction_count_up > 1_000_000 {
-                transaction_count_up = 0;
-                db_ctx.start_new_transaction()?;
+        let mut transaction_count_up = 0usize;
+        // writer only binds + steps prepared statements
+        for msg in rx {
+            match msg {
+                DbMessage::Batch(batch) => {
+                    let op_count = batch.len();
+                    for op in batch {
+                        op.apply(&mut db_ctx)?;
+                    }
+                    // commit and begin a new transaction after a fixed number
+                    // of operations
+                    transaction_count_up += op_count;
+                    if transaction_count_up > 1_000_000 {
+                        transaction_count_up = 0;
+                        db_ctx.start_new_transaction()?;
+                    }
+                }
+                DbMessage::WorkerError { msg } => {
+                    return Err(StdfHelperError { msg });
+                }
             }
         }
-        // write HBR/SBR/TSR into database
-        process_summary_data(&mut db_ctx, &mut record_tracker)?;
 
-        // finalize database
+        // finalize database (flushes the writer-side multi-row batches)
         db_ctx.finalize(build_db_index)?;
         if let Err((_, err)) = conn.close() {
-            return Err(StdfHelperError::from(err))?;
+            return Err(StdfHelperError::from(err));
         };
         Ok(())
     })?;
@@ -1128,8 +1177,7 @@ fn empirical_cdf<'py>(
         // position of duplicates: [i, j-1]
         // rank begins at 1, and we are in max mode, so:
         let rank = (j - 1) as f64 + 1.0f64;
-        for k in i..j {
-            let orig_index = idx_sort[k];
+        for &orig_index in &idx_sort[i..j] {
             p[orig_index] = rank / (dsz as f64);
         }
         i = j;

@@ -9,6 +9,7 @@
 // Copyright (c) 2022 noonchen
 //
 
+use crate::db_ops::TestId;
 use crate::StdfHelperError;
 use rusqlite::{Connection, Statement, ToSql};
 
@@ -17,20 +18,20 @@ const ROWS_PER_BATCH: usize = 128;
 
 struct PtrRow {
     dut: u64,
-    tid: usize,
+    tid: TestId,
     result: f32,
     flag: u8,
 }
 
 struct FtrRow {
     dut: u64,
-    tid: usize,
+    tid: TestId,
     flag: u8,
 }
 
 struct MprRow {
     dut: u64,
-    tid: usize,
+    tid: TestId,
     rslt: String,
     stat: String,
     flag: u8,
@@ -612,7 +613,7 @@ impl<'con> DataBaseCtx<'con> {
     pub fn insert_ptr_data_batched(
         &mut self,
         dut: u64,
-        tid: usize,
+        tid: TestId,
         result: f32,
         flag: u8,
     ) -> Result<(), StdfHelperError> {
@@ -644,7 +645,7 @@ impl<'con> DataBaseCtx<'con> {
     pub fn insert_ftr_data_batched(
         &mut self,
         dut: u64,
-        tid: usize,
+        tid: TestId,
         flag: u8,
     ) -> Result<(), StdfHelperError> {
         self.ftr_batch.push(FtrRow { dut, tid, flag });
@@ -669,7 +670,7 @@ impl<'con> DataBaseCtx<'con> {
     pub fn insert_mpr_data_batched(
         &mut self,
         dut: u64,
-        tid: usize,
+        tid: TestId,
         rslt: String,
         stat: String,
         flag: u8,
