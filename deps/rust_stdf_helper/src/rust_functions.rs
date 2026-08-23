@@ -10,7 +10,7 @@
 //
 
 use crate::{database_context::DataBaseCtx, StdfHelperError};
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Local};
 use lazy_static::lazy_static;
 use rust_stdf::*;
 use rust_xlsxwriter::{Worksheet, XlsxError};
@@ -591,14 +591,15 @@ pub fn process_summary_data(
 
 #[inline(always)]
 pub fn u32_to_localtime(timestamp: u32) -> String {
-    // convert u32 timestamp to native datetime (without timezone info)
-    let utc_native = NaiveDateTime::from_timestamp(timestamp as i64, 0);
-    // treat the native datetime as if in UTC, converts to UTC datetime
-    let utc_time = Utc.from_local_datetime(&utc_native).unwrap();
+    let utc_time = DateTime::from_timestamp(timestamp as i64, 0).unwrap();
     // convert UTC datetime to Local datetime
     let local_time: DateTime<Local> = DateTime::from(utc_time);
 
-    format!("{} (UTC{})", local_time.format("%Y-%m-%d %H:%M:%S"), local_time.format("%:z"))
+    format!(
+        "{} (UTC{})",
+        local_time.format("%Y-%m-%d %H:%M:%S"),
+        local_time.format("%:z")
+    )
 }
 
 #[inline(always)]
