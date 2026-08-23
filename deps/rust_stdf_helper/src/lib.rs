@@ -958,7 +958,7 @@ fn stdf_to_xlsx(
                     s.set_name(rec_name)?;
                     // based on the record type, write the column header
                     for (col, field) in field_names.iter().enumerate() {
-                        s.write_string(0, col as u16, field, &bold_format)?;
+                        s.write_string_with_format(0, col as u16, *field, &bold_format)?;
                     }
                     s
                 }
@@ -1044,7 +1044,7 @@ fn stdf_to_xlsx(
             }
         }
         // save xlsx to path
-        xlsx.save_to_path(std::path::Path::new(&xlsx_path))?;
+        xlsx.save(std::path::Path::new(&xlsx_path))?;
         Ok(())
     })?;
 

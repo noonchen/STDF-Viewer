@@ -2072,11 +2072,11 @@ pub fn write_json_to_sheet(
         let v = &json[field];
         match v {
             serde_json::Value::Number(n) => {
-                sheet.write_number_only(row, col, n.as_f64().unwrap_or(f64::NAN))?
+                sheet.write_number(row, col, n.as_f64().unwrap_or(f64::NAN))?
             }
-            serde_json::Value::Null => sheet.write_string_only(row, col, "N/A")?,
-            serde_json::Value::String(s) => sheet.write_string_only(row, col, s)?,
-            _ => sheet.write_string_only(row, col, &v.to_string())?,
+            serde_json::Value::Null => sheet.write_string(row, col, "N/A")?,
+            serde_json::Value::String(s) => sheet.write_string(row, col, s)?,
+            _ => sheet.write_string(row, col, v.to_string())?,
         };
     }
     Ok(())
