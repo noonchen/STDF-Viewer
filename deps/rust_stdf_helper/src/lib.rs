@@ -11,7 +11,7 @@ use pyo3::{
     types::{PyBool, PyDict},
 };
 use rusqlite::{Connection, Error};
-use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
+use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord, StdfRecordView};
 use rust_xlsxwriter::{Workbook, XlsxError};
 use std::collections::{HashMap, HashSet};
 use std::convert::{From, Infallible};
@@ -173,10 +173,10 @@ fn analyze_stdf_file(
     let mut dup_cnt = 0;
     let mut dut_cnt = 0;
     let mut wafer_cnt = 0;
-    // rec_code -> Set of (test num, test name)
-    let mut test_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
-    // rec_code -> Set of (test num, test name) of TSR
-    let mut tsr_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
+    // rec_code -> (test num -> set of test names)
+    let mut test_id_tracker = HashMap::<u64, HashMap<u32, HashSet<String>>>::with_capacity(3);
+    // rec_code -> (test num -> set of test names) of TSR
+    let mut tsr_id_tracker = HashMap::<u64, HashMap<u32, HashSet<String>>>::with_capacity(3);
     // rec_code -> (bin num -> has H/S bin rec?)
     let mut test_bin_tracker = HashMap::<u64, HashMap<u16, bool>>::with_capacity(2);
 
@@ -191,28 +191,29 @@ fn analyze_stdf_file(
             Err(e) => return Err(PyOSError::new_err(e.to_string())),
         };
 
-        for rec in reader.get_rawdata_iter() {
+        let mut view_iter = reader.get_rawdata_view_iter();
+        while let Some(raw_view) = view_iter.next() {
             if stop_flag_rust {
                 break;
             }
 
-            let rec = match rec {
+            let raw_view = match raw_view {
                 Ok(r) => r,
                 Err(e) => return Err(PyException::new_err(e.to_string())),
             };
             total_record += 1;
-            let rec_code = rec.header.get_type();
+            let rec_code = raw_view.header.get_type();
             let rec_name = get_rec_name_from_code(rec_code);
 
-            if rec_code == REC_INVALID {
+            if rec_code == REC_UNKNOWN {
                 result_log += &format!(
-                    "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
-                    rec.header.len, rec.header.typ, rec.header.sub
+                    "Unknown STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
+                    raw_view.header.len, raw_view.header.typ, raw_view.header.sub
                 );
                 break;
             }
 
-            if rec.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
+            if raw_view.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
                 if dup_cnt != 0 && previous_rec_type != 0 {
                     // flush previous record info to result_log
                     result_log += &format!(
@@ -222,35 +223,35 @@ fn analyze_stdf_file(
                     );
                 }
 
-                parse_progess = rec.offset * 100 / file_size;
-                let parsed_rec: StdfRecord = rec.into();
-                match parsed_rec {
-                    StdfRecord::PIR(pir_rec) => {
+                parse_progess = raw_view.offset * 100 / file_size;
+                let rec_view: StdfRecordView = (&raw_view).into();
+                match rec_view {
+                    StdfRecordView::PIR(pir_view) => {
                         dut_cnt += 1;
                         result_log += &format!(
                             "[{}] {} (HEAD: {}, SITE: {})\n",
-                            dut_cnt, rec_name, pir_rec.head_num, pir_rec.site_num
+                            dut_cnt, rec_name, pir_view.head_num(), pir_view.site_num()
                         );
                     }
-                    StdfRecord::WIR(wir_rec) => {
+                    StdfRecordView::WIR(wir_view) => {
                         wafer_cnt += 1;
-                        result_log += &format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wir_view.head_num());
                     }
-                    StdfRecord::PRR(prr_rec) => {
+                    StdfRecordView::PRR(prr_view) => {
                         result_log += &format!(
                             "{} (HEAD: {}, SITE: {})\n",
-                            rec_name, prr_rec.head_num, prr_rec.site_num
+                            rec_name, prr_view.head_num(), prr_view.site_num()
                         );
                         // track all bin numbers appear in PRR
                         test_bin_tracker
                             .entry(REC_HBR)
                             .or_insert_with(HashMap::new)
-                            .entry(prr_rec.hard_bin)
+                            .entry(prr_view.hard_bin())
                             .or_insert(false);
                         test_bin_tracker
                             .entry(REC_SBR)
                             .or_insert_with(HashMap::new)
-                            .entry(prr_rec.soft_bin)
+                            .entry(prr_view.soft_bin())
                             .or_insert(false);
                         // send or print result_log at PRR
                         // avoid result_log takes up too much memory...
@@ -280,8 +281,8 @@ fn analyze_stdf_file(
                         // reset to default
                         result_log.clear();
                     }
-                    StdfRecord::WRR(wrr_rec) => {
-                        result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
+                    StdfRecordView::WRR(wrr_view) => {
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_view.head_num());
                     }
                     _ => { /* impossible case */ }
                 }
@@ -306,60 +307,80 @@ fn analyze_stdf_file(
                 }
 
                 // track the test number, name and bin of PTR, FTR and MPR
-                if rec.is_type(REC_PTR | REC_FTR | REC_MPR | REC_TSR | REC_HBR | REC_SBR) {
-                    let parsed_rec: StdfRecord = rec.into();
-                    match parsed_rec {
-                        StdfRecord::PTR(ptr_rec) => {
-                            test_id_tracker
+                if raw_view.is_type(REC_PTR | REC_FTR | REC_MPR | REC_TSR | REC_HBR | REC_SBR) {
+                    let rec_view: StdfRecordView = (&raw_view).into();
+                    match rec_view {
+                        StdfRecordView::PTR(ptr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((ptr_rec.test_num, ptr_rec.test_txt));
+                                .or_default()
+                                .entry(ptr_view.test_num())
+                                .or_default();
+                            let name = ptr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::FTR(ftr_rec) => {
-                            test_id_tracker
+                        StdfRecordView::FTR(ftr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((ftr_rec.test_num, ftr_rec.test_txt));
+                                .or_default()
+                                .entry(ftr_view.test_num())
+                                .or_default();
+                            let name = ftr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::MPR(mpr_rec) => {
-                            test_id_tracker
+                        StdfRecordView::MPR(mpr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((mpr_rec.test_num, mpr_rec.test_txt));
+                                .or_default()
+                                .entry(mpr_view.test_num())
+                                .or_default();
+                            let name = mpr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::TSR(tsr_rec) => {
-                            let rec_code = match tsr_rec.test_typ {
+                        StdfRecordView::TSR(tsr_view) => {
+                            let rec_code = match tsr_view.test_typ() {
                                 'P' => REC_PTR,
                                 'F' => REC_FTR,
                                 'M' => REC_MPR,
                                 _ => continue,
                             };
-                            tsr_id_tracker
+                            let names = tsr_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((tsr_rec.test_num, tsr_rec.test_nam));
+                                .or_default()
+                                .entry(tsr_view.test_num())
+                                .or_default();
+                            let name = tsr_view.test_nam().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::HBR(hbr_rec) => {
+                        StdfRecordView::HBR(hbr_view) => {
                             if let Some(s) = test_bin_tracker.get_mut(&REC_HBR) {
-                                if let Some(b) = s.get_mut(&hbr_rec.hbin_num) {
+                                if let Some(b) = s.get_mut(&hbr_view.hbin_num()) {
                                     *b = true;
                                 }
                             } else {
                                 analyze_rst += &format!(
                                     "\nWarning: HBR (Bin {}) appears before any PRR!\n",
-                                    hbr_rec.hbin_num
+                                    hbr_view.hbin_num()
                                 );
                             }
                         }
-                        StdfRecord::SBR(sbr_rec) => {
+                        StdfRecordView::SBR(sbr_view) => {
                             if let Some(s) = test_bin_tracker.get_mut(&REC_SBR) {
-                                if let Some(b) = s.get_mut(&sbr_rec.sbin_num) {
+                                if let Some(b) = s.get_mut(&sbr_view.sbin_num()) {
                                     *b = true;
                                 }
                             } else {
                                 analyze_rst += &format!(
                                     "\nWarning: SBR (Bin {}) appears before any PRR!\n",
-                                    sbr_rec.sbin_num
+                                    sbr_view.sbin_num()
                                 );
                             }
                         }
@@ -394,11 +415,18 @@ fn analyze_stdf_file(
         });
 
         // 2. each test should have corresponding TSR (warning)
-        tsr_id_tracker.iter().for_each(|(rec_code, tsr_set)| {
+        // flatten `num -> {names}` into a set of borrowed (num, name) pairs for comparison
+        fn flatten_id_map(m: &HashMap<u32, HashSet<String>>) -> HashSet<(u32, &str)> {
+            m.iter()
+                .flat_map(|(num, names)| names.iter().map(move |n| (*num, n.as_str())))
+                .collect()
+        }
+        tsr_id_tracker.iter().for_each(|(rec_code, tsr_map)| {
             // get id set from test tracker, check for mismatch
-            let test_set = test_id_tracker.entry(*rec_code).or_default();
-            let mut mismatch_test: Vec<&(u32, String)> = test_set.difference(tsr_set).collect();
-            let mut mismatch_tsr: Vec<&(u32, String)> = tsr_set.difference(test_set).collect();
+            let test_set = flatten_id_map(test_id_tracker.entry(*rec_code).or_default());
+            let tsr_set = flatten_id_map(tsr_map);
+            let mut mismatch_test: Vec<&(u32, &str)> = test_set.difference(&tsr_set).collect();
+            let mut mismatch_tsr: Vec<&(u32, &str)> = tsr_set.difference(&test_set).collect();
             let has_mis_test = mismatch_test.len() > 1;
             let has_mis_tsr = mismatch_tsr.len() > 1;
 
@@ -408,7 +436,7 @@ fn analyze_stdf_file(
                 if has_mis_test {
                     analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
                     mismatch_test.sort_by(|&a, &b| a.0.cmp(&b.0));
-                    mismatch_test.iter().for_each(|&(num, name)| {
+                    mismatch_test.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
                 } else {
@@ -418,7 +446,7 @@ fn analyze_stdf_file(
                 if has_mis_tsr {
                     analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
                     mismatch_tsr.sort_by(|&a, &b| a.0.cmp(&b.0));
-                    mismatch_tsr.iter().for_each(|&(num, name)| {
+                    mismatch_tsr.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
                 }
@@ -428,23 +456,18 @@ fn analyze_stdf_file(
         // 3. test number should only appear once (warning)
         {
             let mut reused = false;
-            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
+            test_id_tracker.iter().for_each(|(rec_code, num_map)| {
                 let rec_code = get_rec_name_from_code(*rec_code);
-                // create a hashmap with test num as key, vec of test name as value
-                let mut num_map = HashMap::<u32, Vec<&str>>::new();
-                id_set.iter().for_each(|(num, name)| {
-                    num_map.entry(*num).or_default().push(name);
-                });
-                // iterate test number hashmap, if vec len > 1, means test number are reused
-                num_map.iter().for_each(|(num, name_vec)| {
-                    if name_vec.len() > 1 {
+                // if a test number maps to more than one name, it is reused
+                num_map.iter().for_each(|(num, names)| {
+                    if names.len() > 1 {
                         reused = true;
                         // add the test num and name as duplicates to result
                         analyze_rst += &format!(
                             "\nWarning: test number [{}] is reused in multiple {}s\n",
                             num, rec_code
                         );
-                        name_vec.iter().for_each(|&s| {
+                        names.iter().for_each(|s| {
                             analyze_rst += &format!("\t({}, \"{}\")\n", num, s);
                         });
                     }
@@ -465,16 +488,18 @@ fn analyze_stdf_file(
             // for detection
             let mut reverse_id_map = HashMap::<(u32, &str), HashSet<u64>>::new();
             let mut reverse_num_map = HashMap::<u32, HashSet<u64>>::new();
-            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
-                id_set.iter().for_each(|(num, name)| {
-                    reverse_id_map
-                        .entry((*num, name))
-                        .or_default()
-                        .insert(*rec_code);
-                    reverse_num_map
-                        .entry(*num)
-                        .or_default()
-                        .insert(*rec_code);
+            test_id_tracker.iter().for_each(|(rec_code, num_map)| {
+                num_map.iter().for_each(|(num, names)| {
+                    names.iter().for_each(|name| {
+                        reverse_id_map
+                            .entry((*num, name.as_str()))
+                            .or_default()
+                            .insert(*rec_code);
+                        reverse_num_map
+                            .entry(*num)
+                            .or_default()
+                            .insert(*rec_code);
+                    });
                 });
             });
             // check test number reuse
