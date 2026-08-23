@@ -98,7 +98,7 @@ impl<'py> IntoPyObject<'py> for TestIDType {
 }
 
 // RAII to join threads
-struct ThreadJoiner<T> (Vec<std::thread::JoinHandle<T>>);
+struct ThreadJoiner<T>(Vec<std::thread::JoinHandle<T>>);
 
 impl<T> Drop for ThreadJoiner<T> {
     fn drop(&mut self) {
@@ -659,8 +659,12 @@ fn generate_database(
                         })
                     }
                 };
-                for raw_rec in stdf_reader.get_rawdata_iter() {
-                    let raw_rec = match raw_rec {
+                // parse in the reader thread so the CPU-heavy decode runs in
+                // parallel across groups; view iter reuses one buffer (no per-
+                // record alloc) and only the owned parsed record crosses the channel
+                let mut view_iter = stdf_reader.get_rawdata_view_iter();
+                while let Some(raw_view) = view_iter.next() {
+                    let raw_view = match raw_view {
                         Ok(r) => r,
                         Err(_) => {
                             // there is only one error, that is
@@ -671,11 +675,13 @@ fn generate_database(
                     };
                     // calculate the reading progress in each thread
                     let progress_x100 = 10000.0
-                        * (raw_rec.offset as f32 / file_size + sub_fid as f32)
+                        * (raw_view.offset as f32 / file_size + sub_fid as f32)
                         / num_files as f32;
+                    let byte_order = raw_view.byte_order;
+                    let parsed_rec = StdfRecord::from(&raw_view);
                     // send
                     if thread_tx
-                        .send((fid, sub_fid, progress_x100, raw_rec))
+                        .send((fid, sub_fid, progress_x100, byte_order, parsed_rec))
                         .is_err()
                     {
                         break;
@@ -760,15 +766,10 @@ fn generate_database(
         let mut progress_tracker = vec![0.0f32; num_groups];
         let mut transaction_count_up = 0;
         // process and write database in main thread
-        for (fid, sub_fid, progress_x100, raw_rec) in rx {
-            let rec_info = (
-                fid,
-                sub_fid,
-                raw_rec.byte_order,
-                raw_rec.offset,
-                raw_rec.raw_data.len(),
-                StdfRecord::from(raw_rec),
-            );
+        for (fid, sub_fid, progress_x100, byte_order, parsed_rec) in rx {
+            // record is already parsed in the reader thread; offset/data_len are
+            // unused by process_incoming_record
+            let rec_info = (fid, sub_fid, byte_order, 0u64, 0usize, parsed_rec);
             process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
 
             if is_valid_progress_signal {
@@ -1043,8 +1044,8 @@ fn stdf_to_xlsx(
                 // rec type 180: Reserved
                 // rec type 181: Reserved
                 StdfRecord::ReservedRec(r) => serde_json::to_value(&r)?,
-                StdfRecord::InvalidRec(h) => {
-                    panic!("Invalid record found! {h:?}");
+                StdfRecord::UnknownRec(h) => {
+                    panic!("Unknown record found! {h:?}");
                 }
             };
             write_json_to_sheet(json, field_names, sheet, row)?;
@@ -1089,12 +1090,10 @@ fn norm_cdf<'py>(
     let mut p = Array1::from_elem(data.len(), f64::NAN);
 
     if stddev != 0.0 && !stddev.is_nan() {
-        Zip::from(&data)
-            .and(&mut p)
-            .par_for_each(|d, prob| {
-                let d_norm = (*d - mean) / stddev;
-                *prob = statistic_functions::ndtr(d_norm)
-            });
+        Zip::from(&data).and(&mut p).par_for_each(|d, prob| {
+            let d_norm = (*d - mean) / stddev;
+            *prob = statistic_functions::ndtr(d_norm)
+        });
     }
     Ok(p.into_pyarray(py))
 }
@@ -1153,12 +1152,10 @@ fn norm_ppf<'py>(
     let mut q = Array1::from_elem(p.len(), init);
 
     if stddev != 0.0 && !stddev.is_nan() {
-        Zip::from(&p)
-            .and(&mut q)
-            .par_for_each(|prob, quantile| {
-                let q_norm = statistic_functions::ndtri(*prob);
-                *quantile = q_norm * stddev + mean
-            });
+        Zip::from(&p).and(&mut q).par_for_each(|prob, quantile| {
+            let q_norm = statistic_functions::ndtri(*prob);
+            *quantile = q_norm * stddev + mean
+        });
     }
     Ok(q.into_pyarray(py))
 }

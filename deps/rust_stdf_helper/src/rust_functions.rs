@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Sep 21 2025
+// Last Modified: Sun Aug 23 2026
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -371,14 +371,20 @@ impl RecordTracker {
                 Ok((llimit - *dft_ll).abs() > f32::EPSILON)
             }
             None => Err(StdfHelperError {
-                msg: format!("Default low limit of Test ID [{}] cannot be read...this should never happen", test_id),
+                msg: format!(
+                    "Default low limit of Test ID [{}] cannot be read...this should never happen",
+                    test_id
+                ),
             }),
         }?;
         // hlimit
         let hlimit_changed = match self.default_hlimit.get(&test_id) {
             Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
             None => Err(StdfHelperError {
-                msg: format!("Default high limit of Test ID [{}] cannot be read...this should never happen", test_id),
+                msg: format!(
+                    "Default high limit of Test ID [{}] cannot be read...this should never happen",
+                    test_id
+                ),
             }),
         }?;
         Ok((llimit_changed, hlimit_changed))
@@ -409,7 +415,9 @@ impl RecordTracker {
     pub fn tsr_detected(&mut self, file_id: usize, tsr_rec: &TSR) -> Result<(), StdfHelperError> {
         // get test_id
         let key = match self.id_type {
-            TestIDType::TestNumberAndName => (file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string()),
+            TestIDType::TestNumberAndName => {
+                (file_id, tsr_rec.test_num, tsr_rec.test_nam.to_string())
+            }
             TestIDType::TestNumberOnly => (file_id, tsr_rec.test_num, "".to_string()),
         };
         let test_id = match self.id_map.get(&key) {
@@ -540,11 +548,13 @@ pub fn process_incoming_record(
         // rec type 180: Reserved
         // rec type 181: Reserved
         // invalid
-        StdfRecord::InvalidRec(header) => {
+        StdfRecord::UnknownRec(header) => {
             return Err(StdfHelperError {
                 msg: format!(
-                    "Invalid record detected, typ: {}, sub: {}, len: {}",
-                    header.typ, header.sub, header.len
+                    "Unknown record detected, typ: {}, sub: {}, len: {}",
+                    header.typ,
+                    header.sub,
+                    header.raw_data.len()
                 ),
             })
         }
@@ -1157,13 +1167,12 @@ fn on_ptr_rec(
     // overwrite existing TestInfo entry.
     let lim_exist = tracker.default_limits_contains_id(test_id);
     // insert ptr result
-    db_ctx.insert_ptr_data(rusqlite::params![
+    db_ctx.insert_ptr_data_batched(
         dut_index,
         test_id,
-        // replace_inf(ptr_rec.result * 10f32.powi(scale)),
         ptr_rec.result * 10f32.powi(scale),
-        ptr_rec.test_flg[0]
-    ])?;
+        ptr_rec.test_flg[0],
+    )?;
 
     if !exist || !lim_exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
@@ -1255,13 +1264,7 @@ fn on_mpr_rec(
     });
     let stat_hex = hex::encode_upper(mpr_rec.rtn_stat);
     // insert mpr data
-    db_ctx.insert_mpr_data(rusqlite::params![
-        dut_index,
-        test_id,
-        rslt_hex,
-        stat_hex,
-        mpr_rec.test_flg[0]
-    ])?;
+    db_ctx.insert_mpr_data_batched(dut_index, test_id, rslt_hex, stat_hex, mpr_rec.test_flg[0])?;
 
     if !exist {
         // indicates it is the 1st PTR, that we need to save the possible omitted fields
@@ -1319,7 +1322,7 @@ fn on_ftr_rec(
         &ftr_rec.test_txt,
     )?;
     // insert ftr test flag
-    db_ctx.insert_ftr_data(rusqlite::params![dut_index, test_id, ftr_rec.test_flg[0]])?;
+    db_ctx.insert_ftr_data_batched(dut_index, test_id, ftr_rec.test_flg[0])?;
 
     // FTR doesn't have result scale, but we can still use this hashmap to check
     // if this test id has been saved, to avoid duplicate rows in the sqlite3 database
@@ -1667,13 +1670,13 @@ fn on_dtr_rec(
 ) -> Result<(), StdfHelperError> {
     let (dut_index, is_before_prr) = tracker.get_datalog_relative_pos(file_id);
 
-    db_ctx.insert_datalog_rec(rusqlite::params![
+    db_ctx.insert_datalog_rec_batched(
         file_id,
         "DTR",
         dtr_rec.text_dat,
         dut_index,
         is_before_prr,
-    ])?;
+    )?;
     Ok(())
 }
 
@@ -1687,13 +1690,7 @@ fn on_gdr_rec(
     let (dut_index, is_before_prr) = tracker.get_datalog_relative_pos(file_id);
     let flatten_string = flatten_generic_data(&gdr_rec);
 
-    db_ctx.insert_datalog_rec(rusqlite::params![
-        file_id,
-        "GDR",
-        flatten_string,
-        dut_index,
-        is_before_prr,
-    ])?;
+    db_ctx.insert_datalog_rec_batched(file_id, "GDR", flatten_string, dut_index, is_before_prr)?;
     Ok(())
 }
 
@@ -1939,16 +1936,36 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
     let mut rslt = String::with_capacity(256);
     for (i, v1_data) in gdr_rec.gen_data.iter().enumerate() {
         match v1_data {
-            V1::B0 => { rslt.push_str(&format!("{} B0: NULL\n", i)); }
-            V1::U1(v) => { rslt.push_str(&format!("{} U1: {}\n", i, v)); }
-            V1::U2(v) => { rslt.push_str(&format!("{} U2: {}\n", i, v)); }
-            V1::U4(v) => { rslt.push_str(&format!("{} U4: {}\n", i, v)); }
-            V1::I1(v) => { rslt.push_str(&format!("{} I1: {}\n", i, v)); }
-            V1::I2(v) => { rslt.push_str(&format!("{} I2: {}\n", i, v)); }
-            V1::I4(v) => { rslt.push_str(&format!("{} I4: {}\n", i, v)); }
-            V1::R4(v) => { rslt.push_str(&format!("{} R4: {}\n", i, v)); }
-            V1::R8(v) => { rslt.push_str(&format!("{} R8: {}\n", i, v)); }
-            V1::Cn(v) => { rslt.push_str(&format!("{} Cn: {}\n", i, v)); }
+            V1::B0 => {
+                rslt.push_str(&format!("{} B0: NULL\n", i));
+            }
+            V1::U1(v) => {
+                rslt.push_str(&format!("{} U1: {}\n", i, v));
+            }
+            V1::U2(v) => {
+                rslt.push_str(&format!("{} U2: {}\n", i, v));
+            }
+            V1::U4(v) => {
+                rslt.push_str(&format!("{} U4: {}\n", i, v));
+            }
+            V1::I1(v) => {
+                rslt.push_str(&format!("{} I1: {}\n", i, v));
+            }
+            V1::I2(v) => {
+                rslt.push_str(&format!("{} I2: {}\n", i, v));
+            }
+            V1::I4(v) => {
+                rslt.push_str(&format!("{} I4: {}\n", i, v));
+            }
+            V1::R4(v) => {
+                rslt.push_str(&format!("{} R4: {}\n", i, v));
+            }
+            V1::R8(v) => {
+                rslt.push_str(&format!("{} R8: {}\n", i, v));
+            }
+            V1::Cn(v) => {
+                rslt.push_str(&format!("{} Cn: {}\n", i, v));
+            }
             V1::Bn(v) => {
                 rslt.push_str(&match v.len() {
                     0 => format!("{} Bn: NULL\n", i),
@@ -1956,12 +1973,14 @@ fn flatten_generic_data(gdr_rec: &GDR) -> String {
                 });
             }
             V1::Dn(v) => {
-                rslt.push_str(&match v.len() {
+                rslt.push_str(&match v.bit_data.len() {
                     0 => format!("{} Dn: NULL\n", i),
-                    _ => format!("{} Dn: (HEX){}\n", i, hex::encode_upper(v)),
+                    _ => format!("{} Dn: (HEX){}\n", i, hex::encode_upper(&v.bit_data)),
                 });
             }
-            V1::N1(v) => { rslt.push_str(&format!("{} N1: {:X}\n", i, v)); }
+            V1::N1(v) => {
+                rslt.push_str(&format!("{} N1: {:X}\n", i, v));
+            }
             V1::Invalid => (),
         };
     }
