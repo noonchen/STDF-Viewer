@@ -133,7 +133,7 @@ static U: [f64; 5] = [
 
 static MAXLOG: f64 = 7.09782712893383996732E2; /* log(DBL_MAX) */
 
-static M_SQRT1_2: f64 = 0.70710678118654752440; /* 1/sqrt(2) */
+static M_SQRT1_2: f64 = std::f64::consts::FRAC_1_SQRT_2; /* 1/sqrt(2) */
 
 #[inline(always)]
 fn erf(x: f64) -> f64 {
