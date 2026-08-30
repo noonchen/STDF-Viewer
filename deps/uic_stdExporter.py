@@ -55,7 +55,7 @@ from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 # from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 
-logger = logging.getLogger("STDF Viewer")
+logger = logging.getLogger(LOG_NAME)
 
     
 class ReportSelection(IntEnum):

@@ -74,7 +74,7 @@ setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
 
 # logger
 init_logger(rootFolder)
-logger = logging.getLogger("STDF-Viewer")
+logger = logging.getLogger(LOG_NAME)
 
 
 class signals4MainUI(QtCore.QObject):
