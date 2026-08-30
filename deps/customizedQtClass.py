@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -739,15 +739,16 @@ class MergeTableModel(QtCore.QAbstractTableModel):
             pass
         
     def moveFile(self, srcIndex: int, up: bool):
-        try:
-            desIndex = srcIndex - 1 if up else srcIndex + 1
-            src = self.contents[srcIndex]
-            des = self.contents[desIndex]
-            # switch
-            self.contents[srcIndex] = des
-            self.contents[desIndex] = src
-        except IndexError:
-            pass
+        if srcIndex == 0 and up:
+            return
+        if srcIndex == len(self.contents) - 1 and not up:
+            return
+        desIndex = srcIndex - 1 if up else srcIndex + 1
+        src = self.contents[srcIndex]
+        des = self.contents[desIndex]
+        # switch
+        self.contents[srcIndex] = des
+        self.contents[desIndex] = src
     
     def getFilePaths(self) -> list:
         paths = []
