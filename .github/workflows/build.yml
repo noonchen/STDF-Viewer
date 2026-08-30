@@ -35,7 +35,7 @@ jobs:
         id: osinfo
         shell: bash
         run: |
-          echo "image_os=${ImageOS:-unknownImg}" >> "$GITHUB_OUTPUT"
+          echo "image_os=${ImageOS:-unknownImg}_$(uname -m)" >> "$GITHUB_OUTPUT"
 
       # setup uv to handle dependencies
       - uses: astral-sh/setup-uv@v8.2.0
