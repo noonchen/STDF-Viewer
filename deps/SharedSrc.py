@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -129,7 +129,7 @@ class GeneralConfig(BaseModel):
                 continue
             
             new_v[i_num] = symbol
-        return v
+        return new_v
     
     @field_serializer("file_symbols")
     def serialize_file_symbols(self, v: dict[int, str], _info):
@@ -218,7 +218,7 @@ def loadConfigFile():
         with open(sys.CONFIG_PATH, "rb") as f:
             data = tomllib.load(f)
             GlobalSetting = SettingParams.model_validate(data)
-    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError):
+    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError, ValueError):
         # any error occurs in config file reading, simply ignore
         pass
     
@@ -275,6 +275,9 @@ WHITE_COLOR = "#FFFFFF"
 FAIL_DUT_COLOR = "#CC0000"
 OVRD_DUT_COLOR = "#D0D0D0"
 UNKN_DUT_COLOR = "#FE7B00"
+
+
+LOG_NAME = "STDF-Viewer"
 
 
 FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
@@ -667,8 +670,6 @@ def get_file_size(p: str) -> str:
         return "%.2f MB"%(os.stat(p).st_size / 2**20)
     except Exception:
         return "?? MB"
-    except SystemExit:
-        pass
 
 
 class GeneralWorker(QObject):
@@ -793,7 +794,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
            "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 
-           "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
+           "LOG_NAME", "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 

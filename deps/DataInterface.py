@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -643,7 +643,8 @@ class DataInterface:
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(head, site, -1, fid)
-            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, isHbin))
+            pass_rate = 100*counts[0]/(counts[0]+counts[1]) if (counts[0]+counts[1]) > 0 else np.nan
+            row.append((f"Yield: {pass_rate:.2f}%", -1, isHbin))
             row.append((f"Total: {sum(counts)}", -1, isHbin))
             for (n, c) in zip(["Pass", "Failed", "Unknown", "Superseded"], counts):
                 row.append((f"{n}: {c}", -1, isHbin))
@@ -698,7 +699,8 @@ class DataInterface:
             row = []
             # add yield and dut counts in the row
             counts = self.DatabaseFetcher.getDUTCountOnConditions(-1, site, waferIndex, fid)
-            row.append((f"Yield: {100*counts[0]/(counts[0]+counts[1]):.2f}%", -1, False))
+            pass_rate = 100*counts[0]/(counts[0]+counts[1]) if (counts[0]+counts[1]) > 0 else np.nan
+            row.append((f"Yield: {pass_rate:.2f}%", -1, False))
             row.append((f"Total: {sum(counts)}", -1, False))
             for (n, c) in zip(["Pass", "Failed", "Unknown", "Superseded"], counts):
                 row.append((f"{n}: {c}", -1, False))
