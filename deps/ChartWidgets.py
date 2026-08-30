@@ -458,7 +458,7 @@ class TrendViewBox(StdfViewrViewBox):
         # cache friendly sort
         uniqueY = sly[np.sort(uniqueIdx)]
         # calc stats
-        mean = np.min(uniqueY)
+        mean = np.mean(uniqueY)
         median = np.median(uniqueY)
         stddev = np.std(uniqueY)
         
