@@ -209,7 +209,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 msgBox = QMessageBox(self)
                 msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
                 msgBox.setTextFormat(Qt.TextFormat.RichText)
-                msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;\
+                msgBox.setText("<span style='font-size:15px'>{0}&nbsp;&nbsp;\
                                 <a href='{2}'>{1}</a></span>".format(
                                     self.tr("{0} is available!").format(latestTag),
                                     self.tr("→Go to download page←"),
