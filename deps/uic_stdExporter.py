@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 11th 2020
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1170,7 +1170,7 @@ class stdfExporter(QtWidgets.QDialog):
         if ReportSelection.Histo in selectedContents:
             totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.Stat in selectedContents:
-            totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads) * len(selectedFiles)
         if ReportSelection.Bin in selectedContents:
             totalLoopCnt += len(selectedSites) * len(selectedHeads)
         if ReportSelection.FileInfo in selectedContents:
@@ -1178,7 +1178,7 @@ class stdfExporter(QtWidgets.QDialog):
         if ReportSelection.DUT in selectedContents:
             totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
         if ReportSelection.Wafer in selectedContents:
-            totalLoopCnt += len(waferTuples) * len(selectedSites) * len(selectedHeads)
+            totalLoopCnt += len(waferTuples)
         if ReportSelection.GDR_DTR in selectedContents:
             totalLoopCnt += 1
                     
