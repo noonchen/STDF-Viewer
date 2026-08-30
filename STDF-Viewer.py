@@ -201,7 +201,10 @@ class MyWindow(QtWidgets.QMainWindow):
             changeList = resDict["body"]
             releaseLink = resDict["html_url"]
             
-            if latestTag > Version:
+            latestVer = tuple(int(x) for x in latestTag.lstrip("vV").split("."))
+            currentVer = tuple(int(x) for x in Version.lstrip("vV").split("."))
+
+            if latestVer > currentVer:
                 # show dialog for updating
                 msgBox = QMessageBox(self)
                 msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
