@@ -290,6 +290,7 @@ DUT_SUMMARY_QUERY = '''SELECT
                             DUTIndex,
                             Dut_Info.Fid AS "File ID",
                             PartID AS "Part ID",
+                            PartText AS "Part Text",
                             'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
                             TestCount AS "Tests Executed",
                             TestTime || ' ms' AS "Test Time",

@@ -81,6 +81,7 @@ class DataInterface:
         self.completeTestList = self.DatabaseFetcher.getTestItemsList()
         self.completeWaferList = self.DatabaseFetcher.getWaferList()
         # for dut summary
+        self.noPartTXT = self.DatabaseFetcher.isDutInfoColumnEmpty("PartText")
         self.noWaferID = self.DatabaseFetcher.isDutInfoColumnEmpty("WaferIndex")
         self.noWaferXY = self.DatabaseFetcher.isDutInfoColumnEmpty("XCOORD")
         
