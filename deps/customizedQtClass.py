@@ -109,14 +109,15 @@ class DutTableColIndex(IntEnum):
     DutIndex = 0
     FileID = 1
     PartID = 2
-    HeadSite = 3
-    TestCount = 4
-    TestTime = 5
-    HBIN = 6
-    SBIN = 7
-    WaferID = 8
-    XYCOORD = 9
-    DutFlag = 10
+    PartText = 3
+    HeadSite = 4
+    TestCount = 5
+    TestTime = 6
+    HBIN = 7
+    SBIN = 8
+    WaferID = 9
+    XYCOORD = 10
+    DutFlag = 11
 
 
 class DutSortFilter(QSortFilterProxyModel):

@@ -755,6 +755,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dutInfoTable.hideColumn(DutTableColIndex.DutIndex)
         # hide other columns under specific condition
         for hideCond, col in [(self.data_interface.num_files <= 1, DutTableColIndex.FileID),
+                              (self.data_interface.noPartTXT, DutTableColIndex.PartText),
                               (self.data_interface.noWaferID, DutTableColIndex.WaferID),
                               (self.data_interface.noWaferXY, DutTableColIndex.XYCOORD)]:
             if hideCond:
