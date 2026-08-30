@@ -670,8 +670,6 @@ def get_file_size(p: str) -> str:
         return "%.2f MB"%(os.stat(p).st_size / 2**20)
     except Exception:
         return "?? MB"
-    except SystemExit:
-        pass
 
 
 class GeneralWorker(QObject):
