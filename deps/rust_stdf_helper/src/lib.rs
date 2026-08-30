@@ -1094,7 +1094,14 @@ fn stdf_to_xlsx(
                 // rec type 181: Reserved
                 StdfRecord::ReservedRec(r) => serde_json::to_value(&r)?,
                 StdfRecord::UnknownRec(h) => {
-                    panic!("Unknown record found! {h:?}");
+                    return Err(StdfHelperError {
+                        msg: format!(
+                            "Unknown record found:\ntyp: {}, sub: {}, len: {}",
+                            h.typ,
+                            h.sub,
+                            h.raw_data.len()
+                        ),
+                    });
                 }
             };
             write_json_to_sheet(json, field_names, sheet, row)?;

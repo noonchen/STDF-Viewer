@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: Dec 12 2022
 # -----
-# Last Modified: Mon Dec 12 2022
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -140,7 +140,7 @@ class StdfConverter(QDialog):
         hasErr, errMsg, pathOut = finishMsg
         if hasErr:
             title = self.tr("Error occurred")
-            msg = self.tr("{}, report path:").format(errMsg)
+            msg = self.tr("{}\n\nReport path:").format(errMsg)
         elif self.c.aborted:
             title = self.tr("Process Aborted!")
             msg = self.tr("Partial report is saved in:")
@@ -183,4 +183,4 @@ class ConverterWrapper(QObject):
             self.progressSignal.emit(100)
             self.finishMsgSignal.emit( (False, "", self.outPath) )
         except Exception as e:
-            self.finishMsgSignal.emit( (True, repr(e), self.outPath) )
+            self.finishMsgSignal.emit( (True, str(e), self.outPath) )
