@@ -1,14 +1,21 @@
 name: build
 
 on:
-  #push:
-  #  branches: [ main ]
+  push:
+    branches: [ main ]
   pull_request:
     branches: [ main ]
     paths-ignore:
      - '**.md'
      - '**.png'
      - 'deps/cystdf/**.*'
+  schedule:
+    # 0 → minute 00
+    # 3 → hour 03
+    # * → every day of month
+    # * → every month
+    # 0 → Sunday
+    - cron: '0 3 * * 0'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -24,8 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Detect Runner Image
+        id: osinfo
+        shell: bash
+        run: |
+          echo "image_os=${ImageOS:-unknownImg}" >> "$GITHUB_OUTPUT"
+
       # setup uv to handle dependencies
       - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
 
       - name: Install Python via uv
         run: |
@@ -37,7 +52,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/numpycache
-          key: numpy-2.3.4-${{ matrix.os }}
+          key: numpy-2.3.4-${{ steps.osinfo.outputs.image_os }}
 
       # same setup used in numpy repo
       - name: Setup MSVC
@@ -58,7 +73,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/numpycache
-          key: numpy-2.3.4-${{ matrix.os }}
+          key: numpy-2.3.4-${{ steps.osinfo.outputs.image_os }}
 
       - name: Add Numpy no BLAS to deps
         shell: bash
