@@ -54,6 +54,7 @@ def autoHideResize(view: QTableView, model: MergeTableModel):
         if hide:
             view.hideColumn(col)
         else:
+            view.showColumn(col)
             view.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
 
 

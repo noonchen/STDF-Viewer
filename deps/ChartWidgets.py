@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Tue Oct 14 2025
+# Last Modified: Sun Nov 02 2025
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -458,7 +458,7 @@ class TrendViewBox(StdfViewrViewBox):
         # cache friendly sort
         uniqueY = sly[np.sort(uniqueIdx)]
         # calc stats
-        mean = np.min(uniqueY)
+        mean = np.mean(uniqueY)
         median = np.median(uniqueY)
         stddev = np.std(uniqueY)
         
@@ -1127,10 +1127,94 @@ class HistoChart(TrendChart):
             pitem.getAxis(valueAxis).setLabel(self.test_name + f" ({unit})" if unit else "")
 
 
-class BinChart(GraphicViewWithMenu):
+class AxisItemRotText(pg.AxisItem):
+    def setTicksAngle(self, angleInDeg: float):
+        '''
+        left/right axis: angle is between x- and text, e.g. 0 deg means perpendicular to y axis
+        top/bottom axis: angle is between x+ and text, e.g. 0 deg means parallel to x axis
+        '''
+        self._angle = angleInDeg % 90
+        self.sinA = np.fabs(np.sin(np.deg2rad(self._angle)))
+        self.cosA = np.fabs(np.cos(np.deg2rad(self._angle)))
+        # prevent label being hidden, 
+        # first tick text may hidden if set too small
+        self.setStyle(hideOverlappingLabels=100)
+    
+    def drawPicture(self, p: QtGui.QPainter, axisSpec, tickSpecs, textSpecs: list[tuple[QRectF, int, str]]):
+        p.setRenderHint(p.RenderHint.Antialiasing, False)
+        p.setRenderHint(p.RenderHint.TextAntialiasing, True)
+
+        ## draw long line along axis
+        pen, p1, p2 = axisSpec
+        p.setPen(pen)
+        p.drawLine(p1, p2)
+
+        ## draw ticks
+        for pen, p1, p2 in tickSpecs:
+            p.setPen(pen)
+            p.drawLine(p1, p2)
+
+        # Draw all text
+        if self.style['tickFont'] is not None:
+            p.setFont(self.style['tickFont'])
+        p.setPen(self.textPen())
+        
+        # optimized from https://github.com/pyqtgraph/pyqtgraph/issues/322#issuecomment-503541303
+        max_width = 0
+        max_height = 0
+        
+        # STDF Viewer will only rotate texts in left and bottom axis
+        if self.orientation == 'bottom':
+            # rect left align to tick position
+            _ = [rect.setLeft(rect.left() + rect.width() / 2) for (rect, _, _) in textSpecs]
+
+        for rect, flags, text in textSpecs:
+            p.save()  # save the painter state
+
+            if self.orientation == 'left':
+                # center of right side
+                rotOrigin = QPointF(rect.right(), rect.center().y())
+            elif self.orientation == 'bottom':
+                rotOrigin = rect.topLeft()
+                # unset default align center and apply align left
+                flags = (flags & ~Qt.AlignmentFlag.AlignHCenter) | Qt.AlignmentFlag.AlignLeft
+            else:
+                rotOrigin = rect.center()
+            
+            p.translate(rotOrigin)   # move coordinate system to center of text rect
+            p.rotate(self._angle)  # rotate text
+            p.translate(-rotOrigin)  # revert coordinate system
+
+            new_w = np.ceil(self.cosA * rect.width() + self.sinA * rect.height())
+            new_h = np.ceil(self.sinA * rect.width() + self.cosA * rect.height())
+
+            p.drawText(rect, flags, text)
+            p.restore()  # restore the painter state
+            max_width = max(new_w, max_width)
+            max_height = max(new_h, max_height)
+
+        #  Adjust the width or height
+        if self.orientation in ['left', 'right']:
+            self.textWidth = max_width
+            # not sure why ticks will be hidden if enabled,
+            # but it doesn't matter, original width will always
+            # larger than rotated, visually: more spaces.
+            # self._updateWidth()
+        else:
+            self.textHeight = max_height * 1.8
+            self._updateHeight()
+
+
+class BinChartGenerator:
     def __init__(self):
-        super().__init__(800, 800)
         self.validData = False
+        self.binData = {}
+        self.titleSuffix = ""
+        
+        settings = ss.getSetting()
+        self.isVertical = settings.gen.vert_bar
+        self.hbinColor = settings.color.hbin_colors
+        self.sbinColor = settings.color.sbin_colors
         
     def setBinData(self, binData: dict):
         if not all([k in binData for k in ["HS", 
@@ -1138,107 +1222,139 @@ class BinChart(GraphicViewWithMenu):
                                            "HBIN_Ticks", "SBIN_Ticks"]]):
             return
         
-        settings = ss.getSetting()
         self.validData = True
-        isVertical = settings.gen.vert_bar
-        row = 0
-        (head, site) = binData["HS"]
-        hs_info = f" - Head {head} - " + (f"All Site" if site == -1 else f"Site {site}")
-        # create two plot items for HBIN & SBIN
-        for binType in ["HBIN", "SBIN"]:
-            hsbin = binData[binType]
-            binTicks = binData[binType+"_Ticks"]
-            isHBIN = True if binType == "HBIN" else False
-            num_files = len(hsbin)
-            # use a list to track viewbox count in
-            # a single plot, used for Y-link and 
-            # hide axis
-            tmpVbList = []
-            binColorDict = settings.color.hbin_colors if isHBIN else settings.color.sbin_colors
-            # add title
-            binTypeName = "Hardware Bin" if isHBIN else "Software Bin"
-            self.plotlayout.addLabel(f"{binTypeName}{hs_info}", 
-                                     row=row, col=0, 
-                                     rowspan=1, colspan=1 if isVertical else num_files, 
-                                     size="20pt")
-            row += 1
-            # iterate thru all files
-            for fid in sorted(hsbin.keys()):
-                isFirstPlot = len(tmpVbList) == 0
-                view_bin = BinViewBox()
-                view_bin.setFileID(fid)
-                # in horizontal mode, invert y axis to put Bin0 at top
-                view_bin.invertY(not isVertical)
-                pitem = pg.PlotItem(viewBox=view_bin)
-                binStats = hsbin[fid]
-                # get data for barGraph
-                numList = sorted(binTicks.keys())
-                cntList = np.array([binStats.get(n, 0) for n in numList])
-                colorList = [binColorDict[n] for n in numList]
-                # draw bars, use `ind` instead of `bin_num`
-                tickInd = np.arange(len(numList))
-                binWidth = 0.8
-                rectList = prepareBinRectList(tickInd, cntList, 
-                                              binWidth, isHBIN, 
-                                              numList, not settings.gen.vert_bar)
-                # show name (tick), bin number and count in hover tip
-                ticks = [[binTicks[n] for n in numList]]
-                tipData = [(f"{name[1]}\nBin: {n}", cnt) 
-                           for (name, n, cnt) 
-                           in zip(ticks[0], numList, cntList)]
-                cnt_max = max(cntList) * 1.15
-                ind_max = len(numList)
-                if isVertical:
-                    barArg = dict(y0=0, x=tickInd, height=cntList, width=binWidth)
-                    layoutArg = dict(row=row, col=0, rowspan=1, colspan=1)
-                    rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
-                    limitArg = dict(yMin=0, yMax=cnt_max, 
-                                    xMin=-1, xMax=ind_max, 
-                                    minXRange=4, minYRange=3)
-                    # each fid takes a single row in vertical mode
-                    row += 1
-                    tickAxis = "bottom"
-                    valueAxis = "left"
-                    linkAttr = "setXLink"
-                else:
-                    barArg = dict(x0=0, y=tickInd, width=cntList, height=binWidth)
-                    layoutArg = dict(row=row, col=fid, rowspan=1, colspan=1)
-                    rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
-                    limitArg = dict(xMin=0, xMax=cnt_max, 
-                                    yMin=-1, yMax=ind_max, 
-                                    minYRange=4, minXRange=3)
-                    tickAxis = "left"
-                    valueAxis = "bottom"
-                    linkAttr = "setYLink"
-                bar = SVBarGraphItem(**barArg, brushes=colorList)
-                bar.setRectDutList(rectList)
-                bar.setTipData(tipData)
-                bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
-                pitem.addItem(bar)
-                # set ticks
-                pitem.getAxis(tickAxis).setTicks(ticks)
-                pitem.getAxis(valueAxis).setLabel(f"{binType} Count" 
-                                                 if num_files == 1 
-                                                 else f"{binType} Count in File {fid}")
-                # set visible range
-                view_bin.setRange(**rangeArg, padding=0.0)
-                view_bin.setLimits(**limitArg)
-                # add them to the same row
-                self.plotlayout.addItem(pitem, **layoutArg)
-                if isFirstPlot and not isVertical:
-                    pitem.getAxis(tickAxis).show()
-                else:
-                    pitem.getAxis(tickAxis).hide()
-                if not isFirstPlot:
-                    view_bin.__getattribute__(linkAttr)(tmpVbList[0])
-                tmpVbList.append(view_bin)
-                # this list is for storing all
-                # view boxes from HBIN/SBIN plot
-                self.view_list.append(view_bin)
-            # vertical mode, show axis of last plot
-            if isVertical:
+        self.binData = binData
+        head, site = binData["HS"]
+        self.titleSuffix = f" - Head {head} - " + (f"All Site" if site == -1 else f"Site {site}")
+        
+    def getWindowsHeightResizeRatio(vb: pg.ViewBox, axis: AxisItemRotText) -> float:
+        # get pixel height of tick label
+        labelHeight = QtGui.QFontMetricsF(axis.font()).height()
+        # get pixel spacing between ticks
+        pixPos = list(map(
+            lambda y: vb.mapViewToDevice(QPointF(0, y)).y(), 
+            [-1, 0]))
+        tickHeight = abs(pixPos[1] - pixPos[0])
+        # theta is the angle between y+/x+ and label text
+        if axis.orientation in ['left', 'right']:
+            # _angle is between x- and label text
+            theta = np.deg2rad(90 - axis._angle)
+        else:
+            # _angle is between x+ and label text
+            theta = np.deg2rad(axis._angle)
+        # get minmum tick height that won't cause overlap
+        # x2 for extra padding
+        minTickHeight = 2 * labelHeight / np.sin(theta)
+        if minTickHeight > tickHeight and tickHeight != 0 and np.isfinite(minTickHeight):
+            # overlap occurred
+            return minTickHeight / tickHeight
+        else:
+            return 1.0
+    
+    def genGraphicView(self, isHBIN: bool):
+        gvm = GraphicViewWithMenu(800, 300)
+        
+        binType = "HBIN" if isHBIN else "SBIN"
+        hsbin = self.binData[binType]
+        binTicks = self.binData[binType+"_Ticks"]
+        num_files = len(hsbin)
+        if isHBIN:
+            binColorDict = self.hbinColor
+            binTypeName = "Hardware Bin"
+        else:
+            binColorDict = self.sbinColor
+            binTypeName = "Software Bin"
+        # add title
+        gvm.plotlayout.addLabel(f"{binTypeName}{self.titleSuffix}", 
+                                row=0, col=0, 
+                                rowspan=1, 
+                                colspan=1 if self.isVertical else num_files, 
+                                size="20pt")
+        # iterate thru all files
+        for fid in sorted(hsbin.keys()):
+            isFirstPlot = len(gvm.view_list) == 0
+            view_bin = BinViewBox()
+            view_bin.setFileID(fid)
+            # in horizontal mode, invert y axis to put Bin0 at top
+            view_bin.invertY(not self.isVertical)
+            binStats = hsbin[fid]
+            # get data for barGraph
+            numList = sorted(binTicks.keys())
+            cntList = np.array([binStats.get(n, 0) for n in numList])
+            colorList = [binColorDict[n] for n in numList]
+            # draw bars, use `ind` instead of `bin_num`
+            tickInd = np.arange(len(numList))
+            binWidth = 0.8
+            rectList = prepareBinRectList(tickInd, cntList,
+                                          binWidth, isHBIN, 
+                                          numList, not self.isVertical)
+            # show name (tick), bin number and count in hover tip
+            ticks = [[binTicks[n] for n in numList]]
+            tipData = [(f"{name[1]}\nBin: {n}", cnt) 
+                        for (name, n, cnt) 
+                        in zip(ticks[0], numList, cntList)]
+            cnt_max = max(cntList) * 1.15
+            ind_max = len(numList)
+            if self.isVertical:
+                barArg = dict(y0=0, x=tickInd, height=cntList, width=binWidth)
+                layoutArg = dict(row=fid + 1, col=0, rowspan=1, colspan=1)
+                rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
+                limitArg = dict(yMin=0, yMax=cnt_max, 
+                                xMin=-1, xMax=ind_max, 
+                                minXRange=min(4, ind_max+1), minYRange=min(3, cnt_max))
+                tickAxis = "bottom"
+                valueAxis = "left"
+                linkAttr = "setXLink"
+            else:
+                barArg = dict(x0=0, y=tickInd, width=cntList, height=binWidth)
+                layoutArg = dict(row=1, col=fid, rowspan=1, colspan=1)
+                rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
+                limitArg = dict(xMin=0, xMax=cnt_max, 
+                                yMin=-1, yMax=ind_max, 
+                                minYRange=min(4, ind_max+1), minXRange=min(3, cnt_max))
+                tickAxis = "left"
+                valueAxis = "bottom"
+                linkAttr = "setYLink"
+            bar = SVBarGraphItem(**barArg, brushes=colorList)
+            bar.setRectDutList(rectList)
+            bar.setTipData(tipData)
+            bar.setHoverTipFunction("Name: {}\nDUT Count: {}".format)
+            pitem = pg.PlotItem(viewBox=view_bin, axisItems={tickAxis: AxisItemRotText(tickAxis)})
+            pitem.addItem(bar)
+            # set ticks
+            pitem.getAxis(tickAxis).setTicksAngle(30)
+            pitem.getAxis(tickAxis).setTicks(ticks)
+            pitem.getAxis(valueAxis).setLabel(f"{binType} Count" 
+                                                if num_files == 1 
+                                                else f"{binType} Count in File {fid}")
+            # set visible range
+            view_bin.setRange(**rangeArg, padding=0.0)
+            view_bin.setLimits(**limitArg)
+            # add them to the same row
+            gvm.plotlayout.addItem(pitem, **layoutArg)
+            if isFirstPlot and not self.isVertical:
                 pitem.getAxis(tickAxis).show()
-            row += 1
+            else:
+                pitem.getAxis(tickAxis).hide()
+            if not isFirstPlot:
+                view_bin.__getattribute__(linkAttr)(gvm.view_list[0])
+            # this list is for storing all
+            # view boxes from HBIN/SBIN plot
+            gvm.view_list.append(view_bin)
+        
+        if self.isVertical:
+            # vertical mode, show axis of last plot
+            pitem.getAxis(tickAxis).show()
+        else:
+            # horizontal mode, axis tick might be overlapping
+            # resize plot if necessary.
+            # any viewbox and axis can be used as arg, because y linked
+            ratio = BinChartGenerator.getWindowsHeightResizeRatio(
+                gvm.view_list[0],
+                pitem.getAxis(tickAxis))
+            if ratio > 1.0:
+                gvm.setMinimumHeight(int(ratio * gvm.minimumHeight()))
+        return gvm
 
 
 class WaferBlock(pg.ItemSample):
@@ -1353,6 +1469,6 @@ class WaferMap(GraphicViewWithMenu):
 
 __all__ = ["TrendChart", 
            "HistoChart", 
-           "BinChart",
+           "BinChartGenerator",
            "WaferMap"
            ]

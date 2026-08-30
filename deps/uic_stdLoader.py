@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Sep 21 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -40,10 +40,10 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
-from deps.SharedSrc import getSetting
+from deps.SharedSrc import getSetting, LOG_NAME
 
 
-logger = logging.getLogger("STDF Viewer")
+logger = logging.getLogger(LOG_NAME)
 
 class flags:
     stop = False

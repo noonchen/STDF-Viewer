@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Fri Oct 10 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -121,7 +121,7 @@ class GeneralConfig(BaseModel):
         for i, symbol in v.items():
             try:
                 i_num = int(i)
-            except:
+            except ValueError:
                 continue
             
             if not isValidSymbol(symbol):
@@ -129,7 +129,7 @@ class GeneralConfig(BaseModel):
                 continue
             
             new_v[i_num] = symbol
-        return v
+        return new_v
     
     @field_serializer("file_symbols")
     def serialize_file_symbols(self, v: dict[int, str], _info):
@@ -218,7 +218,7 @@ def loadConfigFile():
         with open(sys.CONFIG_PATH, "rb") as f:
             data = tomllib.load(f)
             GlobalSetting = SettingParams.model_validate(data)
-    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError):
+    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError, ValueError):
         # any error occurs in config file reading, simply ignore
         pass
     
@@ -275,6 +275,9 @@ WHITE_COLOR = "#FFFFFF"
 FAIL_DUT_COLOR = "#CC0000"
 OVRD_DUT_COLOR = "#D0D0D0"
 UNKN_DUT_COLOR = "#FE7B00"
+
+
+LOG_NAME = "STDF-Viewer"
 
 
 FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
@@ -634,30 +637,33 @@ def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
         return (test_num, pmr, test_name)
 
 
-def openFileInOS(filepath: str):
+def openOrRevealFileInOS(filepath: str, openf = True):
     # https://stackoverflow.com/a/435669
-    filepath = os.path.normpath(filepath)
-    if platform.system() == 'Darwin':       # macOS
-        subprocess.call(('open', filepath))
-    elif platform.system() == 'Windows':    # Windows
-        subprocess.call(f'cmd /c start "" "{filepath}"', creationflags = \
-            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-    else:                                   # linux variants
-        subprocess.call(('xdg-open', filepath))
-
-
-def revealFile(filepath: str):
     filepath = os.path.normpath(filepath)
     if not os.path.exists(filepath):
         return
-    
+
+    flags = 0
     if platform.system() == 'Darwin':       # macOS
-        subprocess.call(('open', '-R', filepath))
+        args = (
+            ('open', filepath) if openf else 
+            ('open', '-R', filepath)
+            )
+        
     elif platform.system() == 'Windows':    # Windows
-        subprocess.call(f'explorer /select,"{filepath}"', creationflags = \
-            subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+        args = (
+            f'cmd /c start "" "{filepath}"' if openf else 
+            f'explorer /select,"{filepath}"'
+            )
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+        
     else:                                   # linux variants
-        subprocess.call(('xdg-open', os.path.dirname(filepath)))
+        args = (
+            ('xdg-open', filepath) if openf else 
+            ('xdg-open', os.path.dirname(filepath))
+            )
+        
+    subprocess.call(args, creationflags = flags)    # nosec
 
 
 def get_file_size(p: str) -> str:
@@ -665,8 +671,6 @@ def get_file_size(p: str) -> str:
         return "%.2f MB"%(os.stat(p).st_size / 2**20)
     except Exception:
         return "?? MB"
-    except SystemExit:
-        pass
 
 
 class GeneralWorker(QObject):
@@ -756,9 +760,9 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
     msgbox.setDefaultButton(okBtn)
     msgbox.exec_()
     if msgbox.clickedButton() == revealBtn:
-        revealFile(outPath)
+        openOrRevealFileInOS(outPath, False)
     elif msgbox.clickedButton() == openBtn:
-        openFileInOS(outPath)
+        openOrRevealFileInOS(outPath, True)
     
 
 def validateSession(dbPath: str):
@@ -791,7 +795,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
            "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 
-           "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
+           "LOG_NAME", "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 

@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Dec 11 2022
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -83,6 +83,22 @@ class DatabaseFetcher:
             file_paths.append(d[fid])
         self.file_paths = file_paths
         
+    
+    def isDutInfoColumnEmpty(self, columnName: str) -> bool:
+        '''return True if the given column of Dut_Info table has no valid value'''
+        if self.cursor is None: raise RuntimeError("No database is connected")
+
+        sql = f'''SELECT EXISTS (
+                    SELECT 1 
+                    FROM Dut_Info 
+                    WHERE {columnName} IS NOT NULL 
+                        AND 
+                        (typeof({columnName}) != 'text' OR trim({columnName}) != "")
+                    )'''
+        
+        validDataExist = self.cursor.execute(sql).fetchone()[0]
+        return not validDataExist
+    
     
     @property
     def num_files(self):
@@ -624,7 +640,9 @@ class DatabaseFetcher:
         # If the length of `duts` is too long, we will iterate all duts instead
         # and pick duts of interet during the iteration
         dutsCount = len(duts)
-        if dutsCount > 128:
+        if dutsCount == 0:
+            return {}
+        elif dutsCount > 128:
             # select all
             dut_condition = " AND DUTIndex > 0"
         else:
@@ -861,7 +879,7 @@ class DatabaseFetcher:
         
         for fid, isHBIN, binList in selectedBin:
             binType = "HBIN" if isHBIN else "SBIN"
-            bin_condition = f"{binType} in ({(binList)})"
+            bin_condition = f"{binType} in ({','.join(map(str, binList))})"
             file_condition = f" AND Fid={fid}"
             sql = f"SELECT Fid, DUTIndex FROM Dut_Info WHERE {bin_condition}{file_condition}"
             

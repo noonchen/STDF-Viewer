@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Oct 12 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -74,7 +74,7 @@ setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
 
 # logger
 init_logger(rootFolder)
-logger = logging.getLogger("STDF-Viewer")
+logger = logging.getLogger(LOG_NAME)
 
 
 class signals4MainUI(QtCore.QObject):
@@ -106,6 +106,8 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
+        # track widgets whose click signal has already been connected
+        self._connectedCbs = set()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
         # init and connect signals
@@ -199,12 +201,15 @@ class MyWindow(QtWidgets.QMainWindow):
             changeList = resDict["body"]
             releaseLink = resDict["html_url"]
             
-            if latestTag > Version:
+            latestVer = tuple(int(x) for x in latestTag.lstrip("vV").split("."))
+            currentVer = tuple(int(x) for x in Version.lstrip("vV").split("."))
+
+            if latestVer > currentVer:
                 # show dialog for updating
                 msgBox = QMessageBox(self)
                 msgBox.setWindowFlag(Qt.WindowType.FramelessWindowHint)
                 msgBox.setTextFormat(Qt.TextFormat.RichText)
-                msgBox.setText("<span font-size:20px'>{0}&nbsp;&nbsp;&nbsp;&nbsp;\
+                msgBox.setText("<span style='font-size:15px'>{0}&nbsp;&nbsp;\
                                 <a href='{2}'>{1}</a></span>".format(
                                     self.tr("{0} is available!").format(latestTag),
                                     self.tr("→Go to download page←"),
@@ -665,17 +670,27 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def init_Head_SiteCheckbox(self):
-        # bind functions to all checkboxes
-        self.ui.All.clicked['bool'].connect(self.onSiteChecked)
+        # bind functions to all checkboxes, but only once per widget
+        if id(self.ui.All) not in self._connectedCbs:
+            self.ui.All.clicked['bool'].connect(self.onSiteChecked)
+            self._connectedCbs.add(id(self.ui.All))
 
         for cb in self.site_cb_dict.values():
-            cb.clicked['bool'].connect(self.onSiteChecked)
+            if id(cb) not in self._connectedCbs:
+                cb.clicked['bool'].connect(self.onSiteChecked)
+                self._connectedCbs.add(id(cb))
         for cb in self.head_cb_dict.values():
-            cb.clicked['bool'].connect(self.onSiteChecked)
+            if id(cb) not in self._connectedCbs:
+                cb.clicked['bool'].connect(self.onSiteChecked)
+                self._connectedCbs.add(id(cb))
             
-        # bind functions to check/uncheck all buttons
-        self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
-        self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+        # bind functions to check/uncheck all buttons, also only once
+        if id(self.ui.checkAll) not in self._connectedCbs:
+            self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
+            self._connectedCbs.add(id(self.ui.checkAll))
+        if id(self.ui.cancelAll) not in self._connectedCbs:
+            self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+            self._connectedCbs.add(id(self.ui.cancelAll))
         
         
     def updateModelContent(self, model, newList):
@@ -726,8 +741,10 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_dut.setQuery(QtSql.QSqlQuery(DUT_SUMMARY_QUERY, self.db_dut))
         
         for column in range(0, header.count()):
-            if column in [2, 3, 4, header.count()-1]:
-                # PartID, Part Text, Head-Site and DUT Flag
+            if column in [DutTableColIndex.PartID, 
+                          DutTableColIndex.HeadSite, 
+                          DutTableColIndex.DutFlag]:
+                # PartID, Head-Site and DUT Flag
                 # column may be too long to display
                 mode = QHeaderView.ResizeMode.ResizeToContents
             else:
@@ -735,28 +752,15 @@ class MyWindow(QtWidgets.QMainWindow):
             header.setSectionResizeMode(column, mode)
         
         # always hide dut index column
-        self.ui.dutInfoTable.hideColumn(0)
-        # hide file id column if 1 file is opened
-        if self.data_interface.num_files <= 1:
-            self.ui.dutInfoTable.hideColumn(1)
-        else:
-            self.ui.dutInfoTable.showColumn(1)
-        
-        # hide Part Text column (column 3) if all values are empty
-        has_part_txt = False
-        for row in range(self.tmodel_dut.rowCount()):
-            part_txt = self.tmodel_dut.data(self.tmodel_dut.index(row, 3), Qt.ItemDataRole.DisplayRole)
-            if part_txt and part_txt.strip():
-                has_part_txt = True
-                break
-        
-        if not has_part_txt:
-            self.ui.dutInfoTable.hideColumn(3)
-        else:
-            self.ui.dutInfoTable.showColumn(3)
-        # # show all rows
-        # while self.tmodel_dut.canFetchMore():
-        #     self.tmodel_dut.fetchMore()
+        self.ui.dutInfoTable.hideColumn(DutTableColIndex.DutIndex)
+        # hide other columns under specific condition
+        for hideCond, col in [(self.data_interface.num_files <= 1, DutTableColIndex.FileID),
+                              (self.data_interface.noWaferID, DutTableColIndex.WaferID),
+                              (self.data_interface.noWaferXY, DutTableColIndex.XYCOORD)]:
+            if hideCond:
+                self.ui.dutInfoTable.hideColumn(col)
+            else:
+                self.ui.dutInfoTable.showColumn(col)
         
         
     def updateGDR_DTR_Table(self):
@@ -1112,11 +1116,13 @@ class MyWindow(QtWidgets.QMainWindow):
             # one site per binchart
             for site in selectSites:
                 bdata = self.data_interface.getBinChartData(head, site)
-                bchart = BinChart()
-                bchart.setBinData(bdata)
-                if bchart.validData:
-                    bchart.setShowDutSignal(self.signals.showDutDataSignal_Bin)
-                    bcharts.append(bchart)
+                bchartgen = BinChartGenerator()
+                bchartgen.setBinData(bdata)
+                if bchartgen.validData:
+                    for isHBIN in [True, False]:
+                        gvm = bchartgen.genGraphicView(isHBIN)
+                        gvm.setShowDutSignal(self.signals.showDutDataSignal_Bin)
+                        bcharts.append(gvm)
             return bcharts
         
         return None
@@ -1161,10 +1167,10 @@ class MyWindow(QtWidgets.QMainWindow):
         # return datalog
         
         # method 2: use generator
+        # Yield whatever rows are currently in the model, then call fetchMore()
+        # and yield again, repeating until the underlying query is exhausted.
         row = 0
-        while model.canFetchMore():
-            model.fetchMore()
-            
+        while True:
             while row < model.rowCount():
                 datalogRow = []
                 for col in range(model.columnCount()):
@@ -1172,6 +1178,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
                 row += 1
                 yield datalogRow
+            if not model.canFetchMore():
+                break
+            model.fetchMore()
     
     
     def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
@@ -1300,7 +1309,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     col = site % 4
                     cb_layout = self.ui.gridLayout_site_select.itemAtPosition(row, col)
                     if cb_layout is not None:
-                        cb_layout.widget().deleteLater()
+                        cb = cb_layout.widget()
+                        self._connectedCbs.discard(id(cb))
+                        cb.deleteLater()
                         self.ui.gridLayout_site_select.removeItem(cb_layout)
                         
             for headnum in current_exist_head:
@@ -1310,7 +1321,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     col = headnum % 3
                     cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
                     if cb_layout_h is not None:
-                        cb_layout_h.widget().deleteLater()
+                        cb = cb_layout_h.widget()
+                        self._connectedCbs.discard(id(cb))
+                        cb.deleteLater()
                         self.ui.gridLayout_head_select.removeItem(cb_layout_h)
                                  
             # add & enable checkboxes for each sites and heads

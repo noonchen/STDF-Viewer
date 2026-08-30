@@ -1,5 +1,4 @@
 use core::f64;
-use crossbeam_channel;
 use numpy::ndarray::{Array1, Zip};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -11,7 +10,7 @@ use pyo3::{
     types::{PyBool, PyDict},
 };
 use rusqlite::{Connection, Error};
-use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord};
+use rust_stdf::{stdf_file::*, stdf_record_type::*, StdfRecord, StdfRecordView};
 use rust_xlsxwriter::{Workbook, XlsxError};
 use std::collections::{HashMap, HashSet};
 use std::convert::{From, Infallible};
@@ -20,13 +19,15 @@ use std::sync::Arc;
 use std::{thread, time, vec};
 
 mod database_context;
+mod db_ops;
 mod resources;
 mod rust_functions;
 mod statistic_functions;
 use database_context::DataBaseCtx;
+use db_ops::{DbMessage, DbOp};
 use rust_functions::{
-    get_fields_from_code, get_file_size, process_incoming_record, process_summary_data,
-    write_json_to_sheet, RecordTracker, TestIDType,
+    get_fields_from_code, get_file_size, process_record_view, write_json_to_sheet, RecordTracker,
+    TestIDType,
 };
 
 #[derive(Debug)]
@@ -97,6 +98,33 @@ impl<'py> IntoPyObject<'py> for TestIDType {
     }
 }
 
+// RAII to join threads
+struct ThreadJoiner<T>(Vec<std::thread::JoinHandle<T>>);
+
+impl<T> Drop for ThreadJoiner<T> {
+    fn drop(&mut self) {
+        for handle in self.0.drain(..) {
+            if let Err(e) = handle.join() {
+                println!("Join thread failed: {:?}", e);
+            }
+        }
+    }
+}
+
+// RAII to fill up progress bar and generate done signal
+struct ProgressBarFiller {
+    progress: Arc<AtomicU16>,
+    done: Arc<AtomicBool>,
+}
+
+impl Drop for ProgressBarFiller {
+    fn drop(&mut self) {
+        // mark progress completes
+        self.progress.store(10000u16, Ordering::Relaxed);
+        self.done.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Analyze record types in a STDF file
 #[pyfunction]
 #[pyo3(name = "analyzeSTDF")]
@@ -150,10 +178,10 @@ fn analyze_stdf_file(
     let mut dup_cnt = 0;
     let mut dut_cnt = 0;
     let mut wafer_cnt = 0;
-    // rec_code -> Set of (test num, test name)
-    let mut test_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
-    // rec_code -> Set of (test num, test name) of TSR
-    let mut tsr_id_tracker = HashMap::<u64, HashSet<(u32, String)>>::with_capacity(3);
+    // rec_code -> (test num -> set of test names)
+    let mut test_id_tracker = HashMap::<u64, HashMap<u32, HashSet<String>>>::with_capacity(3);
+    // rec_code -> (test num -> set of test names) of TSR
+    let mut tsr_id_tracker = HashMap::<u64, HashMap<u32, HashSet<String>>>::with_capacity(3);
     // rec_code -> (bin num -> has H/S bin rec?)
     let mut test_bin_tracker = HashMap::<u64, HashMap<u16, bool>>::with_capacity(2);
 
@@ -168,28 +196,29 @@ fn analyze_stdf_file(
             Err(e) => return Err(PyOSError::new_err(e.to_string())),
         };
 
-        for rec in reader.get_rawdata_iter() {
+        let mut view_iter = reader.get_rawdata_view_iter();
+        while let Some(raw_view) = view_iter.next() {
             if stop_flag_rust {
                 break;
             }
 
-            let rec = match rec {
+            let raw_view = match raw_view {
                 Ok(r) => r,
                 Err(e) => return Err(PyException::new_err(e.to_string())),
             };
             total_record += 1;
-            let rec_code = rec.header.get_type();
+            let rec_code = raw_view.header.get_type();
             let rec_name = get_rec_name_from_code(rec_code);
 
-            if rec_code == REC_INVALID {
+            if rec_code == REC_UNKNOWN {
                 result_log += &format!(
-                    "Invalid STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
-                    rec.header.len, rec.header.typ, rec.header.sub
+                    "Unknown STDF V4 Record Detected, len:{}, typ: {}, sub: {}\n",
+                    raw_view.header.len, raw_view.header.typ, raw_view.header.sub
                 );
                 break;
             }
 
-            if rec.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
+            if raw_view.is_type(REC_PIR | REC_WIR | REC_PRR | REC_WRR) {
                 if dup_cnt != 0 && previous_rec_type != 0 {
                     // flush previous record info to result_log
                     result_log += &format!(
@@ -199,35 +228,35 @@ fn analyze_stdf_file(
                     );
                 }
 
-                parse_progess = rec.offset * 100 / file_size;
-                let parsed_rec: StdfRecord = rec.into();
-                match parsed_rec {
-                    StdfRecord::PIR(pir_rec) => {
+                parse_progess = raw_view.offset * 100 / file_size;
+                let rec_view: StdfRecordView = (&raw_view).into();
+                match rec_view {
+                    StdfRecordView::PIR(pir_view) => {
                         dut_cnt += 1;
                         result_log += &format!(
                             "[{}] {} (HEAD: {}, SITE: {})\n",
-                            dut_cnt, rec_name, pir_rec.head_num, pir_rec.site_num
+                            dut_cnt, rec_name, pir_view.head_num(), pir_view.site_num()
                         );
                     }
-                    StdfRecord::WIR(wir_rec) => {
+                    StdfRecordView::WIR(wir_view) => {
                         wafer_cnt += 1;
-                        result_log += &format!("{} (HEAD: {})\n", rec_name, wir_rec.head_num);
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wir_view.head_num());
                     }
-                    StdfRecord::PRR(prr_rec) => {
+                    StdfRecordView::PRR(prr_view) => {
                         result_log += &format!(
                             "{} (HEAD: {}, SITE: {})\n",
-                            rec_name, prr_rec.head_num, prr_rec.site_num
+                            rec_name, prr_view.head_num(), prr_view.site_num()
                         );
                         // track all bin numbers appear in PRR
                         test_bin_tracker
                             .entry(REC_HBR)
-                            .or_insert_with(HashMap::new)
-                            .entry(prr_rec.hard_bin)
+                            .or_default()
+                            .entry(prr_view.hard_bin())
                             .or_insert(false);
                         test_bin_tracker
                             .entry(REC_SBR)
-                            .or_insert_with(HashMap::new)
-                            .entry(prr_rec.soft_bin)
+                            .or_default()
+                            .entry(prr_view.soft_bin())
                             .or_insert(false);
                         // send or print result_log at PRR
                         // avoid result_log takes up too much memory...
@@ -257,8 +286,8 @@ fn analyze_stdf_file(
                         // reset to default
                         result_log.clear();
                     }
-                    StdfRecord::WRR(wrr_rec) => {
-                        result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_rec.head_num);
+                    StdfRecordView::WRR(wrr_view) => {
+                        result_log += &format!("{} (HEAD: {})\n", rec_name, wrr_view.head_num());
                     }
                     _ => { /* impossible case */ }
                 }
@@ -283,60 +312,80 @@ fn analyze_stdf_file(
                 }
 
                 // track the test number, name and bin of PTR, FTR and MPR
-                if rec.is_type(REC_PTR | REC_FTR | REC_MPR | REC_TSR | REC_HBR | REC_SBR) {
-                    let parsed_rec: StdfRecord = rec.into();
-                    match parsed_rec {
-                        StdfRecord::PTR(ptr_rec) => {
-                            test_id_tracker
+                if raw_view.is_type(REC_PTR | REC_FTR | REC_MPR | REC_TSR | REC_HBR | REC_SBR) {
+                    let rec_view: StdfRecordView = (&raw_view).into();
+                    match rec_view {
+                        StdfRecordView::PTR(ptr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((ptr_rec.test_num, ptr_rec.test_txt));
+                                .or_default()
+                                .entry(ptr_view.test_num())
+                                .or_default();
+                            let name = ptr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::FTR(ftr_rec) => {
-                            test_id_tracker
+                        StdfRecordView::FTR(ftr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((ftr_rec.test_num, ftr_rec.test_txt));
+                                .or_default()
+                                .entry(ftr_view.test_num())
+                                .or_default();
+                            let name = ftr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::MPR(mpr_rec) => {
-                            test_id_tracker
+                        StdfRecordView::MPR(mpr_view) => {
+                            let names = test_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((mpr_rec.test_num, mpr_rec.test_txt));
+                                .or_default()
+                                .entry(mpr_view.test_num())
+                                .or_default();
+                            let name = mpr_view.test_txt().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::TSR(tsr_rec) => {
-                            let rec_code = match tsr_rec.test_typ {
+                        StdfRecordView::TSR(tsr_view) => {
+                            let rec_code = match tsr_view.test_typ() {
                                 'P' => REC_PTR,
                                 'F' => REC_FTR,
                                 'M' => REC_MPR,
                                 _ => continue,
                             };
-                            tsr_id_tracker
+                            let names = tsr_id_tracker
                                 .entry(rec_code)
-                                .or_insert_with(HashSet::new)
-                                .insert((tsr_rec.test_num, tsr_rec.test_nam));
+                                .or_default()
+                                .entry(tsr_view.test_num())
+                                .or_default();
+                            let name = tsr_view.test_nam().as_str();
+                            if !names.contains(name.as_ref()) {
+                                names.insert(name.into_owned());
+                            }
                         }
-                        StdfRecord::HBR(hbr_rec) => {
+                        StdfRecordView::HBR(hbr_view) => {
                             if let Some(s) = test_bin_tracker.get_mut(&REC_HBR) {
-                                if let Some(b) = s.get_mut(&hbr_rec.hbin_num) {
+                                if let Some(b) = s.get_mut(&hbr_view.hbin_num()) {
                                     *b = true;
                                 }
                             } else {
                                 analyze_rst += &format!(
                                     "\nWarning: HBR (Bin {}) appears before any PRR!\n",
-                                    hbr_rec.hbin_num
+                                    hbr_view.hbin_num()
                                 );
                             }
                         }
-                        StdfRecord::SBR(sbr_rec) => {
+                        StdfRecordView::SBR(sbr_view) => {
                             if let Some(s) = test_bin_tracker.get_mut(&REC_SBR) {
-                                if let Some(b) = s.get_mut(&sbr_rec.sbin_num) {
+                                if let Some(b) = s.get_mut(&sbr_view.sbin_num()) {
                                     *b = true;
                                 }
                             } else {
                                 analyze_rst += &format!(
                                     "\nWarning: SBR (Bin {}) appears before any PRR!\n",
-                                    sbr_rec.sbin_num
+                                    sbr_view.sbin_num()
                                 );
                             }
                         }
@@ -371,11 +420,18 @@ fn analyze_stdf_file(
         });
 
         // 2. each test should have corresponding TSR (warning)
-        tsr_id_tracker.iter().for_each(|(rec_code, tsr_set)| {
+        // flatten `num -> {names}` into a set of borrowed (num, name) pairs for comparison
+        fn flatten_id_map(m: &HashMap<u32, HashSet<String>>) -> HashSet<(u32, &str)> {
+            m.iter()
+                .flat_map(|(num, names)| names.iter().map(move |n| (*num, n.as_str())))
+                .collect()
+        }
+        tsr_id_tracker.iter().for_each(|(rec_code, tsr_map)| {
             // get id set from test tracker, check for mismatch
-            let test_set = test_id_tracker.entry(*rec_code).or_default();
-            let mut mismatch_test: Vec<&(u32, String)> = test_set.difference(tsr_set).collect();
-            let mut mismatch_tsr: Vec<&(u32, String)> = tsr_set.difference(test_set).collect();
+            let test_set = flatten_id_map(test_id_tracker.entry(*rec_code).or_default());
+            let tsr_set = flatten_id_map(tsr_map);
+            let mut mismatch_test: Vec<&(u32, &str)> = test_set.difference(&tsr_set).collect();
+            let mut mismatch_tsr: Vec<&(u32, &str)> = tsr_set.difference(&test_set).collect();
             let has_mis_test = mismatch_test.len() > 1;
             let has_mis_tsr = mismatch_tsr.len() > 1;
 
@@ -384,8 +440,8 @@ fn analyze_stdf_file(
                 // print mismatched test records
                 if has_mis_test {
                     analyze_rst += &format!("\nWarning: no TSR detected for following {}(s)\n", rec_code);
-                    mismatch_test.sort_by(|&a, &b| a.0.cmp(&b.0));
-                    mismatch_test.iter().for_each(|&(num, name)| {
+                    mismatch_test.sort_by_key(|&a| a.0);
+                    mismatch_test.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
                 } else {
@@ -394,8 +450,8 @@ fn analyze_stdf_file(
                 // print mismatch TSR
                 if has_mis_tsr {
                     analyze_rst += &format!("there are TSRs have no matching {}\n", rec_code);
-                    mismatch_tsr.sort_by(|&a, &b| a.0.cmp(&b.0));
-                    mismatch_tsr.iter().for_each(|&(num, name)| {
+                    mismatch_tsr.sort_by_key(|&a| a.0);
+                    mismatch_tsr.iter().for_each(|&&(num, name)| {
                         analyze_rst += &format!("\t({}, \"{}\")\n", num, name);
                     });
                 }
@@ -405,23 +461,18 @@ fn analyze_stdf_file(
         // 3. test number should only appear once (warning)
         {
             let mut reused = false;
-            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
+            test_id_tracker.iter().for_each(|(rec_code, num_map)| {
                 let rec_code = get_rec_name_from_code(*rec_code);
-                // create a hashmap with test num as key, vec of test name as value
-                let mut num_map = HashMap::<u32, Vec<&str>>::new();
-                id_set.iter().for_each(|(num, name)| {
-                    num_map.entry(*num).or_default().push(name);
-                });
-                // iterate test number hashmap, if vec len > 1, means test number are reused
-                num_map.iter().for_each(|(num, name_vec)| {
-                    if name_vec.len() > 1 {
+                // if a test number maps to more than one name, it is reused
+                num_map.iter().for_each(|(num, names)| {
+                    if names.len() > 1 {
                         reused = true;
                         // add the test num and name as duplicates to result
                         analyze_rst += &format!(
                             "\nWarning: test number [{}] is reused in multiple {}s\n",
                             num, rec_code
                         );
-                        name_vec.iter().for_each(|&s| {
+                        names.iter().for_each(|s| {
                             analyze_rst += &format!("\t({}, \"{}\")\n", num, s);
                         });
                     }
@@ -442,16 +493,18 @@ fn analyze_stdf_file(
             // for detection
             let mut reverse_id_map = HashMap::<(u32, &str), HashSet<u64>>::new();
             let mut reverse_num_map = HashMap::<u32, HashSet<u64>>::new();
-            test_id_tracker.iter().for_each(|(rec_code, id_set)| {
-                id_set.iter().for_each(|(num, name)| {
-                    reverse_id_map
-                        .entry((*num, name))
-                        .or_default()
-                        .insert(*rec_code);
-                    reverse_num_map
-                        .entry(*num)
-                        .or_default()
-                        .insert(*rec_code);
+            test_id_tracker.iter().for_each(|(rec_code, num_map)| {
+                num_map.iter().for_each(|(num, names)| {
+                    names.iter().for_each(|name| {
+                        reverse_id_map
+                            .entry((*num, name.as_str()))
+                            .or_default()
+                            .insert(*rec_code);
+                        reverse_num_map
+                            .entry(*num)
+                            .or_default()
+                            .insert(*rec_code);
+                    });
                 });
             });
             // check test number reuse
@@ -546,7 +599,10 @@ fn generate_database(
     //
     // do nothing if empty file group detected
     let num_groups = stdf_paths.len();
-    if stdf_paths.iter().map(|v| v.is_empty()).any(|b| b) {
+    if num_groups == 0 {
+        return Err(PyValueError::new_err("No STDF files provided"));
+    }
+    if stdf_paths.iter().any(|v| v.is_empty()) {
         return Err(PyValueError::new_err("Empty STDF file group detected"));
     }
 
@@ -569,9 +625,18 @@ fn generate_database(
     let progress_signal: Py<PyAny> = progress_signal.into();
     let stop_flag: Py<PyAny> = stop_flag.into();
 
-    // prepare channel for multithreading communication
-    const CHANNEL_CAP: usize = 16_384;
-    let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAP);
+    // Channel payload is now a batch of `DbOp`s.
+    const OPS_PER_BATCH: usize = 128;
+    const CHANNEL_CAP: usize = 64;
+    let (tx, rx) = crossbeam_channel::bounded::<DbMessage>(CHANNEL_CAP);
+
+    // Shared control/state between workers, writer, and the GIL progress thread.
+    let global_stop = Arc::new(AtomicBool::new(false));
+    let fgroup_done = Arc::new(AtomicBool::new(false));
+    let total_progress = Arc::new(AtomicU16::new(0));
+    let progress_values: Vec<Arc<AtomicU16>> = (0..num_groups)
+        .map(|_| Arc::new(AtomicU16::new(0)))
+        .collect();
 
     let mut thread_handles = vec![];
     let mut thread_txes = Vec::with_capacity(num_groups);
@@ -581,80 +646,126 @@ fn generate_database(
         .count();
     thread_txes.push(tx);
 
-    // sending parsing work to
-    // other threads.
-    // one file group per thread
-    for (fid, (fgroups, thread_tx)) in stdf_paths
-        .clone()
-        .into_iter()
-        .zip(thread_txes.into_iter())
-        .enumerate()
-    {
+    // Each thread handles one parsing/tracking task of one file group.
+    for (fid, (fgroups, thread_tx)) in stdf_paths.clone().into_iter().zip(thread_txes).enumerate() {
+        let worker_stop = global_stop.clone();
+        let worker_progress = progress_values[fid].clone();
         let handle = thread::spawn(move || -> Result<(), StdfHelperError> {
             let num_files = fgroups.len();
+            let mut record_tracker = RecordTracker::new(test_id_type);
+            let mut ops: Vec<DbOp> = Vec::with_capacity(OPS_PER_BATCH);
+
             // loop fpath in a group in vector order,
             // this step CANNOT be parallel, since
             // superseded flag must overwrite all the
             // DUTs in the previous files
             for (sub_fid, fpath) in fgroups.iter().enumerate() {
-                let file_size = get_file_size(fpath)? as f32;
+                if worker_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let file_size = match get_file_size(fpath) {
+                    Ok(size) => size as f32,
+                    Err(e) => {
+                        let msg = format!("Cannot get file size:\n{}\n\nMessage:\n{}", fpath, e);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
+                    }
+                };
                 if file_size == 0.0 {
-                    return Err(StdfHelperError {
-                        msg: format!("Empty file detected!\n\n{}", fpath),
-                    });
+                    let msg = format!("Empty file detected!\n\n{}", fpath);
+                    let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                    return Ok(());
                 }
                 let mut stdf_reader = match StdfReader::new(fpath) {
                     Ok(r) => r,
                     Err(e) => {
-                        return Err(StdfHelperError {
-                            msg: format!("Cannot parse this file:\n{}\n\nMessage:\n{}", fpath, e),
-                        })
+                        let msg = format!("Cannot parse this file:\n{}\n\nMessage:\n{}", fpath, e);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
                     }
                 };
-                for raw_rec in stdf_reader.get_rawdata_iter() {
-                    let raw_rec = match raw_rec {
+                // Parse with the zero-copy view iterator and keep all
+                // RecordTracker bookkeeping in this worker thread.
+                // Only DbOp batches cross the channel.
+                let mut view_iter = stdf_reader.get_rawdata_view_iter();
+                while let Some(raw_view) = view_iter.next() {
+                    if worker_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    let raw_view = match raw_view {
                         Ok(r) => r,
                         Err(_) => {
                             // there is only one error, that is
-                            // unexpected EOF, we just sliently
+                            // unexpected EOF, we just silently
                             // stop here
                             break;
                         }
                     };
+
                     // calculate the reading progress in each thread
                     let progress_x100 = 10000.0
-                        * (raw_rec.offset as f32 / file_size + sub_fid as f32)
+                        * (raw_view.offset as f32 / file_size + sub_fid as f32)
                         / num_files as f32;
-                    // send
-                    if thread_tx
-                        .send((fid, sub_fid, progress_x100, raw_rec))
-                        .is_err()
-                    {
-                        break;
+                    worker_progress.store(progress_x100 as u16, Ordering::Relaxed);
+
+                    let rec_view: StdfRecordView = (&raw_view).into();
+                    if let Err(e) = process_record_view(
+                        &mut record_tracker,
+                        fid,
+                        sub_fid,
+                        raw_view.byte_order,
+                        rec_view,
+                        &mut ops,
+                    ) {
+                        let msg = format!("File[{}]: {}", fid, e.msg);
+                        let _ = thread_tx.send(DbMessage::WorkerError { msg });
+                        return Ok(());
+                    }
+
+                    if ops.len() >= OPS_PER_BATCH {
+                        let batch = std::mem::replace(&mut ops, Vec::with_capacity(OPS_PER_BATCH));
+                        if thread_tx.send(DbMessage::Batch(batch)).is_err() {
+                            // Writer is gone (stop or error). Stop reading.
+                            return Ok(());
+                        }
                     }
                 }
+            }
+
+            // Group EOF: emit HBR/SBR/TSR summaries, then flush any partial
+            // batch. Channel FIFO preserves operation order for this fid.
+            record_tracker.append_summary_ops(&mut ops);
+            if !ops.is_empty() && thread_tx.send(DbMessage::Batch(ops)).is_err() {
+                return Ok(());
             }
             Ok(())
         });
         thread_handles.push(handle);
     }
 
-    // create some atomic var for data communication between threads
-    let global_stop = Arc::new(AtomicBool::new(false));
-    // only need to hold a number <= 10000, u16 should be enough
-    let total_progress = Arc::new(AtomicU16::new(0));
-
     let global_stop_copy = global_stop.clone();
     let total_progress_copy = total_progress.clone();
+    let progress_values_copy = progress_values.clone();
+    let fgroup_done_copy = fgroup_done.clone();
 
     if is_valid_progress_signal || is_valid_stop {
         // start another thread for updating stop signal
         // and sending progress back to python
         let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
+            let mut stop_cur_thread = false;
             loop {
-                let current_progress = total_progress_copy.load(Ordering::Relaxed);
-                // sleep for 100ms
-                thread::sleep(time::Duration::from_millis(100));
+                let done = fgroup_done_copy.load(Ordering::Relaxed);
+                let current_progress: u16 = if done || num_groups == 0 {
+                    10000
+                } else {
+                    (progress_values_copy
+                        .iter()
+                        .map(|p| p.load(Ordering::Relaxed) as u32)
+                        .sum::<u32>()
+                        / num_groups as u32) as u16
+                };
+                total_progress_copy.store(current_progress, Ordering::Relaxed);
                 // access python object inside a gil block
                 if let Err(py_e) = Python::attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
@@ -663,13 +774,12 @@ fn generate_database(
                             .call_method1(intern!(py, "emit"), (current_progress,))?;
                     }
                     if is_valid_stop {
-                        global_stop_copy.store(
-                            stop_flag
-                                .bind(py)
-                                .getattr(intern!(py, "stop"))?
-                                .extract::<bool>()?,
-                            Ordering::Relaxed,
-                        );
+                        let stop_from_py = stop_flag
+                            .bind(py)
+                            .getattr(intern!(py, "stop"))?
+                            .extract::<bool>()?;
+                        global_stop_copy.store(stop_from_py, Ordering::Relaxed);
+                        stop_cur_thread |= stop_from_py;
                     };
                     Ok(())
                 }) {
@@ -678,9 +788,12 @@ fn generate_database(
                     println!("{}", py_e);
                     break;
                 }
-                if current_progress == 10000 {
+                // exit when file group parsing is finished or the user stopped.
+                if done || stop_cur_thread {
                     break;
                 }
+                // sleep for 100ms
+                thread::sleep(time::Duration::from_millis(100));
             }
             Ok(())
         });
@@ -688,6 +801,14 @@ fn generate_database(
     }
 
     py.detach(|| -> Result<(), StdfHelperError> {
+        // use RAII to join threads
+        let _joiner = ThreadJoiner(thread_handles);
+        // use RAII to fill bar and stop gil thread
+        let _filler = ProgressBarFiller {
+            progress: total_progress.clone(),
+            done: fgroup_done.clone(),
+        };
+
         // initiate sqlite3 database
         let conn = match Connection::open(&dbpath) {
             Ok(conn) => conn,
@@ -702,56 +823,33 @@ fn generate_database(
             }
         }
 
-        let mut record_tracker = RecordTracker::new(test_id_type);
-        let mut progress_tracker = vec![0.0f32; num_groups];
-        let mut transaction_count_up = 0;
-        // process and write database in main thread
-        for (fid, sub_fid, progress_x100, raw_rec) in rx {
-            let rec_info = (
-                fid,
-                sub_fid,
-                raw_rec.byte_order,
-                raw_rec.offset,
-                raw_rec.raw_data.len(),
-                StdfRecord::from(raw_rec),
-            );
-            process_incoming_record(&mut db_ctx, &mut record_tracker, rec_info)?;
-
-            if is_valid_progress_signal {
-                // main thread will calculate the `total progress`
-                if let Some(v) = progress_tracker.get_mut(fid) {
-                    *v = progress_x100;
-                };
-                total_progress.store(
-                    (progress_tracker.iter().sum::<f32>() / num_groups as f32) as u16,
-                    Ordering::Relaxed,
-                );
-            }
-
-            if is_valid_stop && global_stop.load(Ordering::Relaxed) {
-                break;
-            }
-
-            // commit and begin a new transaction after fixed number of records
-            transaction_count_up += 1;
-            if transaction_count_up > 1_000_000 {
-                transaction_count_up = 0;
-                db_ctx.start_new_transaction()?;
+        let mut transaction_count_up = 0usize;
+        // writer only binds + steps prepared statements
+        for msg in rx {
+            match msg {
+                DbMessage::Batch(batch) => {
+                    let op_count = batch.len();
+                    for op in batch {
+                        op.apply(&mut db_ctx)?;
+                    }
+                    // commit and begin a new transaction after a fixed number
+                    // of operations
+                    transaction_count_up += op_count;
+                    if transaction_count_up > 1_000_000 {
+                        transaction_count_up = 0;
+                        db_ctx.start_new_transaction()?;
+                    }
+                }
+                DbMessage::WorkerError { msg } => {
+                    return Err(StdfHelperError { msg });
+                }
             }
         }
-        // write HBR/SBR/TSR into database
-        process_summary_data(&mut db_ctx, &mut record_tracker)?;
-        // write 10000 as the sign of complete...
-        total_progress.store(10000u16, Ordering::Relaxed);
 
-        // join threads
-        for handle in thread_handles {
-            handle.join().unwrap()?;
-        }
-        // finalize database
+        // finalize database (flushes the writer-side multi-row batches)
         db_ctx.finalize(build_db_index)?;
         if let Err((_, err)) = conn.close() {
-            return Err(StdfHelperError::from(err))?;
+            return Err(StdfHelperError::from(err));
         };
         Ok(())
     })?;
@@ -935,7 +1033,7 @@ fn stdf_to_xlsx(
                     s.set_name(rec_name)?;
                     // based on the record type, write the column header
                     for (col, field) in field_names.iter().enumerate() {
-                        s.write_string(0, col as u16, field, &bold_format)?;
+                        s.write_string_with_format(0, col as u16, *field, &bold_format)?;
                     }
                     s
                 }
@@ -995,8 +1093,15 @@ fn stdf_to_xlsx(
                 // rec type 180: Reserved
                 // rec type 181: Reserved
                 StdfRecord::ReservedRec(r) => serde_json::to_value(&r)?,
-                StdfRecord::InvalidRec(h) => {
-                    panic!("Invalid record found! {h:?}");
+                StdfRecord::UnknownRec(h) => {
+                    return Err(StdfHelperError {
+                        msg: format!(
+                            "Unknown record found:\ntyp: {}, sub: {}, len: {}",
+                            h.typ,
+                            h.sub,
+                            h.raw_data.len()
+                        ),
+                    });
                 }
             };
             write_json_to_sheet(json, field_names, sheet, row)?;
@@ -1021,7 +1126,7 @@ fn stdf_to_xlsx(
             }
         }
         // save xlsx to path
-        xlsx.save_to_path(std::path::Path::new(&xlsx_path))?;
+        xlsx.save(std::path::Path::new(&xlsx_path))?;
         Ok(())
     })?;
 
@@ -1041,12 +1146,10 @@ fn norm_cdf<'py>(
     let mut p = Array1::from_elem(data.len(), f64::NAN);
 
     if stddev != 0.0 && !stddev.is_nan() {
-        Zip::from(&data)
-            .and(&mut p)
-            .par_for_each(|d, prob| {
-                let d_norm = (*d - mean) / stddev;
-                *prob = statistic_functions::ndtr(d_norm)
-            });
+        Zip::from(&data).and(&mut p).par_for_each(|d, prob| {
+            let d_norm = (*d - mean) / stddev;
+            *prob = statistic_functions::ndtr(d_norm)
+        });
     }
     Ok(p.into_pyarray(py))
 }
@@ -1081,8 +1184,7 @@ fn empirical_cdf<'py>(
         // position of duplicates: [i, j-1]
         // rank begins at 1, and we are in max mode, so:
         let rank = (j - 1) as f64 + 1.0f64;
-        for k in i..j {
-            let orig_index = idx_sort[k];
+        for &orig_index in &idx_sort[i..j] {
             p[orig_index] = rank / (dsz as f64);
         }
         i = j;
@@ -1105,12 +1207,10 @@ fn norm_ppf<'py>(
     let mut q = Array1::from_elem(p.len(), init);
 
     if stddev != 0.0 && !stddev.is_nan() {
-        Zip::from(&p)
-            .and(&mut q)
-            .par_for_each(|prob, quantile| {
-                let q_norm = statistic_functions::ndtri(*prob);
-                *quantile = q_norm * stddev + mean
-            });
+        Zip::from(&p).and(&mut q).par_for_each(|prob, quantile| {
+            let q_norm = statistic_functions::ndtri(*prob);
+            *quantile = q_norm * stddev + mean
+        });
     }
     Ok(q.into_pyarray(py))
 }
