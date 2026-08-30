@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -640,7 +640,9 @@ class DatabaseFetcher:
         # If the length of `duts` is too long, we will iterate all duts instead
         # and pick duts of interet during the iteration
         dutsCount = len(duts)
-        if dutsCount > 128:
+        if dutsCount == 0:
+            return {}
+        elif dutsCount > 128:
             # select all
             dut_condition = " AND DUTIndex > 0"
         else:
