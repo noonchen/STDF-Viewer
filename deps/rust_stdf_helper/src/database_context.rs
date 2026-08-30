@@ -3,7 +3,7 @@
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: October 29th 2022
 // -----
-// Last Modified: Sun Aug 23 2026
+// Last Modified: Sun Aug 30 2026
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -110,7 +110,7 @@ static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         TestCount INTEGER,
                                                         TestTime INTEGER,
                                                         PartID TEXT,
-                                                        PART_TXT TEXT,
+                                                        PartText TEXT,
                                                         HBIN INTEGER,
                                                         SBIN INTEGER,
                                                         Flag INTEGER,
@@ -260,7 +260,7 @@ static INSERT_DUT: &str = "INSERT INTO
                                 (?,?,?,?);";
 
 static UPDATE_DUT: &str = "UPDATE Dut_Info SET 
-                                TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, PART_TXT=:PART_TXT,
+                                TestCount=:TestCount, TestTime=:TestTime, PartID=:PartID, PartText=:PartText,
                                 HBIN=:HBIN_NUM, SBIN=:SBIN_NUM, Flag=:Flag, 
                                 WaferIndex=:WaferIndex, XCOORD=:XCOORD, YCOORD=:YCOORD,
                                 Supersede=:Supersede

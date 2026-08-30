@@ -1716,6 +1716,7 @@ fn on_prr_view(
             num_test: prr_rec.num_test(),
             test_t: prr_rec.test_t(),
             part_id: prr_rec.part_id().to_owned(),
+            part_text: prr_rec.part_txt().to_owned(),
             hard_bin,
             soft_bin,
             part_flg,
