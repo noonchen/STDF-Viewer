@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Sun Aug 30 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -106,6 +106,8 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
+        # track widgets whose click signal has already been connected
+        self._connectedCbs = set()
         self.translatorUI = QTranslator(self)
         self.translatorCode = QTranslator(self)
         # init and connect signals
@@ -665,17 +667,27 @@ class MyWindow(QtWidgets.QMainWindow):
         
         
     def init_Head_SiteCheckbox(self):
-        # bind functions to all checkboxes
-        self.ui.All.clicked['bool'].connect(self.onSiteChecked)
+        # bind functions to all checkboxes, but only once per widget
+        if id(self.ui.All) not in self._connectedCbs:
+            self.ui.All.clicked['bool'].connect(self.onSiteChecked)
+            self._connectedCbs.add(id(self.ui.All))
 
         for cb in self.site_cb_dict.values():
-            cb.clicked['bool'].connect(self.onSiteChecked)
+            if id(cb) not in self._connectedCbs:
+                cb.clicked['bool'].connect(self.onSiteChecked)
+                self._connectedCbs.add(id(cb))
         for cb in self.head_cb_dict.values():
-            cb.clicked['bool'].connect(self.onSiteChecked)
+            if id(cb) not in self._connectedCbs:
+                cb.clicked['bool'].connect(self.onSiteChecked)
+                self._connectedCbs.add(id(cb))
             
-        # bind functions to check/uncheck all buttons
-        self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
-        self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+        # bind functions to check/uncheck all buttons, also only once
+        if id(self.ui.checkAll) not in self._connectedCbs:
+            self.ui.checkAll.clicked.connect(lambda: self.toggleSite(True))
+            self._connectedCbs.add(id(self.ui.checkAll))
+        if id(self.ui.cancelAll) not in self._connectedCbs:
+            self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
+            self._connectedCbs.add(id(self.ui.cancelAll))
         
         
     def updateModelContent(self, model, newList):
@@ -1294,7 +1306,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     col = site % 4
                     cb_layout = self.ui.gridLayout_site_select.itemAtPosition(row, col)
                     if cb_layout is not None:
-                        cb_layout.widget().deleteLater()
+                        cb = cb_layout.widget()
+                        self._connectedCbs.discard(id(cb))
+                        cb.deleteLater()
                         self.ui.gridLayout_site_select.removeItem(cb_layout)
                         
             for headnum in current_exist_head:
@@ -1304,7 +1318,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     col = headnum % 3
                     cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
                     if cb_layout_h is not None:
-                        cb_layout_h.widget().deleteLater()
+                        cb = cb_layout_h.widget()
+                        self._connectedCbs.discard(id(cb))
+                        cb.deleteLater()
                         self.ui.gridLayout_head_select.removeItem(cb_layout_h)
                                  
             # add & enable checkboxes for each sites and heads
