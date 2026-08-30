@@ -129,7 +129,7 @@ class GeneralConfig(BaseModel):
                 continue
             
             new_v[i_num] = symbol
-        return v
+        return new_v
     
     @field_serializer("file_symbols")
     def serialize_file_symbols(self, v: dict[int, str], _info):
