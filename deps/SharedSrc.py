@@ -218,7 +218,7 @@ def loadConfigFile():
         with open(sys.CONFIG_PATH, "rb") as f:
             data = tomllib.load(f)
             GlobalSetting = SettingParams.model_validate(data)
-    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError):
+    except (FileNotFoundError, TypeError, tomllib.TOMLDecodeError, ValueError):
         # any error occurs in config file reading, simply ignore
         pass
     
