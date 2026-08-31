@@ -1,15 +1,19 @@
 //
-// db_ops.rs
+// operations.rs
 //
-// Compact, owned database operations that can be computed in a worker thread
-// and applied by the single SQLite writer thread. The hot variants are plain
-// Copy structs (PTR/FTR) or carry only the strings that the database really
-// stores (MPR/Datalog). Large/cold operations are boxed so that the stride of
-// Vec<DbOp> stays close to the hot MPR variant instead of the largest cold
-// operation.
+// Compact, owned database operations for STDF DB generation.
+// For passing STDF record views information to DB gen thread.
+//
+// Author: noonchen - chennoon233@foxmail.com
+// Created Date: Tue Sep 01 2026
+// -----
+// Last Modified: Tue Sep 01 2026
+// Modified By: noonchen
+// -----
+// Copyright (c) 2022 noonchen
 //
 
-use crate::database_context::DataBaseCtx;
+use crate::database::context::DatabaseCtx;
 use crate::StdfHelperError;
 
 /// Test ID represents a unique identifier for a test item in a database.
@@ -213,7 +217,7 @@ pub enum ColdOp {
 
 impl DbOp {
     /// Apply one operation to the writer-owned database context.
-    pub fn apply(self, db_ctx: &mut DataBaseCtx) -> Result<(), StdfHelperError> {
+    pub fn apply(self, db_ctx: &mut DatabaseCtx) -> Result<(), StdfHelperError> {
         match self {
             DbOp::Ptr {
                 dut_index,
@@ -246,7 +250,7 @@ impl DbOp {
 }
 
 impl ColdOp {
-    pub fn apply(self, db_ctx: &mut DataBaseCtx) -> Result<(), StdfHelperError> {
+    pub fn apply(self, db_ctx: &mut DatabaseCtx) -> Result<(), StdfHelperError> {
         match self {
             ColdOp::UpdateFileList {
                 fid,

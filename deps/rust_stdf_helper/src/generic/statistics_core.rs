@@ -8,11 +8,12 @@
 #![allow(clippy::excessive_precision)]
 
 //
-// statistic_functions.rs
+// statistics_core.rs
+//
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: December 21st 2022
 // -----
-// Last Modified: Thu Sep 11 2025
+// Last Modified: Tue Sep 01 2026
 // Modified By: noonchen
 // -----
 // Copyright (c) 2022 noonchen
@@ -296,6 +297,7 @@ static Q2: [f64; 8] = [
 ];
 
 static EXP_MINUS_2: f64 = 0.13533528323661269189;
+
 /// DESCRIPTION:
 ///
 /// Returns the argument, x, for which the area under the standard
