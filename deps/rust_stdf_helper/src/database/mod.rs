@@ -13,5 +13,6 @@
 //
 
 pub mod context;
+pub mod fetcher;
 pub mod operations;
 pub mod schema;
