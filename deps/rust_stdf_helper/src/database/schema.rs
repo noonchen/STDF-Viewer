@@ -373,3 +373,96 @@ pub(crate) static COMMIT_AND_SET_LOCKING: &str = "COMMIT;
                                         PRAGMA locking_mode = NORMAL";
 
 pub(crate) static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
+
+/***********************/
+/*** Fetcher Queries ***/
+/***********************/
+
+pub(crate) static FETCH_SELECT_FILE_LIST: &str = "SELECT 
+        Fid, 
+        Filename 
+    FROM 
+        File_List 
+    ORDER BY 
+        Fid, SubFid";
+
+pub(crate) static FETCH_SELECT_MAX_DUT_INDEX: &str = "SELECT 
+        MAX(DUTIndex) 
+    FROM 
+        Dut_Info 
+    WHERE 
+        Fid=?";
+
+pub(crate) static FETCH_SELECT_DUT_HEAD_SITE: &str = "SELECT 
+        DUTIndex, 
+        HEAD_NUM, 
+        SITE_NUM 
+    FROM 
+        Dut_Info 
+    WHERE 
+        Fid=? AND Supersede=0";
+
+pub(crate) static FETCH_SELECT_SITE_LIST: &str = "SELECT 
+        DISTINCT SITE_NUM 
+    FROM 
+        Dut_Info";
+
+pub(crate) static FETCH_SELECT_HEAD_LIST: &str = "SELECT 
+        DISTINCT HEAD_NUM 
+    FROM 
+        Dut_Info";
+
+pub(crate) static FETCH_SELECT_TEST_INFO: &str = "SELECT 
+        TEST_ID, 
+        recHeader, 
+        TEST_NUM, 
+        TEST_NAME, 
+        RES_SCAL, 
+        LLimit, 
+        HLimit, 
+        Unit, 
+        OPT_FLAG, 
+        FailCount, 
+        RTN_ICNT, 
+        RSLT_PGM_CNT, 
+        LSpec, 
+        HSpec, 
+        VECT_NAM, 
+        SEQ_NAME 
+    FROM 
+        Test_Info 
+    WHERE 
+        Fid=? AND TEST_NUM=? AND TEST_NAME=?";
+
+pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT 
+        DUTIndex, 
+        RESULT, 
+        TEST_FLAG 
+    FROM 
+        PTR_Data 
+    WHERE 
+        TEST_ID=? 
+    ORDER BY 
+        DUTIndex";
+
+pub(crate) static FETCH_SELECT_FTR_DATA: &str = "SELECT 
+        DUTIndex, 
+        TEST_FLAG 
+    FROM 
+        FTR_Data 
+    WHERE 
+        TEST_ID=? 
+    ORDER BY 
+        DUTIndex";
+
+pub(crate) static FETCH_SELECT_MPR_DATA: &str = "SELECT 
+        DUTIndex, 
+        RTN_RSLT, 
+        RTN_STAT, 
+        TEST_FLAG 
+    FROM 
+        MPR_Data 
+    WHERE 
+        TEST_ID=? 
+    ORDER BY 
+        DUTIndex";

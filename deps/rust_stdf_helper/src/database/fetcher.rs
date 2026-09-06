@@ -1,6 +1,6 @@
 // fetcher.rs
 //
-// Pure Rust data fetcher with the cache design agreed for the Python reference.
+// Pure Rust data fetcher with typed STDF domain values and cached access.
 //
 // Author: noonchen - chennoon233@foxmail.com
 // Created Date: Tue Sep 01 2026
@@ -11,6 +11,12 @@
 // Copyright (c) 2026 noonchen
 //
 
+use crate::database::operations::TestId;
+use crate::database::schema::{
+    FETCH_SELECT_DUT_HEAD_SITE, FETCH_SELECT_FILE_LIST, FETCH_SELECT_FTR_DATA,
+    FETCH_SELECT_HEAD_LIST, FETCH_SELECT_MAX_DUT_INDEX, FETCH_SELECT_MPR_DATA,
+    FETCH_SELECT_PTR_DATA, FETCH_SELECT_SITE_LIST, FETCH_SELECT_TEST_INFO,
+};
 use crate::generic::error::StdfHelperError;
 use lru::LruCache;
 use ndarray::{Array1, Array2};
@@ -18,28 +24,33 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 
+pub type HeadNum = u8;
+pub type SiteNum = u8;
+pub type RecHeader = u8;
+pub type TestNum = u32;
+
 #[derive(Debug, Clone)]
 pub struct TestInfo {
-    pub test_id: i64,
-    pub rec_header: i64,
-    pub test_num: i64,
+    pub test_id: TestId,
+    pub rec_header: RecHeader,
+    pub test_num: TestNum,
     pub test_name: String,
-    pub res_scal: Option<i64>,
-    pub llimit: Option<f64>,
-    pub hlimit: Option<f64>,
+    pub res_scal: Option<i8>,
+    pub llimit: Option<f32>,
+    pub hlimit: Option<f32>,
     pub unit: Option<String>,
-    pub opt_flag: Option<i64>,
-    pub fail_count: Option<i64>,
-    pub rtn_icnt: Option<i64>,
-    pub rslt_pgm_cnt: Option<i64>,
-    pub lspec: Option<f64>,
-    pub hspec: Option<f64>,
+    pub opt_flag: Option<u8>,
+    pub fail_count: i32,
+    pub rtn_icnt: Option<u16>,
+    pub rslt_pgm_cnt: Option<u16>,
+    pub lspec: Option<f32>,
+    pub hspec: Option<f32>,
     pub vect_nam: Option<String>,
     pub seq_name: Option<String>,
 }
 
 pub struct TestDataCacheEntry {
-    pub rec_header: i64,
+    pub rec_header: RecHeader,
     pub data: Array2<f32>,
     pub flags: Array1<i16>,
     pub states: Option<Array2<u8>>,
@@ -47,7 +58,7 @@ pub struct TestDataCacheEntry {
 }
 
 pub struct FetchedTestData {
-    pub rec_header: i64,
+    pub rec_header: RecHeader,
     pub dut_list: Array1<u32>,
     pub data: Array2<f32>,
     pub flags: Array1<i16>,
@@ -58,9 +69,9 @@ pub struct DataFetcher {
     conn: Connection,
     file_paths: Vec<Vec<String>>,
     full_dut: HashMap<usize, Array1<u32>>,
-    head_site_idx: HashMap<(usize, i64, Option<i64>), Vec<usize>>,
-    test_info: HashMap<(usize, i64, String), TestInfo>,
-    test_data: LruCache<(i64, usize), TestDataCacheEntry>,
+    head_site_idx: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
+    test_info: HashMap<(usize, TestNum, String), TestInfo>,
+    test_data: LruCache<(TestId, usize), TestDataCacheEntry>,
 }
 
 impl DataFetcher {
@@ -79,7 +90,13 @@ impl DataFetcher {
         Ok(fetcher)
     }
 
-    pub fn close(&self) {}
+    pub fn close(&mut self) {
+        self.file_paths.clear();
+        self.full_dut.clear();
+        self.head_site_idx.clear();
+        self.test_info.clear();
+        self.test_data.clear();
+    }
 
     pub fn num_files(&self) -> usize {
         self.file_paths.len()
@@ -90,20 +107,18 @@ impl DataFetcher {
     }
 
     pub fn read_file_paths(&mut self) -> Result<(), StdfHelperError> {
-        let mut d: HashMap<i64, Vec<String>> = HashMap::new();
+        let mut d: HashMap<usize, Vec<String>> = HashMap::new();
         {
-            let mut stmt = self.conn.prepare(
-                "SELECT Fid, Filename FROM File_List ORDER BY Fid, SubFid",
-            )?;
+            let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FILE_LIST)?;
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                Ok((row.get::<_, i64>(0)? as usize, row.get::<_, String>(1)?))
             })?;
             for row in rows {
                 let (fid, path) = row?;
                 d.entry(fid).or_default().push(path);
             }
         }
-        let mut keys: Vec<i64> = d.keys().copied().collect();
+        let mut keys: Vec<usize> = d.keys().copied().collect();
         keys.sort_unstable();
         let mut paths = Vec::new();
         for fid in keys {
@@ -115,31 +130,26 @@ impl DataFetcher {
 
     fn build_file_caches(&mut self) -> Result<(), StdfHelperError> {
         for fid in 0..self.num_files() {
-            let n: i64 = self.conn.query_row(
-                "SELECT MAX(DUTIndex) FROM Dut_Info WHERE Fid=?",
-                [fid as i64],
-                |row| row.get(0),
-            )?;
+            let n: i64 = self
+                .conn
+                .query_row(FETCH_SELECT_MAX_DUT_INDEX, [fid as i64], |row| row.get(0))?;
             let n = n.max(0) as usize;
-            self.full_dut
-                .insert(fid, Array1::from_iter(1..=n as u32));
+            self.full_dut.insert(fid, Array1::from_iter(1..=n as u32));
 
-            let mut site_lists: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-            let mut head_lists: HashMap<i64, Vec<usize>> = HashMap::new();
+            let mut site_lists: HashMap<(HeadNum, SiteNum), Vec<usize>> = HashMap::new();
+            let mut head_lists: HashMap<HeadNum, Vec<usize>> = HashMap::new();
             {
-                let mut stmt = self.conn.prepare(
-                    "SELECT DUTIndex, HEAD_NUM, SITE_NUM FROM Dut_Info WHERE Fid=? AND Supersede=0",
-                )?;
+                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DUT_HEAD_SITE)?;
                 let rows = stmt.query_map([fid as i64], |row| {
                     Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(0)? as u32,
+                        row.get::<_, i64>(1)? as u8,
+                        row.get::<_, i64>(2)? as u8,
                     ))
                 })?;
                 for row in rows {
                     let (dut_index, head, site) = row?;
-                    let idx = dut_index as usize - 1;
+                    let idx = (dut_index as usize) - 1;
                     site_lists.entry((head, site)).or_default().push(idx);
                     head_lists.entry(head).or_default().push(idx);
                 }
@@ -156,29 +166,25 @@ impl DataFetcher {
         Ok(())
     }
 
-    pub fn get_site_list(&self) -> Result<Vec<i64>, StdfHelperError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT DISTINCT SITE_NUM FROM Dut_Info")?;
+    pub fn get_site_list(&self) -> Result<Vec<SiteNum>, StdfHelperError> {
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_SITE_LIST)?;
         let sites = stmt
-            .query_map([], |row| row.get::<_, i64>(0))?
+            .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(sites)
     }
 
-    pub fn get_head_list(&self) -> Result<Vec<i64>, StdfHelperError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT DISTINCT HEAD_NUM FROM Dut_Info")?;
+    pub fn get_head_list(&self) -> Result<Vec<HeadNum>, StdfHelperError> {
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_HEAD_LIST)?;
         let heads = stmt
-            .query_map([], |row| row.get::<_, i64>(0))?
+            .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(heads)
     }
 
     pub fn get_test_info(
         &mut self,
-        test_tup: (i64, &str),
+        test_tup: (TestNum, &str),
         file_id: usize,
     ) -> Result<Option<TestInfo>, StdfHelperError> {
         let key = (file_id, test_tup.0, test_tup.1.to_string());
@@ -186,8 +192,7 @@ impl DataFetcher {
             return Ok(Some(info.clone()));
         }
         let info = self.conn.query_row(
-            "SELECT TEST_ID, recHeader, TEST_NUM, TEST_NAME, RES_SCAL, LLimit, HLimit, Unit, OPT_FLAG, FailCount, RTN_ICNT, RSLT_PGM_CNT, LSpec, HSpec, VECT_NAM, SEQ_NAME \
-             FROM Test_Info WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?",
+            FETCH_SELECT_TEST_INFO,
             rusqlite::params![file_id as i64, test_tup.0, test_tup.1],
             |row| {
                 Ok(TestInfo {
@@ -222,8 +227,8 @@ impl DataFetcher {
 
     fn ensure_test_data(
         &mut self,
-        test_id: i64,
-        rec_header: i64,
+        test_id: TestId,
+        rec_header: RecHeader,
         file_id: usize,
     ) -> Result<TestDataCacheEntry, StdfHelperError> {
         let key = (test_id, file_id);
@@ -238,14 +243,12 @@ impl DataFetcher {
         let entry = if rec_header == 10 {
             let mut data = Array2::from_elem((n, 1), f32::NAN);
             {
-                let mut stmt = self.conn.prepare(
-                    "SELECT DUTIndex, RESULT, TEST_FLAG FROM PTR_Data WHERE TEST_ID=? ORDER BY DUTIndex",
-                )?;
+                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PTR_DATA)?;
                 let rows = stmt.query_map([test_id], |row| {
                     Ok((
-                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(0)? as u32,
                         row.get::<_, f32>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(2)? as u8,
                     ))
                 })?;
                 for row in rows {
@@ -266,13 +269,11 @@ impl DataFetcher {
                 valid_test_idx: valid,
             }
         } else if rec_header == 20 {
-            let mut data = Array2::from_elem((n, 0), 0.0f32);
+            let data = Array2::from_elem((n, 0), 0.0f32);
             {
-                let mut stmt = self.conn.prepare(
-                    "SELECT DUTIndex, TEST_FLAG FROM FTR_Data WHERE TEST_ID=? ORDER BY DUTIndex",
-                )?;
+                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FTR_DATA)?;
                 let rows = stmt.query_map([test_id], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                    Ok((row.get::<_, i64>(0)? as u32, row.get::<_, i64>(1)? as u8))
                 })?;
                 for row in rows {
                     let (dut_index, flag) = row?;
@@ -291,16 +292,14 @@ impl DataFetcher {
                 valid_test_idx: valid,
             }
         } else if rec_header == 15 {
-            let rows_vec: Vec<(i64, String, String, i64)> = {
-                let mut stmt = self.conn.prepare(
-                    "SELECT DUTIndex, RTN_RSLT, RTN_STAT, TEST_FLAG FROM MPR_Data WHERE TEST_ID=? ORDER BY DUTIndex",
-                )?;
+            let rows_vec: Vec<(u32, String, String, u8)> = {
+                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
                 let rows = stmt.query_map([test_id], |row| {
                     Ok((
-                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(0)? as u32,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(3)? as u8,
                     ))
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()?
@@ -322,7 +321,7 @@ impl DataFetcher {
                 let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
                 let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
                 for (dut_index, rslt_hex, stat_hex, flag) in rows_vec {
-                    let pos = (dut_index - 1) as usize;
+                    let pos = dut_index as usize - 1;
                     if pos < n {
                         let result = hex_to_f32s(&rslt_hex);
                         let stat = hex_to_u8s(&stat_hex);
@@ -360,9 +359,9 @@ impl DataFetcher {
 
     pub fn get_test_data_from_head_site(
         &mut self,
-        test_tup: (i64, &str),
-        heads: &[i64],
-        sites: &[i64],
+        test_tup: (TestNum, &str),
+        heads: &[HeadNum],
+        sites: &[Option<SiteNum>],
         file_id: usize,
     ) -> Result<Option<FetchedTestData>, StdfHelperError> {
         let info = match self.get_test_info(test_tup, file_id)? {
@@ -371,17 +370,17 @@ impl DataFetcher {
         };
 
         let mut selected: Vec<usize> = Vec::new();
-        if sites.contains(&-1) {
-            for &head in heads {
+        for &head in heads {
+            if sites.contains(&None) {
                 if let Some(list) = self.head_site_idx.get(&(file_id, head, None)) {
                     selected.extend_from_slice(list);
                 }
-            }
-        } else {
-            for &head in heads {
+            } else {
                 for &site in sites {
-                    if let Some(list) = self.head_site_idx.get(&(file_id, head, Some(site))) {
-                        selected.extend_from_slice(list);
+                    if let Some(site) = site {
+                        if let Some(list) = self.head_site_idx.get(&(file_id, head, Some(site))) {
+                            selected.extend_from_slice(list);
+                        }
                     }
                 }
             }
@@ -400,8 +399,8 @@ impl DataFetcher {
 
     pub fn get_test_data_from_dut_index(
         &mut self,
-        test_tup: (i64, &str),
-        duts: &[i64],
+        test_tup: (TestNum, &str),
+        duts: &[u64],
         file_id: usize,
     ) -> Result<Option<FetchedTestData>, StdfHelperError> {
         let info = match self.get_test_info(test_tup, file_id)? {
@@ -418,7 +417,7 @@ impl DataFetcher {
         let idx: Vec<usize> = sorted_duts
             .iter()
             .filter_map(|&dut| {
-                let pos = dut - 1;
+                let pos = dut as i128 - 1;
                 if pos >= 0 && (pos as usize) < n {
                     Some(pos as usize)
                 } else {
@@ -521,10 +520,7 @@ fn hex_bytes(hex: &str) -> Vec<u8> {
     let chars: Vec<char> = hex.chars().collect();
     let mut i = 0;
     while i + 1 < chars.len() {
-        if let (Some(hi), Some(lo)) = (
-            chars[i].to_digit(16),
-            chars[i + 1].to_digit(16),
-        ) {
+        if let (Some(hi), Some(lo)) = (chars[i].to_digit(16), chars[i + 1].to_digit(16)) {
             bytes.push(((hi << 4) | lo) as u8);
         }
         i += 2;
