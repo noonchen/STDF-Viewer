@@ -13,6 +13,7 @@
 //
 
 pub mod analyze_stdf;
+pub mod fetcher;
 pub mod generate_database;
 pub mod get_icon_src;
 pub mod read_mir;
@@ -39,6 +40,7 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(statistics::norm_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::empirical_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_ppf, module)?)?;
+    module.add_class::<fetcher::PyDataFetcher>()?;
 
     Ok(())
 }

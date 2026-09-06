@@ -27,3 +27,4 @@ serde_json = "1.0.151"
 flate2 = { version = "1.1.9"}
 rust_xlsxwriter = "0.84.1"
 crossbeam-channel = "0.5.16"
+lru = "0.18.4"
