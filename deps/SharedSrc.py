@@ -23,7 +23,7 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pydantic import BaseModel, Field, field_validator, field_serializer
-from rust_stdf_helper import get_icon_src
+from rust_stdf_helper import TestSubCode, get_icon_src
 
 
 class TrendPlotConfig(BaseModel):
@@ -363,10 +363,11 @@ class tab(IntEnum):
     
 
 class REC(IntEnum):
-    '''Constants of STDF Test Records: sub'''
-    PTR = 10
-    FTR = 20
-    MPR = 15
+    '''Constants of STDF Test Records, single-sourced from Rust
+    (rust_stdf_helper.TestSubCode, i.e. the Test_Info SUB_CODE column).'''
+    PTR = int(TestSubCode.PTR)
+    FTR = int(TestSubCode.FTR)
+    MPR = int(TestSubCode.MPR)
     
 
 record_name_dict = {

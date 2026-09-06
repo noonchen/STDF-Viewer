@@ -239,7 +239,7 @@ class DataInterface:
         
         test_num, pmr, test_name = testTuple
         outData.update(testInfo)
-        recHeader = testInfo["recHeader"]
+        recHeader = testInfo["SUB_CODE"]
         # store original for testID lookup
         outData["TEST_NAME_ORIG"] = test_name
         outData["dutList"] = testData["dutList"]
@@ -355,7 +355,7 @@ class DataInterface:
             return {}
         # add (head, site) list to testInfo for MPR
         # it will be used for indexing channel name dict
-        if testInfo["recHeader"] == REC.MPR:
+        if testInfo["SUB_CODE"] == REC.MPR:
             testInfo["HeadSite"] = set(itertools.product(selectHeads, 
                                                          [-1] if -1 in selectSites else selectSites))
         testData = self.DatabaseFetcher.getTestDataFromHeadSite(testID, 
@@ -387,7 +387,7 @@ class DataInterface:
         # but channel name is only displayed in statistic table
         # this function is used only in `getDutSummaryWithTestDataCore`
         # we can simply skip this logic
-        if testInfo["recHeader"] == REC.MPR:
+        if testInfo["SUB_CODE"] == REC.MPR:
             testInfo["HeadSite"] = set()
         testData = self.DatabaseFetcher.getTestDataFromDutIndex(testID, 
                                                                 selectedDutIndex,
@@ -591,12 +591,12 @@ class DataInterface:
                         floatFormat % testDataDict["Max"]]
                 # match the elements of hHeader
                 if containsFTR:
-                    row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["recHeader"] == REC.FTR else [""]
+                    row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["SUB_CODE"] == REC.FTR else [""]
                 if containsMPR:
                     row[1:1] = [str(pmr), 
                                 testDataDict["LOG_NAM"], 
                                 testDataDict["PHY_NAM"], 
-                                testDataDict["CHAN_NAM"]] if testDataDict["recHeader"] == REC.MPR else ["", "", "", ""]
+                                testDataDict["CHAN_NAM"]] if testDataDict["SUB_CODE"] == REC.MPR else ["", "", "", ""]
                     
                 rowList.append(row)
             else:
@@ -770,9 +770,9 @@ class DataInterface:
             nestSiteData["dataList"] = dataOrig[validMask]
             nestSiteData["dutList"] = test_site_fid.pop("dutList")[validMask]
             nestSiteData["flagList"] = test_site_fid.pop("flagList")[validMask]
-            if test_site_fid["recHeader"] == REC.MPR:
+            if test_site_fid["SUB_CODE"] == REC.MPR:
                 nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
-            elif test_site_fid["recHeader"] == REC.PTR:
+            elif test_site_fid["SUB_CODE"] == REC.PTR:
                 # dynamic limit
                 dyL, dyH = self.DatabaseFetcher.getDynamicLimits(test_site_fid["TEST_NUM"],
                                                                  test_site_fid["TEST_NAME"],
