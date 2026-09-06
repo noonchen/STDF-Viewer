@@ -53,6 +53,41 @@ impl<'py> IntoPyObject<'py> for TestIDType {
     }
 }
 
+/// Single source of truth for the `SUB_CODE` column of `Test_Info`: which of
+/// the three STDF test-result records (PTR / MPR / FTR) a test row represents.
+///
+/// The discriminants are the legacy `recHeader` values stored in the database
+/// and are kept stable for backwards compatibility. The values are exported to
+/// Python (module `rust_stdf_helper.TestSubCode`, members `PTR`/`MPR`/`FTR`),
+/// where the UI-facing `REC` IntEnum is built from them, so the raw 10/15/20
+/// numbers only ever appear here.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestSubCode {
+    Ptr = 10,
+    Mpr = 15,
+    Ftr = 20,
+    /// Never generated; placeholder for unknown/legacy values read from a DB.
+    Other = 0,
+}
+
+impl TestSubCode {
+    /// Parse the value stored in the `SUB_CODE` column.
+    pub fn from_code(code: u8) -> Self {
+        match code {
+            10 => Self::Ptr,
+            15 => Self::Mpr,
+            20 => Self::Ftr,
+            _ => Self::Other,
+        }
+    }
+
+    /// Numeric value stored in the `SUB_CODE` column.
+    pub fn code(self) -> u8 {
+        self as u8
+    }
+}
+
 pub struct RecordTracker {
     // determines how the unique test id is constructed
     id_type: TestIDType,

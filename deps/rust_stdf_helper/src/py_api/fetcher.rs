@@ -12,7 +12,8 @@
 // Copyright (c) 2026 noonchen
 //
 
-use crate::database::fetcher::DataFetcher;
+use crate::database::fetcher::{DataFetcher, FetchedTestData, TestSubCode};
+use numpy::ndarray::Array1;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -25,8 +26,14 @@ pub struct PyDataFetcher {
 #[pymethods]
 impl PyDataFetcher {
     #[new]
-    pub fn new(path: &str) -> PyResult<Self> {
-        let inner = DataFetcher::open(path)?;
+    #[pyo3(signature = (path, cache_budget_mb=None))]
+    pub fn new(path: &str, cache_budget_mb: Option<usize>) -> PyResult<Self> {
+        // cache_budget_mb: Tier-2 test-data LRU byte budget in MiB
+        // (plan §3.3/§7). Defaults to 128 MiB when not given.
+        let inner = match cache_budget_mb {
+            Some(mb) => DataFetcher::open_with_budget(path, mb.saturating_mul(1024 * 1024))?,
+            None => DataFetcher::open(path)?,
+        };
         Ok(Self { inner })
     }
 
@@ -67,13 +74,15 @@ impl PyDataFetcher {
         test_name: &str,
         file_id: usize,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let info = self.inner.get_test_info((test_num, test_name), file_id)?;
+        // Quick single-row lookup; still run it GIL-free so the SQLite hit
+        // never stalls the UI thread.
+        let info = py.detach(|| self.inner.get_test_info((test_num, test_name), file_id))?;
         let dict = PyDict::new(py);
         if let Some(info) = info {
             dict.set_item("Fid", file_id as i64)?;
             dict.set_item("TEST_ID", info.test_id)?;
             dict.set_item("TEST_NUM", info.test_num)?;
-            dict.set_item("recHeader", info.rec_header)?;
+            dict.set_item("SUB_CODE", info.sub_code.code())?;
             dict.set_item("TEST_NAME", &info.test_name)?;
             dict.set_item("RES_SCAL", info.res_scal)?;
             dict.set_item("LLimit", info.llimit.map(f64::from).unwrap_or(f64::NAN))?;
@@ -107,34 +116,19 @@ impl PyDataFetcher {
             .iter()
             .map(|&s| if s < 0 { None } else { Some(s as u8) })
             .collect();
-        let fetched = self.inner.get_test_data_from_head_site(
-            (test_num, test_name),
-            &heads_u8,
-            &sites_opt,
-            file_id,
-        )?;
+        // All heavy lifting (first-time SQLite scan + hex decode, row gather)
+        // runs with the GIL released; Python objects are only touched after.
+        let fetched = py.detach(|| {
+            self.inner.get_test_data_from_head_site(
+                (test_num, test_name),
+                &heads_u8,
+                &sites_opt,
+                file_id,
+            )
+        })?;
         let dict = PyDict::new(py);
-        match fetched {
-            Some(data) => {
-                dict.set_item("dutList", data.dut_list.into_pyarray(py))?;
-                if data.rec_header == 10 {
-                    let flat = numpy_1d_from_2d_single_col(&data.data);
-                    dict.set_item("dataList", flat.into_pyarray(py))?;
-                    let flags: numpy::ndarray::Array1<u8> = data.flags.mapv(|v| v as u8);
-                    dict.set_item("flagList", flags.into_pyarray(py))?;
-                } else if data.rec_header == 15 {
-                    dict.set_item("dataList", data.data.t().to_owned().into_pyarray(py))?;
-                    if let Some(states) = data.states {
-                        dict.set_item("stateList", states.t().to_owned().into_pyarray(py))?;
-                    }
-                    let flags: numpy::ndarray::Array1<u8> = data.flags.mapv(|v| v as u8);
-                    dict.set_item("flagList", flags.into_pyarray(py))?;
-                } else {
-                    let flags: numpy::ndarray::Array1<u8> = data.flags.mapv(|v| v as u8);
-                    dict.set_item("flagList", flags.into_pyarray(py))?;
-                }
-            }
-            None => {}
+        if let Some(data) = fetched {
+            fill_test_data_dict(&dict, data, py)?;
         }
         Ok(Some(dict))
     }
@@ -148,31 +142,68 @@ impl PyDataFetcher {
         file_id: usize,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
-        let fetched =
+        let fetched = py.detach(|| {
             self.inner
-                .get_test_data_from_dut_index((test_num, test_name), &duts_u64, file_id)?;
+                .get_test_data_from_dut_index((test_num, test_name), &duts_u64, file_id)
+        })?;
         let dict = PyDict::new(py);
-        match fetched {
-            Some(data) => {
-                dict.set_item("dutList", data.dut_list.into_pyarray(py))?;
-                if data.rec_header == 10 {
-                    let flat = numpy_1d_from_2d_single_col(&data.data);
-                    dict.set_item("dataList", flat.into_pyarray(py))?;
-                    dict.set_item("flagList", data.flags.into_pyarray(py))?;
-                } else if data.rec_header == 15 {
-                    dict.set_item("dataList", data.data.t().to_owned().into_pyarray(py))?;
-                    if let Some(states) = data.states {
-                        dict.set_item("stateList", states.t().to_owned().into_pyarray(py))?;
-                    }
-                    dict.set_item("flagList", data.flags.into_pyarray(py))?;
-                } else {
-                    dict.set_item("flagList", data.flags.into_pyarray(py))?;
-                }
-            }
-            None => {}
+        if let Some(data) = fetched {
+            fill_test_data_dict(&dict, data, py)?;
         }
         Ok(Some(dict))
     }
+}
+
+/// Shape the fetched arrays exactly like the Python reference fetcher:
+///
+/// - PTR (`TestSubCode::Ptr`): `dataList` is a flat 1-D f32 array.
+/// - MPR (`TestSubCode::Mpr`): `dataList` / `stateList` are 2-D, transposed to
+///   (rslt_cnt × dut) like `np.array(rows).T`. When there are no result
+///   columns or no selected rows, Python produces plain empty 1-D arrays
+///   (`np.array([])`, float64), so we mirror that instead of `(0, k)` shapes.
+/// - FTR (everything else): only `flagList`.
+///
+/// `flagList` is always emitted as int16 (the DUT-index path needs the -1
+/// sentinel; the head/site path's values are never negative and simply use the
+/// same dtype for both paths).
+fn fill_test_data_dict<'py>(
+    dict: &Bound<'py, PyDict>,
+    fetched: FetchedTestData,
+    py: Python<'py>,
+) -> PyResult<()> {
+    let FetchedTestData {
+        sub_code,
+        dut_list,
+        data,
+        flags,
+        states,
+    } = fetched;
+    dict.set_item("dutList", dut_list.into_pyarray(py))?;
+    match sub_code {
+        TestSubCode::Ptr => {
+            let flat = numpy_1d_from_2d_single_col(&data);
+            dict.set_item("dataList", flat.into_pyarray(py))?;
+        }
+        TestSubCode::Mpr => {
+            if data.nrows() == 0 || data.ncols() == 0 {
+                // Match Python's `np.array([])` for an MPR result with no rows /
+                // no result columns: empty 1-D float64 arrays.
+                let empty = Array1::<f64>::from_elem(0, f64::NAN);
+                dict.set_item("dataList", empty.into_pyarray(py))?;
+                let empty_state = Array1::<f64>::from_elem(0, f64::NAN);
+                dict.set_item("stateList", empty_state.into_pyarray(py))?;
+            } else {
+                dict.set_item("dataList", data.t().to_owned().into_pyarray(py))?;
+                if let Some(states) = states {
+                    dict.set_item("stateList", states.t().to_owned().into_pyarray(py))?;
+                }
+            }
+        }
+        // FTR and any unknown/legacy code: no dataList / stateList keys.
+        TestSubCode::Ftr | TestSubCode::Other => {}
+    }
+    dict.set_item("flagList", flags.into_pyarray(py))?;
+    Ok(())
 }
 
 fn numpy_1d_from_2d_single_col(data: &numpy::ndarray::Array2<f32>) -> numpy::ndarray::Array1<f32> {

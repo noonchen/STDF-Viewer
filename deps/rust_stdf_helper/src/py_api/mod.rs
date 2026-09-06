@@ -20,7 +20,7 @@ pub mod read_mir;
 pub mod statistics;
 pub mod stdf_to_xlsx;
 
-use crate::stdf::record_tracker::TestIDType;
+use crate::stdf::record_tracker::{TestIDType, TestSubCode};
 use pyo3::prelude::*;
 
 pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -28,7 +28,15 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     test_id_type.add("TestNumberAndName", TestIDType::TestNumberAndName)?;
     test_id_type.add("TestNumberOnly", TestIDType::TestNumberOnly)?;
 
+    // Single source of truth for the Test_Info SUB_CODE values; the Python
+    // side builds its `REC` IntEnum from these (see SharedSrc.py).
+    let sub_code = PyModule::new(py, "TestSubCode")?;
+    sub_code.add("PTR", TestSubCode::Ptr.code())?;
+    sub_code.add("MPR", TestSubCode::Mpr.code())?;
+    sub_code.add("FTR", TestSubCode::Ftr.code())?;
+
     module.add_submodule(&test_id_type)?;
+    module.add_submodule(&sub_code)?;
     module.add_function(wrap_pyfunction!(analyze_stdf::analyze_stdf, module)?)?;
     module.add_function(wrap_pyfunction!(
         generate_database::generate_database,

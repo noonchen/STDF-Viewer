@@ -26,13 +26,17 @@ use std::num::NonZeroUsize;
 
 pub type HeadNum = u8;
 pub type SiteNum = u8;
-pub type RecHeader = u8;
 pub type TestNum = u32;
+
+/// Single source of truth for the `SUB_CODE` column values (PTR/MPR/FTR),
+/// defined with the STDF tracker and re-exported here so the database and
+/// PyO3 layers never spell out the raw 10/15/20 codes.
+pub use crate::stdf::record_tracker::TestSubCode;
 
 #[derive(Debug, Clone)]
 pub struct TestInfo {
     pub test_id: TestId,
-    pub rec_header: RecHeader,
+    pub sub_code: TestSubCode,
     pub test_num: TestNum,
     pub test_name: String,
     pub res_scal: Option<i8>,
@@ -50,7 +54,7 @@ pub struct TestInfo {
 }
 
 pub struct TestDataCacheEntry {
-    pub rec_header: RecHeader,
+    pub sub_code: TestSubCode,
     pub data: Array2<f32>,
     pub flags: Array1<i16>,
     pub states: Option<Array2<u8>>,
@@ -58,11 +62,82 @@ pub struct TestDataCacheEntry {
 }
 
 pub struct FetchedTestData {
-    pub rec_header: RecHeader,
+    pub sub_code: TestSubCode,
     pub dut_list: Array1<u32>,
     pub data: Array2<f32>,
     pub flags: Array1<i16>,
     pub states: Option<Array2<u8>>,
+}
+
+/// Default byte budget for the Tier-2 test-data LRU (see plan §3.3/§7).
+const DEFAULT_TEST_CACHE_BUDGET_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
+
+/// Rough in-memory footprint of one cached test-data entry, in bytes.
+/// Mirrors the plan §7 estimate: data f32 ×1, flags i16 ×2 (plan allows i16 or u8),
+/// states u8 ×1 (MPR), valid_test_idx usize ×8, plus a small constant overhead.
+fn estimate_entry_bytes(entry: &TestDataCacheEntry) -> usize {
+    const ENTRY_OVERHEAD: usize = 64;
+    entry.data.len() * 4
+        + entry.flags.len() * 2
+        + entry.states.as_ref().map_or(0, |s| s.len() * 1)
+        + entry.valid_test_idx.len() * 8
+        + ENTRY_OVERHEAD
+}
+
+/// Tier-2 test-data cache: LRU eviction ordered by recency but bounded by a
+/// byte budget instead of an entry count (plan §3.3 "memory-bounded LRU").
+/// Entries are stored per `(test_id, fid)` and aligned to the shared full-DUT
+/// array, so MPR entries cost `rslt_cnt ×` more than PTR ones — a byte budget
+/// is required, an entry count is not sufficient.
+struct TestDataLru {
+    cache: LruCache<(TestId, usize), TestDataCacheEntry>,
+    budget_bytes: usize,
+    used_bytes: usize,
+}
+
+impl TestDataLru {
+    fn new(budget_bytes: usize) -> Self {
+        // The byte budget is the binding constraint; the count capacity only
+        // guards hashbrown bookkeeping. Every resident entry costs at least
+        // ENTRY_OVERHEAD (64) bytes, so `budget_bytes / 64` is a safe upper
+        // bound on the number of resident entries — a larger count capacity
+        // (e.g. usize::MAX) overflows hashbrown's capacity arithmetic.
+        // Clamped to keep the hash table allocation sane for huge budgets.
+        let count_capacity = (budget_bytes / 64).clamp(1, 1 << 30);
+        Self {
+            cache: LruCache::new(NonZeroUsize::new(count_capacity).expect("capacity >= 1")),
+            budget_bytes,
+            used_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, key: &(TestId, usize)) -> Option<&TestDataCacheEntry> {
+        self.cache.get(key)
+    }
+
+    /// Insert an entry and evict least-recently-used entries until the byte
+    /// budget is satisfied again. Entries larger than the whole budget are not
+    /// cached (they would evict everything and immediately re-blow the budget);
+    /// the caller still returns the freshly computed data to Python.
+    fn insert(&mut self, key: (TestId, usize), entry: TestDataCacheEntry) {
+        let bytes = estimate_entry_bytes(&entry);
+        if bytes > self.budget_bytes {
+            return;
+        }
+        self.used_bytes += bytes;
+        self.cache.put(key, entry);
+        while self.used_bytes > self.budget_bytes {
+            match self.cache.pop_lru() {
+                Some((_, evicted)) => self.used_bytes -= estimate_entry_bytes(&evicted),
+                None => break,
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.cache.clear();
+        self.used_bytes = 0;
+    }
 }
 
 pub struct DataFetcher {
@@ -71,11 +146,16 @@ pub struct DataFetcher {
     full_dut: HashMap<usize, Array1<u32>>,
     head_site_idx: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
     test_info: HashMap<(usize, TestNum, String), TestInfo>,
-    test_data: LruCache<(TestId, usize), TestDataCacheEntry>,
+    test_data: TestDataLru,
 }
 
 impl DataFetcher {
     pub fn open(path: &str) -> Result<Self, StdfHelperError> {
+        Self::open_with_budget(path, DEFAULT_TEST_CACHE_BUDGET_BYTES)
+    }
+
+    /// Open a database with a custom Tier-2 cache byte budget.
+    pub fn open_with_budget(path: &str, budget_bytes: usize) -> Result<Self, StdfHelperError> {
         let conn = Connection::open(path)?;
         let mut fetcher = Self {
             conn,
@@ -83,7 +163,7 @@ impl DataFetcher {
             full_dut: HashMap::new(),
             head_site_idx: HashMap::new(),
             test_info: HashMap::new(),
-            test_data: LruCache::new(NonZeroUsize::new(128).unwrap()),
+            test_data: TestDataLru::new(budget_bytes),
         };
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
@@ -197,7 +277,7 @@ impl DataFetcher {
             |row| {
                 Ok(TestInfo {
                     test_id: row.get(0)?,
-                    rec_header: row.get(1)?,
+                    sub_code: TestSubCode::from_code(row.get(1)?),
                     test_num: row.get(2)?,
                     test_name: row.get(3)?,
                     res_scal: row.get(4)?,
@@ -225,136 +305,156 @@ impl DataFetcher {
         }
     }
 
+    /// Make sure the full-length cached arrays for `(test_id, file_id)` exist.
+    /// On a cache hit this only touches the LRU recency order — it does NOT
+    /// clone the entry (plan §3.5/§3.6: gather with `select` on cached arrays;
+    /// only the final result is an owned copy).
+    ///
+    /// Returns:
+    /// - `Ok(None)` — the entry is now in the byte-budget LRU; callers read it
+    ///   back with `self.test_data.get(&key)`.
+    /// - `Ok(Some(entry))` — the entry is bigger than the whole budget and is
+    ///   therefore not cached; callers must gather from this owned entry.
     fn ensure_test_data(
         &mut self,
         test_id: TestId,
-        rec_header: RecHeader,
+        sub_code: TestSubCode,
         file_id: usize,
-    ) -> Result<TestDataCacheEntry, StdfHelperError> {
+    ) -> Result<Option<TestDataCacheEntry>, StdfHelperError> {
         let key = (test_id, file_id);
-        if let Some(entry) = self.test_data.get(&key) {
-            return Ok(clone_entry(entry));
+        if self.test_data.get(&key).is_some() {
+            return Ok(None);
         }
 
         let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
         let mut flags = Array1::from_elem(n, -1i16);
         let mut valid = Vec::new();
 
-        let entry = if rec_header == 10 {
-            let mut data = Array2::from_elem((n, 1), f32::NAN);
-            {
-                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PTR_DATA)?;
-                let rows = stmt.query_map([test_id], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)? as u32,
-                        row.get::<_, f32>(1)?,
-                        row.get::<_, i64>(2)? as u8,
-                    ))
-                })?;
-                for row in rows {
-                    let (dut_index, result, flag) = row?;
-                    let pos = dut_index as usize - 1;
-                    if pos < n {
-                        data[[pos, 0]] = result;
-                        flags[pos] = flag as i16;
-                        valid.push(pos);
-                    }
-                }
-            }
-            TestDataCacheEntry {
-                rec_header,
-                data,
-                flags,
-                states: None,
-                valid_test_idx: valid,
-            }
-        } else if rec_header == 20 {
-            let data = Array2::from_elem((n, 0), 0.0f32);
-            {
-                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FTR_DATA)?;
-                let rows = stmt.query_map([test_id], |row| {
-                    Ok((row.get::<_, i64>(0)? as u32, row.get::<_, i64>(1)? as u8))
-                })?;
-                for row in rows {
-                    let (dut_index, flag) = row?;
-                    let pos = dut_index as usize - 1;
-                    if pos < n {
-                        flags[pos] = flag as i16;
-                        valid.push(pos);
-                    }
-                }
-            }
-            TestDataCacheEntry {
-                rec_header,
-                data,
-                flags,
-                states: None,
-                valid_test_idx: valid,
-            }
-        } else if rec_header == 15 {
-            let rows_vec: Vec<(u32, String, String, u8)> = {
-                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
-                let rows = stmt.query_map([test_id], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)? as u32,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)? as u8,
-                    ))
-                })?;
-                rows.collect::<Result<Vec<_>, _>>()?
-            };
-            let rslt_cnt = if rows_vec.is_empty() {
-                0
-            } else {
-                rows_vec[0].1.len() / 8
-            };
-            if rslt_cnt == 0 {
-                TestDataCacheEntry {
-                    rec_header,
-                    data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
-                    flags,
-                    states: Some(Array2::from_shape_fn((n, 0), |_| 0xFu8)),
-                    valid_test_idx: valid,
-                }
-            } else {
-                let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
-                let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
-                for (dut_index, rslt_hex, stat_hex, flag) in rows_vec {
-                    let pos = dut_index as usize - 1;
-                    if pos < n {
-                        let result = hex_to_f32s(&rslt_hex);
-                        let stat = hex_to_u8s(&stat_hex);
-                        flags[pos] = flag as i16;
-                        valid.push(pos);
-                        for (j, value) in result.into_iter().enumerate() {
-                            data[[pos, j]] = value;
-                        }
-                        for (j, value) in stat.into_iter().enumerate() {
-                            states[[pos, j]] = value;
+        let entry = match sub_code {
+            TestSubCode::Ptr => {
+                let mut data = Array2::from_elem((n, 1), f32::NAN);
+                {
+                    let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PTR_DATA)?;
+                    let rows = stmt.query_map([test_id], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)? as u32,
+                            row.get::<_, f32>(1)?,
+                            row.get::<_, i64>(2)? as u8,
+                        ))
+                    })?;
+                    for row in rows {
+                        let (dut_index, result, flag) = row?;
+                        let pos = dut_index as usize - 1;
+                        if pos < n {
+                            data[[pos, 0]] = result;
+                            flags[pos] = flag as i16;
+                            valid.push(pos);
                         }
                     }
                 }
                 TestDataCacheEntry {
-                    rec_header,
+                    sub_code,
                     data,
                     flags,
-                    states: Some(states),
+                    states: None,
                     valid_test_idx: valid,
                 }
             }
-        } else {
-            TestDataCacheEntry {
-                rec_header,
+            TestSubCode::Ftr => {
+                let data = Array2::from_elem((n, 0), 0.0f32);
+                {
+                    let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FTR_DATA)?;
+                    let rows = stmt.query_map([test_id], |row| {
+                        Ok((row.get::<_, i64>(0)? as u32, row.get::<_, i64>(1)? as u8))
+                    })?;
+                    for row in rows {
+                        let (dut_index, flag) = row?;
+                        let pos = dut_index as usize - 1;
+                        if pos < n {
+                            flags[pos] = flag as i16;
+                            valid.push(pos);
+                        }
+                    }
+                }
+                TestDataCacheEntry {
+                    sub_code,
+                    data,
+                    flags,
+                    states: None,
+                    valid_test_idx: valid,
+                }
+            }
+            TestSubCode::Mpr => {
+                let rows_vec: Vec<(u32, String, String, u8)> = {
+                    let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
+                    let rows = stmt.query_map([test_id], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)? as u32,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)? as u8,
+                        ))
+                    })?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                };
+                let rslt_cnt = if rows_vec.is_empty() {
+                    0
+                } else {
+                    rows_vec[0].1.len() / 8
+                };
+                if rslt_cnt == 0 {
+                    TestDataCacheEntry {
+                        sub_code,
+                        data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
+                        flags,
+                        states: Some(Array2::from_shape_fn((n, 0), |_| 0xFu8)),
+                        valid_test_idx: valid,
+                    }
+                } else {
+                    let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
+                    let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
+                    for (dut_index, rslt_hex, stat_hex, flag) in rows_vec {
+                        let pos = dut_index as usize - 1;
+                        if pos < n {
+                            let result = hex_to_f32s(&rslt_hex);
+                            let stat = hex_to_u8s(&stat_hex);
+                            flags[pos] = flag as i16;
+                            valid.push(pos);
+                            for (j, value) in result.into_iter().enumerate() {
+                                data[[pos, j]] = value;
+                            }
+                            for (j, value) in stat.into_iter().enumerate() {
+                                states[[pos, j]] = value;
+                            }
+                        }
+                    }
+                    TestDataCacheEntry {
+                        sub_code,
+                        data,
+                        flags,
+                        states: Some(states),
+                        valid_test_idx: valid,
+                    }
+                }
+            }
+            TestSubCode::Other => TestDataCacheEntry {
+                sub_code,
                 data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
                 flags,
                 states: None,
                 valid_test_idx: valid,
-            }
+            },
         };
 
-        let _ = self.test_data.push(key, clone_entry(&entry));
-        Ok(entry)
+        let bytes = estimate_entry_bytes(&entry);
+        if bytes > self.test_data.budget_bytes {
+            // Single entry larger than the whole budget: caching it would evict
+            // everything and immediately re-blow the budget, so hand it back to
+            // the caller to use directly (it is still returned to Python).
+            return Ok(Some(entry));
+        }
+        self.test_data.insert(key, entry);
+        Ok(None)
     }
 
     pub fn get_test_data_from_head_site(
@@ -388,13 +488,27 @@ impl DataFetcher {
         selected.sort_unstable();
         selected.dedup();
 
-        let entry = self.ensure_test_data(info.test_id, info.rec_header, file_id)?;
-        let idx = intersect_sorted(&selected, &entry.valid_test_idx);
-        Ok(Some(make_fetched_data(
-            self.full_dut.get(&file_id).unwrap(),
-            &entry,
-            &idx,
-        )))
+        // Valid rows only (plan §3.4): intersect the head/site rows with the
+        // rows that actually carry data for this test, so no NaN is returned.
+        let oversized = self.ensure_test_data(info.test_id, info.sub_code, file_id)?;
+        let fetched = match oversized {
+            // Single entry bigger than the byte budget: use it directly.
+            Some(entry) => {
+                let idx = intersect_sorted(&selected, &entry.valid_test_idx);
+                let full_dut = self.full_dut.get(&file_id).expect("fid cache exists");
+                make_fetched_data(full_dut, &entry, &idx)
+            }
+            // Normal path: gather with select straight from the cached entry
+            // (no per-call clone of the full cached arrays).
+            None => {
+                let key = (info.test_id, file_id);
+                let entry = self.test_data.get(&key).expect("entry was just cached");
+                let idx = intersect_sorted(&selected, &entry.valid_test_idx);
+                let full_dut = self.full_dut.get(&file_id).expect("fid cache exists");
+                make_fetched_data(full_dut, entry, &idx)
+            }
+        };
+        Ok(Some(fetched))
     }
 
     pub fn get_test_data_from_dut_index(
@@ -410,26 +524,69 @@ impl DataFetcher {
         if duts.is_empty() {
             return Ok(None);
         }
-        let entry = self.ensure_test_data(info.test_id, info.rec_header, file_id)?;
-        let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
+
+        let oversized = self.ensure_test_data(info.test_id, info.sub_code, file_id)?;
         let mut sorted_duts = duts.to_vec();
         sorted_duts.sort_unstable();
-        let idx: Vec<usize> = sorted_duts
-            .iter()
-            .filter_map(|&dut| {
-                let pos = dut as i128 - 1;
-                if pos >= 0 && (pos as usize) < n {
-                    Some(pos as usize)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(Some(make_fetched_data(
-            self.full_dut.get(&file_id).unwrap(),
-            &entry,
-            &idx,
-        )))
+        let fetched = match oversized {
+            // Single entry bigger than the byte budget: use it directly.
+            Some(entry) => {
+                let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
+                gather_dut_rows(&entry, n, &sorted_duts)
+            }
+            // Normal path: read rows straight from the cached entry.
+            None => {
+                let key = (info.test_id, file_id);
+                let entry = self.test_data.get(&key).expect("entry was just cached");
+                let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
+                gather_dut_rows(entry, n, &sorted_duts)
+            }
+        };
+        Ok(Some(fetched))
+    }
+}
+
+/// Gather rows for every requested DUT (plan §3.4).
+///
+/// Contract: EVERY requested DUT is returned, in ascending order, exactly like
+/// the Python fetcher. Requested DUTs always come from `Dut_Info`, so they live
+/// in `1..=n`; a DUT may still carry no data for this test (e.g. it failed an
+/// earlier test and skipped this one), and its row then keeps the sentinel
+/// values (NaN / -1 / 0xF) the cache already holds for it. DUTs outside
+/// `1..=n` are not expected from callers but keep their sentinel row as well,
+/// mirroring Python where such DUTs have no data rows. Duplicate DUTs in a
+/// request are also not expected (request lists are dedup'd selections); each
+/// duplicate row is filled from the same cache row.
+fn gather_dut_rows(entry: &TestDataCacheEntry, n: usize, sorted_duts: &[u64]) -> FetchedTestData {
+    let dut_count = sorted_duts.len();
+    let dut_list: Array1<u32> = Array1::from_iter(sorted_duts.iter().map(|&d| d as u32));
+
+    let width = entry.data.shape()[1];
+    let mut data = Array2::from_elem((dut_count, width), f32::NAN);
+    let mut flags = Array1::from_elem(dut_count, -1i16);
+    let mut states = entry
+        .states
+        .as_ref()
+        .map(|s| Array2::from_elem((dut_count, s.shape()[1]), 0xFu8));
+
+    for (i, &dut) in sorted_duts.iter().enumerate() {
+        if dut >= 1 && (dut as usize) <= n {
+            let pos = dut as usize - 1;
+            data.row_mut(i).assign(&entry.data.row(pos));
+            if let (Some(dst), Some(src)) = (states.as_mut(), entry.states.as_ref()) {
+                dst.row_mut(i).assign(&src.row(pos));
+            }
+            flags[i] = entry.flags[pos];
+        }
+        // DUT outside 1..=n keeps the pre-filled sentinel row (NaN / -1 / 0xF).
+    }
+
+    FetchedTestData {
+        sub_code: entry.sub_code,
+        dut_list,
+        data,
+        flags,
+        states,
     }
 }
 
@@ -440,50 +597,43 @@ fn make_fetched_data(
 ) -> FetchedTestData {
     let dut_list: Array1<u32> = full_dut.select(ndarray::Axis(0), idx);
 
-    if entry.rec_header == 10 {
-        let data2 = entry.data.select(ndarray::Axis(0), idx);
-        let mut flat = Array1::from_elem(idx.len(), f32::NAN);
-        for (i, row) in data2.outer_iter().enumerate() {
-            flat[i] = row[0];
+    match entry.sub_code {
+        TestSubCode::Ptr => {
+            let data2 = entry.data.select(ndarray::Axis(0), idx);
+            let mut flat = Array1::from_elem(idx.len(), f32::NAN);
+            for (i, row) in data2.outer_iter().enumerate() {
+                flat[i] = row[0];
+            }
+            FetchedTestData {
+                sub_code: entry.sub_code,
+                dut_list,
+                data: flat.into_shape((idx.len(), 1)).unwrap(),
+                flags: entry.flags.select(ndarray::Axis(0), idx),
+                states: None,
+            }
         }
-        FetchedTestData {
-            rec_header: entry.rec_header,
-            dut_list,
-            data: flat.into_shape((idx.len(), 1)).unwrap(),
-            flags: entry.flags.select(ndarray::Axis(0), idx),
-            states: None,
+        TestSubCode::Mpr => {
+            let data = entry.data.select(ndarray::Axis(0), idx);
+            let states = entry
+                .states
+                .as_ref()
+                .map(|s| s.select(ndarray::Axis(0), idx));
+            FetchedTestData {
+                sub_code: entry.sub_code,
+                dut_list,
+                data,
+                flags: entry.flags.select(ndarray::Axis(0), idx),
+                states,
+            }
         }
-    } else if entry.rec_header == 15 {
-        let data = entry.data.select(ndarray::Axis(0), idx);
-        let states = entry
-            .states
-            .as_ref()
-            .map(|s| s.select(ndarray::Axis(0), idx));
-        FetchedTestData {
-            rec_header: entry.rec_header,
-            dut_list,
-            data,
-            flags: entry.flags.select(ndarray::Axis(0), idx),
-            states,
-        }
-    } else {
-        FetchedTestData {
-            rec_header: entry.rec_header,
+        // FTR and any unknown/legacy code: flags only.
+        TestSubCode::Ftr | TestSubCode::Other => FetchedTestData {
+            sub_code: entry.sub_code,
             dut_list,
             data: Array2::from_shape_fn((idx.len(), 0), |_| 0.0f32),
             flags: entry.flags.select(ndarray::Axis(0), idx),
             states: None,
-        }
-    }
-}
-
-fn clone_entry(entry: &TestDataCacheEntry) -> TestDataCacheEntry {
-    TestDataCacheEntry {
-        rec_header: entry.rec_header,
-        data: entry.data.clone(),
-        flags: entry.flags.clone(),
-        states: entry.states.clone(),
-        valid_test_idx: entry.valid_test_idx.clone(),
+        },
     }
 }
 

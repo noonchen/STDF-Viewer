@@ -101,7 +101,7 @@ pub(crate) static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                                         Fid INTEGER,
                                                         TEST_ID INTEGER,
                                                         TEST_NUM INTEGER,
-                                                        recHeader INTEGER,
+                                                        SUB_CODE INTEGER,
                                                         TEST_NAME TEXT,
                                                         RES_SCAL INTEGER,
                                                         LLimit REAL,
@@ -270,7 +270,7 @@ pub(crate) static INSERT_FTR_DATA: &str = "INSERT OR REPLACE INTO
 pub(crate) static INSERT_TEST_INFO: &str = "INSERT OR IGNORE INTO 
                                     Test_Info 
                                 VALUES 
-                                    (:Fid, :TEST_ID, :TEST_NUM, :recHeader, :TEST_NAME, 
+                                    (:Fid, :TEST_ID, :TEST_NUM, :SUB_CODE, :TEST_NAME, 
                                     :RES_SCAL, :LLimit, :HLimit, :Unit, :OPT_FLAG, 
                                     :FailCount, :RTN_ICNT, :RSLT_PGM_CNT, :LSpec, 
                                     :HSpec, :VECT_NAM, :SEQ_NAME);";
@@ -414,7 +414,7 @@ pub(crate) static FETCH_SELECT_HEAD_LIST: &str = "SELECT
 
 pub(crate) static FETCH_SELECT_TEST_INFO: &str = "SELECT 
         TEST_ID, 
-        recHeader, 
+        SUB_CODE, 
         TEST_NUM, 
         TEST_NAME, 
         RES_SCAL, 

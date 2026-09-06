@@ -14,7 +14,7 @@
 
 use crate::database::operations::{push_cold_op, push_file_info, ColdOp, DbOp};
 use crate::generic::helper::u32_to_localtime;
-use crate::stdf::record_tracker::RecordTracker;
+use crate::stdf::record_tracker::{RecordTracker, TestSubCode};
 use crate::StdfHelperError;
 use lazy_static::lazy_static;
 use rust_stdf::*;
@@ -231,7 +231,7 @@ fn on_ptr_view(
                 fid: file_id,
                 test_id,
                 test_num,
-                rec_header: 10,
+                sub_code: TestSubCode::Ptr,
                 test_name: ptr.test_txt().to_owned(),
                 res_scal,
                 llimit: lo_limit,
@@ -329,7 +329,7 @@ fn on_mpr_view(
                 fid: file_id,
                 test_id,
                 test_num,
-                rec_header: 15,
+                sub_code: TestSubCode::Mpr,
                 test_name: mpr.test_txt().to_owned(),
                 res_scal,
                 llimit: lo_limit,
@@ -406,7 +406,7 @@ fn on_ftr_view(
                 fid: file_id,
                 test_id,
                 test_num,
-                rec_header: 20,
+                sub_code: TestSubCode::Ftr,
                 test_name: ftr.test_txt().to_owned(),
                 res_scal: None,
                 llimit: f32::NAN,
