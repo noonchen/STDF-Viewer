@@ -170,7 +170,7 @@ class DatabaseFetcher:
         if self.cursor is None: raise RuntimeError("No database is connected")
             
         recTypeDict = {}
-        for TEST_NUM, TEST_NAME, recHeader in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, recHeader FROM Test_Info"):
+        for TEST_NUM, TEST_NAME, recHeader in self.cursor.execute("SELECT TEST_NUM, TEST_NAME, SUB_CODE FROM Test_Info"):
             if (TEST_NUM, TEST_NAME) in recTypeDict and recTypeDict[(TEST_NUM, TEST_NAME)] != recHeader:
                 previous_rec = recTypeDict[(TEST_NUM, TEST_NAME)]
                 # this test item is already registered twice with different record type, not supported
@@ -528,7 +528,7 @@ class DatabaseFetcher:
         recHeader = None
         for tid, rh, in self.cursor.execute('''
                                             SELECT 
-                                                TEST_ID, recHeader 
+                                                TEST_ID, SUB_CODE 
                                             FROM 
                                                 Test_Info 
                                             WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?''', 
@@ -624,7 +624,7 @@ class DatabaseFetcher:
         mprRsltCnt = 0
         for tid, rh, cnt in self.cursor.execute('''
                                             SELECT 
-                                                TEST_ID, recHeader, RSLT_PGM_CNT
+                                                TEST_ID, SUB_CODE, RSLT_PGM_CNT
                                             FROM 
                                                 Test_Info 
                                             WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?''', 

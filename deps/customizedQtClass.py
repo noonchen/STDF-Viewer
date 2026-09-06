@@ -493,7 +493,7 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                 dataList = data_test_file["dataList"]
                 flagList = data_test_file["flagList"]
                 data = dataList[data_ind] if data_ind < len(dataList) else np.nan
-                match data_test_file["recHeader"]:
+                match data_test_file["SUB_CODE"]:
                     case REC.FTR:
                         return "Not Tested" if np.isnan(data) or data < 0 else f"Test Flag: {int(data)}"
                     
@@ -533,7 +533,7 @@ class TestDataTableModel(QtCore.QAbstractTableModel):
                 flag = data_test_file["flagList"][data_ind]
                 flagTip = test_flag_parser(flag)
                 
-                if data_test_file["recHeader"] == REC.MPR:
+                if data_test_file["SUB_CODE"] == REC.MPR:
                     RTNStat = data_test_file["stateList"][data_ind]
                     statTip = return_state_parser(RTNStat)
                     return "\n".join([t for t in [statTip, flagTip] if t])

@@ -382,7 +382,7 @@ class reportGenerator(QtCore.QObject):
             flagList = []
             for fid, dutIndex in order:
                 try:
-                    recHeader = testData[fid]["recHeader"]
+                    recHeader = testData[fid]["SUB_CODE"]
                     dataIndex = summaryTable["dut2ind"][fid][dutIndex]
                     dataList.append(testData[fid]["dataList"][dataIndex])
                     flagList.append(testData[fid]["flagList"][dataIndex])
