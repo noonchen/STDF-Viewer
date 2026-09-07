@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Tue Sep 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -777,6 +777,7 @@ class DataInterface:
                 dyL, dyH = self.DatabaseFetcher.getDynamicLimits(test_site_fid["TEST_NUM"],
                                                                  test_site_fid["TEST_NAME"],
                                                                  nestSiteData["dutList"],
+                                                                 fid,
                                                                  test_site_fid["LLimit"],
                                                                  test_site_fid["HLimit"])
                 nestSiteData["dyLLimit"] = dyL

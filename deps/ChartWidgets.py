@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Sun Nov 02 2025
+# Last Modified: Tue Sep 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -782,10 +782,10 @@ class TrendChart(GraphicViewWithMenu):
             y_max_list.extend([i_file["HLimit"], i_file["HSpec"]])
             for d_site in d_file.values():
                 # dynamic limits
-                if d_site.get("dyLLimit", {}):
-                    y_min_list.append(min(d_site["dyLLimit"].values()))
-                if d_site.get("dyHLimit", {}):
-                    y_max_list.append(max(d_site["dyHLimit"].values()))
+                if "dyLLimit" in d_site and len(d_site["dyLLimit"]) > 0:
+                    y_min_list.append(min(d_site["dyLLimit"]))
+                if "dyHLimit" in d_site and len(d_site["dyHLimit"]) > 0:
+                    y_max_list.append(max(d_site["dyHLimit"]))
                 y_min_list.append(d_site["Min"])
                 y_max_list.append(d_site["Max"])
                 # at least one site data should be valid
@@ -826,8 +826,6 @@ class TrendChart(GraphicViewWithMenu):
                 continue
             x_min_list = []
             x_max_list = []
-            dyL = {}
-            dyH = {}
             for site, data_per_site in sitesData.items():
                 x = data_per_site["dutList"]
                 y = data_per_site["dataList"]
@@ -837,8 +835,8 @@ class TrendChart(GraphicViewWithMenu):
                     continue
                 x_min_list.append(np.nanmin(x))
                 x_max_list.append(np.nanmax(x))
-                dyL.update(data_per_site.get("dyLLimit", {}))
-                dyH.update(data_per_site.get("dyHLimit", {}))
+                dyL = data_per_site.get("dyLLimit", np.array([]))
+                dyH = data_per_site.get("dyHLimit", np.array([]))
                 fsymbol = settings.gen.file_symbols[fid]
                 siteColor = settings.color.site_colors[site]
                 # test value
@@ -863,15 +861,13 @@ class TrendChart(GraphicViewWithMenu):
                 if settings.trend.show_median and ~np.isnan(median) and ~np.isinf(median):
                     pitem.addLine(y=median, pen=self.medianPen, name=f"Median_site{site}", label="x̃ = {value:0.3f}",
                                   labelOpts={"position":0.7, "color": self.medianPen.color(), "movable": True})
+                # dynamic limits
+                for (dylims, name, pen, enabled) in [(dyL, f"Dynamic LLimit {site}", self.lolimitPen, settings.trend.show_lolim), 
+                                                    (dyH, f"Dynamic HLimit {site}", self.hilimitPen, settings.trend.show_hilim)]:
+                    if enabled and len(dylims) > 0:
+                        pitem.addItem(pg.PlotDataItem(x=x, y=dylims, pen=pen, name=name, color=pen.color()))
             # add test limits and specs
             self.addLimitsToPlot(infoDict, pitem)
-            # dynamic limits
-            for (dyDict, name, pen, enabled) in [(dyL, "Dynamic Low Limit", self.lolimitPen, settings.trend.show_lolim), 
-                                                 (dyH, "Dynamic High Limit", self.hilimitPen, settings.trend.show_hilim)]:
-                if enabled and len(dyDict) > 0:
-                    x = np.array(sorted(dyDict.keys()))
-                    dylims = np.array([dyDict[i] for i in x])
-                    pitem.addItem(pg.PlotDataItem(x=x, y=dylims, pen=pen, name=name, color=pen.color()))
             # labels and file id
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")

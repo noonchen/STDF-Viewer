@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 15th 2021
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Tue Sep 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -915,20 +915,25 @@ class DatabaseFetcher:
         return dutIndexList
     
     
-    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, LLimit:float, HLimit:float):
+    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, fileId:int, LLimit:float, HLimit:float):
         '''
-        return (dynamic llim dict, dynamic hlim dict)
+        return (dynamic llim arr, dynamic hlim arr)
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         hasValidLow = ~np.isnan(LLimit)
         hasValidHigh = ~np.isnan(HLimit)
         hasDynamicLow = False
         hasDynamicHigh = False
+        dyL = np.array([], dtype=np.float32)
+        dyH = np.array([], dtype=np.float32)
         
         if hasValidLow or hasValidHigh:
             # dutIndex -> dynamic limit
-            dyLLimitsDict = dict(zip(dutList, np.full(dutList.size, LLimit, np.float32)))
-            dyHLimitsDict = dict(zip(dutList, np.full(dutList.size, HLimit, np.float32)))
+            tmpL = np.full(dutList.size, LLimit, np.float32)
+            tmpH = np.full(dutList.size, HLimit, np.float32)
+            dyLLimitsDict = dict(zip(dutList, tmpL))
+            dyHLimitsDict = dict(zip(dutList, tmpH))
+            # Dynamic_Limits may not contain entries for all DUTs in dutList
             sql = f'''SELECT 
                         DUTIndex, LLimit, HLimit 
                     FROM 
@@ -939,11 +944,11 @@ class DatabaseFetcher:
                                     FROM 
                                         Test_Info 
                                     WHERE 
-                                        TEST_NUM=? AND TEST_NAME=?) 
+                                        TEST_NUM=? AND TEST_NAME=? AND Fid=?) 
                         AND DUTIndex in ({commaJoin(dutList)}) 
                     ORDER by 
                         DUTIndex'''
-            sql_param = [test_num, test_name]
+            sql_param = [test_num, test_name, fileId]
                 
             for dutIndex, dyLL, dyHL in self.cursor.execute(sql, sql_param):
                 # replace the limit in the list of the same index as the dutIndex in dutList
@@ -955,12 +960,12 @@ class DatabaseFetcher:
                     dyHLimitsDict[dutIndex] = dyHL
                     
             # replace with empty dict if no dynamic limit
-            dyLLimitsDict = dyLLimitsDict if hasDynamicLow else {}
-            dyHLimitsDict = dyHLimitsDict if hasDynamicHigh else {}
-            return dyLLimitsDict, dyHLimitsDict
-        else:
-            # return empty dict if there's no dynamic limits
-            return {}, {}
+            if hasDynamicLow:
+                dyL = np.array([dyLLimitsDict[dutIndex] for dutIndex in dutList], dtype=np.float32)
+            if hasDynamicHigh:
+                dyH = np.array([dyHLimitsDict[dutIndex] for dutIndex in dutList], dtype=np.float32)
+        
+        return dyL, dyH
     
     
     def getDTR_GDRs(self) -> list[tuple]:
