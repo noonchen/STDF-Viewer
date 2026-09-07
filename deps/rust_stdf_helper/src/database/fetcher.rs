@@ -13,14 +13,18 @@
 
 use crate::database::operations::TestId;
 use crate::database::schema::{
-    FETCH_SELECT_BIN_INFO, FETCH_SELECT_BIN_STATS_H_HEAD,
+    FETCH_EXISTS_DUT_COLUMN, FETCH_SELECT_BIN_INFO, FETCH_SELECT_BIN_STATS_H_HEAD,
     FETCH_SELECT_BIN_STATS_H_HEAD_SITE, FETCH_SELECT_BIN_STATS_S_HEAD,
     FETCH_SELECT_BIN_STATS_S_HEAD_SITE, FETCH_SELECT_BYTE_ORDER,
-    FETCH_SELECT_DUT_HEAD_SITE, FETCH_SELECT_FILE_INFO, FETCH_SELECT_FILE_LIST,
-    FETCH_SELECT_FTR_DATA, FETCH_SELECT_HEAD_LIST, FETCH_SELECT_MAX_DUT_INDEX,
-    FETCH_SELECT_MPR_DATA, FETCH_SELECT_PTR_DATA, FETCH_SELECT_SITE_LIST,
-    FETCH_SELECT_TEST_FAIL_CNT, FETCH_SELECT_TEST_INFO, FETCH_SELECT_TEST_ITEMS,
-    FETCH_SELECT_TEST_RECORD_TYPES, FETCH_SELECT_WAFER_COUNT, FETCH_SELECT_WAFER_LIST,
+    FETCH_SELECT_DATALOG, FETCH_SELECT_DUT_COUNTS, FETCH_SELECT_DUT_HEAD_SITE,
+    FETCH_SELECT_DUT_HEAD_SITE_ALL, FETCH_SELECT_DUT_SUMMARY, FETCH_SELECT_DYNAMIC_LIMITS_ALL,
+    FETCH_SELECT_FILE_INFO, FETCH_SELECT_FILE_LIST, FETCH_SELECT_FTR_DATA,
+    FETCH_SELECT_HEAD_LIST, FETCH_SELECT_MAX_DUT_INDEX, FETCH_SELECT_MPR_DATA,
+    FETCH_SELECT_PARTIAL_RAW, FETCH_SELECT_PIN_NAMES, FETCH_SELECT_PTR_DATA,
+    FETCH_SELECT_ALL_TEST_INFO, FETCH_SELECT_SITE_LIST, FETCH_SELECT_TEST_FAIL_CNT,
+    FETCH_SELECT_TEST_ITEMS, FETCH_SELECT_TEST_RECORD_TYPES,
+    FETCH_SELECT_WAFER_COUNT, FETCH_SELECT_WAFER_EXT, FETCH_SELECT_WAFER_INFO,
+    FETCH_SELECT_WAFER_LIST,
 };
 use crate::generic::error::StdfHelperError;
 use lru::LruCache;
@@ -68,10 +72,43 @@ pub struct TestDataCacheEntry {
 
 pub struct FetchedTestData {
     pub sub_code: TestSubCode,
-    pub dut_list: Array1<u32>,
+    pub dut_list: Array1<u64>,
     pub data: Array2<f32>,
     pub flags: Array1<i16>,
     pub states: Option<Array2<u8>>,
+}
+
+/// Per-test dynamic-limit cache entry, aligned to the file's full-DUT array.
+///
+/// Values are *fill-first*: a side array exists only when the test has a
+/// static default for that side (`Test_Info.LLimit/HLimit`, f32 as stored in
+/// the STDF file); elements start as that default and `Dynamic_Limits` rows
+/// overwrite their DUT. A side whose index set stayed empty is discarded (it
+/// can never be returned), and a side without a static default has no array at
+/// all — mirroring Python, where a NaN static default disables that side.
+/// `ll_valid_idx` / `hl_valid_idx` record which DUTs carry a *dynamic*
+/// override and gate whether a side's output is empty (`hasDynamicLow/High`).
+pub struct DynamicLimitEntry {
+    pub llimit: Option<Array1<f32>>,
+    pub hlimit: Option<Array1<f32>>,
+    pub ll_default: Option<f32>,
+    pub hl_default: Option<f32>,
+    pub ll_valid_idx: Vec<usize>,
+    pub hl_valid_idx: Vec<usize>,
+}
+
+/// One raw `Dut_Info` row used by the partial-DUT-info cache
+/// (`getPartialDUTInfoOnCondition`), including superseded rows. Formatted
+/// strings ("Head h - Site s", "State - 0x%02X") are built per call so the
+/// cache only keeps raw fields.
+pub struct PartialDutRow {
+    pub row_index: usize,
+    pub part_id: Option<String>,
+    pub part_text: Option<String>,
+    pub head: HeadNum,
+    pub site: SiteNum,
+    pub superseded: bool,
+    pub flag: Option<i64>,
 }
 
 /// Default byte budget for the Tier-2 test-data LRU (see plan §3.3/§7).
@@ -148,9 +185,22 @@ impl TestDataLru {
 pub struct DataFetcher {
     conn: Connection,
     file_paths: Vec<Vec<String>>,
-    full_dut: HashMap<usize, Array1<u32>>,
+    // fid -> [1, 2, .., N]; u64 matches the db-gen counter type.
+    full_dut: HashMap<usize, Array1<u64>>,
+    // (fid, head, site/None) -> sorted row indices of non-superseded DUTs.
     head_site_idx: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
-    test_info: HashMap<(usize, TestNum, String), TestInfo>,
+    // Same shape but *including* superseded rows: getDutIndexDictFromHeadSite
+    // has no Supersede filter, so it cannot reuse head_site_idx.
+    head_site_idx_all: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
+    // (fid, test_num) -> test_name -> TestInfo, so lookups borrow the &str key.
+    test_info: HashMap<(usize, TestNum), HashMap<String, TestInfo>>,
+    // Eager, permanent dynamic-limit cache (no LRU; cleared on close).
+    dynamic_limits: HashMap<TestId, DynamicLimitEntry>,
+    // Per-file raw Dut_Info rows for the partial-DUT-info cache.
+    partial_info: HashMap<usize, Vec<PartialDutRow>>,
+    // Lazily cached distinct site/head lists (immutable DB).
+    site_list_cache: Option<Vec<SiteNum>>,
+    head_list_cache: Option<Vec<HeadNum>>,
     test_data: TestDataLru,
 }
 
@@ -167,11 +217,18 @@ impl DataFetcher {
             file_paths: Vec::new(),
             full_dut: HashMap::new(),
             head_site_idx: HashMap::new(),
+            head_site_idx_all: HashMap::new(),
             test_info: HashMap::new(),
+            dynamic_limits: HashMap::new(),
+            partial_info: HashMap::new(),
+            site_list_cache: None,
+            head_list_cache: None,
             test_data: TestDataLru::new(budget_bytes),
         };
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
+        fetcher.load_test_info()?;
+        fetcher.load_dynamic_limits()?;
         Ok(fetcher)
     }
 
@@ -179,7 +236,12 @@ impl DataFetcher {
         self.file_paths.clear();
         self.full_dut.clear();
         self.head_site_idx.clear();
+        self.head_site_idx_all.clear();
         self.test_info.clear();
+        self.dynamic_limits.clear();
+        self.partial_info.clear();
+        self.site_list_cache = None;
+        self.head_list_cache = None;
         self.test_data.clear();
     }
 
@@ -219,52 +281,104 @@ impl DataFetcher {
                 .conn
                 .query_row(FETCH_SELECT_MAX_DUT_INDEX, [fid as i64], |row| row.get(0))?;
             let n = n.max(0) as usize;
-            self.full_dut.insert(fid, Array1::from_iter(1..=n as u32));
+            // u64 matches the db-gen counter type (see TODO-resolved decision).
+            self.full_dut.insert(fid, Array1::from_iter(1..=n as u64));
 
-            let mut site_lists: HashMap<(HeadNum, SiteNum), Vec<usize>> = HashMap::new();
-            let mut head_lists: HashMap<HeadNum, Vec<usize>> = HashMap::new();
-            {
-                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DUT_HEAD_SITE)?;
-                let rows = stmt.query_map([fid as i64], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)? as u32,
-                        row.get::<_, i64>(1)? as u8,
-                        row.get::<_, i64>(2)? as u8,
-                    ))
-                })?;
-                for row in rows {
-                    let (dut_index, head, site) = row?;
-                    let idx = (dut_index as usize) - 1;
-                    site_lists.entry((head, site)).or_default().push(idx);
-                    head_lists.entry(head).or_default().push(idx);
+            // Both queries ORDER BY DUTIndex, so the per-key subsequences are
+            // already sorted and no explicit sort is needed.
+            for (sql, target) in [
+                (FETCH_SELECT_DUT_HEAD_SITE, &mut self.head_site_idx),
+                (FETCH_SELECT_DUT_HEAD_SITE_ALL, &mut self.head_site_idx_all),
+            ] {
+                let mut site_lists: HashMap<(HeadNum, SiteNum), Vec<usize>> = HashMap::new();
+                let mut head_lists: HashMap<HeadNum, Vec<usize>> = HashMap::new();
+                {
+                    let mut stmt = self.conn.prepare_cached(sql)?;
+                    let rows = stmt.query_map([fid as i64], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)? as u8,
+                            row.get::<_, i64>(2)? as u8,
+                        ))
+                    })?;
+                    for row in rows {
+                        let (dut_index, head, site) = row?;
+                        let idx = (dut_index as usize) - 1;
+                        site_lists.entry((head, site)).or_default().push(idx);
+                        head_lists.entry(head).or_default().push(idx);
+                    }
                 }
-            }
-            for ((head, site), mut vals) in site_lists {
-                vals.sort_unstable();
-                self.head_site_idx.insert((fid, head, Some(site)), vals);
-            }
-            for (head, mut vals) in head_lists {
-                vals.sort_unstable();
-                self.head_site_idx.insert((fid, head, None), vals);
+                for ((head, site), vals) in site_lists {
+                    target.insert((fid, head, Some(site)), vals);
+                }
+                for (head, vals) in head_lists {
+                    target.insert((fid, head, None), vals);
+                }
             }
         }
         Ok(())
     }
 
-    pub fn get_site_list(&self) -> Result<Vec<SiteNum>, StdfHelperError> {
+    pub fn get_site_list(&mut self) -> Result<Vec<SiteNum>, StdfHelperError> {
+        if let Some(sites) = &self.site_list_cache {
+            return Ok(sites.clone());
+        }
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_SITE_LIST)?;
         let sites = stmt
             .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
             .collect::<Result<Vec<_>, _>>()?;
+        self.site_list_cache = Some(sites.clone());
         Ok(sites)
     }
 
-    pub fn get_head_list(&self) -> Result<Vec<HeadNum>, StdfHelperError> {
+    pub fn get_head_list(&mut self) -> Result<Vec<HeadNum>, StdfHelperError> {
+        if let Some(heads) = &self.head_list_cache {
+            return Ok(heads.clone());
+        }
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_HEAD_LIST)?;
         let heads = stmt
             .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
             .collect::<Result<Vec<_>, _>>()?;
+        self.head_list_cache = Some(heads.clone());
         Ok(heads)
+    }
+
+    /// Eagerly cache the whole `Test_Info` table at open — the smallest but
+    /// most-used cache. `get_test_info` and the dynamic-limit defaults both
+    /// read from it, so no further `Test_Info` queries happen.
+    fn load_test_info(&mut self) -> Result<(), StdfHelperError> {
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_ALL_TEST_INFO)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as usize, // Fid
+                TestInfo {
+                    test_id: row.get(1)?,
+                    sub_code: TestSubCode::from_code(row.get(2)?),
+                    test_num: row.get(3)?,
+                    test_name: row.get(4)?,
+                    res_scal: row.get(5)?,
+                    llimit: row.get(6)?,
+                    hlimit: row.get(7)?,
+                    unit: row.get(8)?,
+                    opt_flag: row.get(9)?,
+                    fail_count: row.get(10)?,
+                    rtn_icnt: row.get(11)?,
+                    rslt_pgm_cnt: row.get(12)?,
+                    lspec: row.get(13)?,
+                    hspec: row.get(14)?,
+                    vect_nam: row.get(15)?,
+                    seq_name: row.get(16)?,
+                },
+            ))
+        })?;
+        for r in rows {
+            let (fid, info) = r?;
+            self.test_info
+                .entry((fid, info.test_num))
+                .or_default()
+                .insert(info.test_name.clone(), info);
+        }
+        Ok(())
     }
 
     pub fn get_test_info(
@@ -272,42 +386,12 @@ impl DataFetcher {
         test_tup: (TestNum, &str),
         file_id: usize,
     ) -> Result<Option<TestInfo>, StdfHelperError> {
-        let key = (file_id, test_tup.0, test_tup.1.to_string());
-        if let Some(info) = self.test_info.get(&key) {
-            return Ok(Some(info.clone()));
-        }
-        let info = self.conn.query_row(
-            FETCH_SELECT_TEST_INFO,
-            rusqlite::params![file_id as i64, test_tup.0, test_tup.1],
-            |row| {
-                Ok(TestInfo {
-                    test_id: row.get(0)?,
-                    sub_code: TestSubCode::from_code(row.get(1)?),
-                    test_num: row.get(2)?,
-                    test_name: row.get(3)?,
-                    res_scal: row.get(4)?,
-                    llimit: row.get(5)?,
-                    hlimit: row.get(6)?,
-                    unit: row.get(7)?,
-                    opt_flag: row.get(8)?,
-                    fail_count: row.get(9)?,
-                    rtn_icnt: row.get(10)?,
-                    rslt_pgm_cnt: row.get(11)?,
-                    lspec: row.get(12)?,
-                    hspec: row.get(13)?,
-                    vect_nam: row.get(14)?,
-                    seq_name: row.get(15)?,
-                })
-            },
-        );
-        match info {
-            Ok(info) => {
-                self.test_info.insert(key, info.clone());
-                Ok(Some(info))
-            }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        // Nested map allows the &str test_name lookup without cloning the key.
+        Ok(self
+            .test_info
+            .get(&(file_id, test_tup.0))
+            .and_then(|by_name| by_name.get(test_tup.1))
+            .cloned())
     }
 
     /// Make sure the full-length cached arrays for `(test_id, file_id)` exist.
@@ -342,7 +426,7 @@ impl DataFetcher {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PTR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
                         Ok((
-                            row.get::<_, i64>(0)? as u32,
+                            row.get::<_, i64>(0)?,
                             row.get::<_, f32>(1)?,
                             row.get::<_, i64>(2)? as u8,
                         ))
@@ -370,7 +454,7 @@ impl DataFetcher {
                 {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FTR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
-                        Ok((row.get::<_, i64>(0)? as u32, row.get::<_, i64>(1)? as u8))
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)? as u8))
                     })?;
                     for row in rows {
                         let (dut_index, flag) = row?;
@@ -390,11 +474,11 @@ impl DataFetcher {
                 }
             }
             TestSubCode::Mpr => {
-                let rows_vec: Vec<(u32, String, String, u8)> = {
+                let rows_vec: Vec<(i64, String, String, u8)> = {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
                         Ok((
-                            row.get::<_, i64>(0)? as u32,
+                            row.get::<_, i64>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
                             row.get::<_, i64>(3)? as u8,
@@ -564,7 +648,7 @@ impl DataFetcher {
 /// duplicate row is filled from the same cache row.
 fn gather_dut_rows(entry: &TestDataCacheEntry, n: usize, sorted_duts: &[u64]) -> FetchedTestData {
     let dut_count = sorted_duts.len();
-    let dut_list: Array1<u32> = Array1::from_iter(sorted_duts.iter().map(|&d| d as u32));
+    let dut_list: Array1<u64> = Array1::from_iter(sorted_duts.iter().copied());
 
     let width = entry.data.shape()[1];
     let mut data = Array2::from_elem((dut_count, width), f32::NAN);
@@ -596,11 +680,11 @@ fn gather_dut_rows(entry: &TestDataCacheEntry, n: usize, sorted_duts: &[u64]) ->
 }
 
 fn make_fetched_data(
-    full_dut: &Array1<u32>,
+    full_dut: &Array1<u64>,
     entry: &TestDataCacheEntry,
     idx: &[usize],
 ) -> FetchedTestData {
-    let dut_list: Array1<u32> = full_dut.select(ndarray::Axis(0), idx);
+    let dut_list: Array1<u64> = full_dut.select(ndarray::Axis(0), idx);
 
     match entry.sub_code {
         TestSubCode::Ptr => {
@@ -643,7 +727,7 @@ fn make_fetched_data(
 }
 
 fn intersect_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(a.len().min(b.len()));
     let (mut i, mut j) = (0, 0);
     while i < a.len() && j < b.len() {
         if a[i] == b[j] {
@@ -892,17 +976,17 @@ impl DataFetcher {
     /// has no valid value. Only a fixed set of column names is accepted (the
     /// Python reference is called with a hard-coded column name as well).
     pub fn is_dut_info_column_empty(&self, column: &str) -> Result<bool, StdfHelperError> {
-        const ALLOWED: &[&str] = &["PartText", "WaferIndex", "XCOORD", "YCOORD"];
-        if !ALLOWED.contains(&column) {
+        // The fetcher is the only reader of these DBs; a plain identifier guard
+        // is enough. The query template itself lives in schema.rs.
+        let is_ident = !column.is_empty()
+            && (column.as_bytes()[0].is_ascii_alphabetic() || column.as_bytes()[0] == b'_')
+            && column.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !is_ident {
             return Err(StdfHelperError {
-                msg: format!("Unsupported Dut_Info column name: {}", column),
+                msg: format!("Invalid Dut_Info column name: {}", column),
             });
         }
-        let sql = format!(
-            "SELECT EXISTS (SELECT 1 FROM Dut_Info WHERE {0} IS NOT NULL AND \
-             (typeof({0}) != 'text' OR trim({0}) != \"\"))",
-            column
-        );
+        let sql = FETCH_EXISTS_DUT_COLUMN.replace("{column}", column);
         let valid_data_exists: i64 = self.conn.query_row(&sql, [], |row| row.get(0))?;
         Ok(valid_data_exists == 0)
     }
@@ -948,40 +1032,25 @@ impl DataFetcher {
     /// `getFullDUTInfoFromDutArray()` row source — DUT summary rows for one
     /// file, mirroring SharedSrc.DUT_SUMMARY_QUERY (typed cells).
     pub fn full_dut_summary_rows(&self, fid: i64) -> Result<Vec<DutSummaryRow>, StdfHelperError> {
-        let sql = "SELECT \
-             DUTIndex, \
-             PartID, \
-             PartText, \
-             'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM, \
-             TestCount, \
-             TestTime || ' ms', \
-             'Bin ' || HBIN, \
-             'Bin ' || SBIN, \
-             wf.WAFER_ID, \
-             '(' || XCOORD || ', ' || YCOORD || ')', \
-             printf(\"%s - 0x%02X\", CASE \
-                 WHEN Supersede=1 THEN 'Superseded' \
-                 WHEN Flag & 24 = 0 THEN 'Pass' \
-                 WHEN Flag & 24 = 8 THEN 'Failed' \
-                 ELSE 'Unknown' END, Flag) \
-         FROM (Dut_Info LEFT JOIN (SELECT Fid, WaferIndex, WAFER_ID FROM Wafer_Info) AS wf \
-             ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex) \
-         WHERE Dut_Info.Fid=? \
-         ORDER BY DUTIndex";
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let sql = format!(
+            "{} WHERE Dut_Info.Fid=? ORDER BY DUTIndex",
+            FETCH_SELECT_DUT_SUMMARY
+        );
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt.query_map([fid], |row| {
             Ok(DutSummaryRow {
                 dut_index: row.get(0)?,
-                part_id: row.get(1)?,
-                part_text: row.get(2)?,
-                head_site: row.get(3)?,
-                tests_executed: row.get(4)?,
-                test_time: row.get(5)?,
-                hbin: row.get(6)?,
-                sbin: row.get(7)?,
-                wafer_id: row.get(8)?,
-                xy: row.get(9)?,
-                dut_flag: row.get(10)?,
+                // column 1 is Dut_Info.Fid ("File ID"), injected by the wrapper
+                part_id: row.get(2)?,
+                part_text: row.get(3)?,
+                head_site: row.get(4)?,
+                tests_executed: row.get(5)?,
+                test_time: row.get(6)?,
+                hbin: row.get(7)?,
+                sbin: row.get(8)?,
+                wafer_id: row.get(9)?,
+                xy: row.get(10)?,
+                dut_flag: row.get(11)?,
             })
         })?;
         let out: rusqlite::Result<Vec<DutSummaryRow>> = rows.collect();
@@ -990,36 +1059,52 @@ impl DataFetcher {
 }
 
 
+/// Typed result of the single-pass `getDUTCountDict()` query — one vector per
+/// category, aligned by file position.
+pub struct DutCounts {
+    pub total: Vec<i64>,
+    pub pass: Vec<i64>,
+    pub failed: Vec<i64>,
+    pub unknown: Vec<i64>,
+    pub superseded: Vec<i64>,
+}
+
 impl DataFetcher {
-    /// Helper: run a grouped-by-Fid count query into per-file positions.
-    fn grouped_dut_counts(&self, sql: &str) -> Result<Vec<i64>, StdfHelperError> {
+    /// `getDUTCountDict()` — all five per-file counts from one scan of
+    /// `Dut_Info` using conditional aggregation (plan §4.1).
+    pub fn dut_count_dict(&self) -> Result<DutCounts, StdfHelperError> {
         let n = self.file_paths.len();
-        let mut counts = vec![0i64; n];
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let mut counts = DutCounts {
+            total: vec![0; n],
+            pass: vec![0; n],
+            failed: vec![0; n],
+            unknown: vec![0; n],
+            superseded: vec![0; n],
+        };
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DUT_COUNTS)?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ))
         })?;
-        for r in rows {
-            let (fid, count) = r?;
+        for row in rows {
+            let (fid, total, pass, failed, unknown, superseded) = row?;
             if let Ok(pos) = usize::try_from(fid) {
                 if pos < n {
-                    counts[pos] = count;
+                    counts.total[pos] = total.unwrap_or(0);
+                    counts.pass[pos] = pass.unwrap_or(0);
+                    counts.failed[pos] = failed.unwrap_or(0);
+                    counts.unknown[pos] = unknown.unwrap_or(0);
+                    counts.superseded[pos] = superseded.unwrap_or(0);
                 }
             }
         }
         Ok(counts)
-    }
-
-    /// `getDUTCountDict()` — [Total, Pass, Failed, Unknown, Superseded] lists.
-    pub fn dut_count_dict(&self) -> Result<Vec<Vec<i64>>, StdfHelperError> {
-        use crate::database::schema as s;
-        Ok(vec![
-            self.grouped_dut_counts(s::FETCH_SELECT_DUT_COUNT_TOTAL)?,
-            self.grouped_dut_counts(s::FETCH_SELECT_DUT_COUNT_PASS)?,
-            self.grouped_dut_counts(s::FETCH_SELECT_DUT_COUNT_FAIL)?,
-            self.grouped_dut_counts(s::FETCH_SELECT_DUT_COUNT_UNKNOWN)?,
-            self.grouped_dut_counts(s::FETCH_SELECT_DUT_COUNT_SUPERSEDED)?,
-        ])
     }
 
     /// `getDUTCountOnConditions()` — [Pass, Failed, Unknown, Superseded].
@@ -1082,6 +1167,9 @@ impl DataFetcher {
 
     /// `getDutIndexDictFromHeadSite()` rows — (Fid, DUTIndex) for non-empty
     /// head/site selections, ordered by Fid then DUTIndex.
+    ///
+    /// Served from `head_site_idx_all`: the Python method has *no* Supersede
+    /// filter, so it must use the all-rows index (not the Supersede=0 cache).
     pub fn dut_index_rows_by_head_site(
         &self,
         heads: &[i64],
@@ -1091,31 +1179,32 @@ impl DataFetcher {
         if heads.is_empty() || sites.is_empty() {
             return Ok(Vec::new());
         }
-        let mut sql = format!(
-            "SELECT Fid, DUTIndex FROM Dut_Info WHERE Fid IN ({})",
-            Self::in_clause_placeholders(file_ids.len())
-        );
-        let mut params: Vec<i64> = file_ids.to_vec();
-        sql.push_str(" AND HEAD_NUM IN (");
-        sql.push_str(&Self::in_clause_placeholders(heads.len()));
-        sql.push(')');
-        params.extend_from_slice(heads);
-        if sites.contains(&-1) {
-            sql.push_str(" AND SITE_NUM >= 0");
-        } else {
-            sql.push_str(" AND SITE_NUM IN (");
-            sql.push_str(&Self::in_clause_placeholders(sites.len()));
-            sql.push(')');
-            params.extend_from_slice(sites);
+        let all_sites = sites.contains(&-1);
+        let mut out: Vec<(i64, i64)> = Vec::new();
+        for &fid64 in file_ids {
+            let Ok(fid) = usize::try_from(fid64) else { continue };
+            let mut acc: Vec<usize> = Vec::new();
+            for &h64 in heads {
+                let Ok(head) = u8::try_from(h64) else { continue };
+                if all_sites {
+                    if let Some(list) = self.head_site_idx_all.get(&(fid, head, None)) {
+                        merge_sorted_unique(&mut acc, list);
+                    }
+                } else {
+                    for &s64 in sites {
+                        let Ok(site) = u8::try_from(s64) else { continue };
+                        if let Some(list) = self.head_site_idx_all.get(&(fid, head, Some(site))) {
+                            merge_sorted_unique(&mut acc, list);
+                        }
+                    }
+                }
+            }
+            out.extend(
+                acc.into_iter()
+                    .map(|row| (fid as i64, (row + 1) as i64)),
+            );
         }
-        sql.push_str(" ORDER By Fid, DUTIndex");
-        let mut stmt = self.conn.prepare_cached(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+        Ok(out)
     }
 
     /// `getDUTIndexFromBin()` — unique (Fid, DUTIndex) pairs in the order the
@@ -1159,6 +1248,8 @@ impl DataFetcher {
         selections: &[(i64, i64, (i64, i64))],
     ) -> Result<Vec<(i64, i64)>, StdfHelperError> {
         let mut out: Vec<(i64, i64)> = Vec::new();
+        // Kept inline: the WHERE clause grows appended conditions per call
+        // (site lists), which does not fit the fixed-constant schema.rs rule.
         for (wafer_index, fid, (x, y)) in selections {
             if *wafer_index == -1 {
                 let sql = "SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD=? AND YCOORD=?";
@@ -1207,76 +1298,225 @@ impl DataFetcher {
         })?)
     }
 
-    /// `getDynamicLimits()` rows — (DUTIndex, LLimit, HLimit) for the given
-    /// test and requested DUTs, ordered by DUTIndex.
-    pub fn dynamic_limit_rows(
-        &self,
-        test_num: i64,
-        test_name: &str,
-        duts: &[i64],
-    ) -> Result<Vec<(i64, Option<f64>, Option<f64>)>, StdfHelperError> {
-        if duts.is_empty() {
-            return Ok(Vec::new());
+    /// Eagerly load every `Dynamic_Limits` row into per-TEST_ID arrays
+    /// (permanent cache, no LRU; cleared on close).
+    ///
+    /// Defaults come from the eagerly cached `Test_Info` map, so no extra DB
+    /// read is needed. Rows are ORDER BY TEST_ID, DUTIndex, so one merge pass
+    /// fills each test's arrays directly (no per-test staging map). A side is
+    /// only kept when it has a static default *and* at least one dynamic row;
+    /// tests without any valid dynamic side are not cached at all.
+    fn load_dynamic_limits(&mut self) -> Result<(), StdfHelperError> {
+        let mut defaults: HashMap<TestId, (usize, Option<f32>, Option<f32>)> = HashMap::new();
+        for (&(fid, _), by_name) in &self.test_info {
+            for info in by_name.values() {
+                defaults.insert(info.test_id, (fid, info.llimit, info.hlimit));
+            }
         }
-        let sql = format!(
-            "SELECT DUTIndex, LLimit, HLimit FROM Dynamic_Limits WHERE TEST_ID in              (SELECT TEST_ID FROM Test_Info WHERE TEST_NUM=? AND TEST_NAME=?)              AND DUTIndex in ({}) ORDER by DUTIndex",
-            Self::in_clause_placeholders(duts.len())
+
+        let mut limits: HashMap<TestId, DynamicLimitEntry> = HashMap::new();
+        let mut active: Option<TestId> = None;
+        let mut n = 0usize;
+        let mut ll_arr: Option<Array1<f32>> = None;
+        let mut hl_arr: Option<Array1<f32>> = None;
+        let mut ll_def: Option<f32> = None;
+        let mut hl_def: Option<f32> = None;
+        let mut ll_valid: Vec<usize> = Vec::new();
+        let mut hl_valid: Vec<usize> = Vec::new();
+
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DYNAMIC_LIMITS_ALL)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<f32>>(2)?,
+                row.get::<_, Option<f32>>(3)?,
+            ))
+        })?;
+        for r in rows {
+            let (test_id, dut_index, ll, hl) = r?;
+            if active != Some(test_id) {
+                flush_dynamic_entry(
+                    &mut limits,
+                    &mut active,
+                    &mut n,
+                    &mut ll_arr,
+                    &mut hl_arr,
+                    &mut ll_def,
+                    &mut hl_def,
+                    &mut ll_valid,
+                    &mut hl_valid,
+                );
+                active = Some(test_id);
+                ll_arr = None;
+                hl_arr = None;
+                ll_def = None;
+                hl_def = None;
+                match defaults.get(&test_id) {
+                    Some(&(fid, lld, hld)) => {
+                        n = self.full_dut.get(&fid).map(|a| a.len()).unwrap_or(0);
+                        ll_def = lld;
+                        hl_def = hld;
+                        // No static default -> no side array (Python treats a
+                        // NaN default as "no dynamic limits" for that side).
+                        ll_arr = ll_def.map(|v| Array1::from_elem(n, v));
+                        hl_arr = hl_def.map(|v| Array1::from_elem(n, v));
+                    }
+                    None => n = 0,
+                }
+            }
+            if n > 0 {
+                let idx = (dut_index as usize).saturating_sub(1);
+                if idx < n {
+                    if let (Some(arr), Some(v)) = (ll_arr.as_mut(), ll) {
+                        arr[idx] = v;
+                        ll_valid.push(idx);
+                    }
+                    if let (Some(arr), Some(v)) = (hl_arr.as_mut(), hl) {
+                        arr[idx] = v;
+                        hl_valid.push(idx);
+                    }
+                }
+            }
+        }
+        flush_dynamic_entry(
+            &mut limits,
+            &mut active,
+            &mut n,
+            &mut ll_arr,
+            &mut hl_arr,
+            &mut ll_def,
+            &mut hl_def,
+            &mut ll_valid,
+            &mut hl_valid,
         );
-        let mut stmt = self.conn.prepare_cached(&sql)?;
-        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&test_num, &test_name];
-        for d in duts {
-            params.push(d);
-        }
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<f64>>(1)?,
-                    row.get::<_, Option<f64>>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+        self.dynamic_limits = limits;
+        Ok(())
     }
 
-    /// `getPartialDUTInfoOnCondition()` rows — formatted exactly like the
-    /// Python reference SQL: (DUTIndex, PartID, "Head h - Site s", "State - 0xFL").
+    /// `getDynamicLimits()` — for each requested DUT and side, the dynamic
+    /// override where a row exists, otherwise the static default fill. A side
+    /// is empty when none of the requested DUTs carries a dynamic value
+    /// (mirrors the Python `hasDynamicLow/High` contract). The returned arrays
+    /// always have the same length as `duts` (out-of-range requests fall back
+    /// to the static default, exactly like the dict-based reference).
+    pub fn dynamic_limits_for(&self, test_id: TestId, duts: &[u64]) -> (Vec<f32>, Vec<f32>) {
+        let Some(entry) = self.dynamic_limits.get(&test_id) else {
+            return (Vec::new(), Vec::new());
+        };
+        // requested row positions (may include out-of-range entries, kept so
+        // the output length always matches the request)
+        let req: Vec<usize> = duts
+            .iter()
+            .filter_map(|&d| (d >= 1).then(|| (d as usize) - 1))
+            .collect();
+        // any() + binary_search: req is unsorted, the valid sets are sorted;
+        // intersect_sorted would only add a sort for a yes/no answer.
+        let has = |valid: &[usize]| req.iter().any(|p| valid.binary_search(p).is_ok());
+        // No DUTs are filtered out, so a direct per-DUT read is the simplest
+        // correct fill (ndarray select() would add machinery for nothing here).
+        // Requested DUTs are always within 1..=N on real lots; an out-of-range
+        // request, if ever passed, falls back to the static default exactly
+        // like the dict-based reference.
+        let values = |arr: &Array1<f32>, default: Option<f32>| -> Vec<f32> {
+            duts.iter()
+                .map(|&d| {
+                    if d >= 1 {
+                        let p = d as usize - 1;
+                        if p < arr.len() {
+                            arr[p]
+                        } else {
+                            default.unwrap_or(f32::NAN)
+                        }
+                    } else {
+                        default.unwrap_or(f32::NAN)
+                    }
+                })
+                .collect()
+        };
+        let low = if has(&entry.ll_valid_idx) {
+            match (&entry.llimit, entry.ll_default) {
+                (Some(arr), def) => values(arr, def),
+                (None, _) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let high = if has(&entry.hl_valid_idx) {
+            match (&entry.hlimit, entry.hl_default) {
+                (Some(arr), def) => values(arr, def),
+                (None, _) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        (low, high)
+    }
+
+    /// Lazily build (once per file) the raw `Dut_Info` row cache used by the
+    /// partial-DUT-info query. Keeps raw fields only; formatted strings are
+    /// produced per call for the filtered subset.
+    fn ensure_partial_info(&mut self, fid: usize) -> Result<(), StdfHelperError> {
+        if self.partial_info.contains_key(&fid) {
+            return Ok(());
+        }
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PARTIAL_RAW)?;
+        let rows = stmt.query_map([fid as i64], |row| {
+            Ok(PartialDutRow {
+                row_index: (row.get::<_, i64>(0)? as usize) - 1,
+                part_id: row.get(1)?,
+                part_text: row.get(2)?,
+                head: row.get(3)?,
+                site: row.get(4)?,
+                superseded: row.get::<_, i64>(5)? != 0,
+                flag: row.get(6)?,
+            })
+        })?;
+        let mut all = Vec::new();
+        for r in rows {
+            all.push(r?);
+        }
+        self.partial_info.insert(fid, all);
+        Ok(())
+    }
+
+    /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
+    /// "Head h - Site s", PartText, "State - 0xFL") served from the raw row
+    /// cache. PartText is a new field added to the DUT-info rows (Python
+    /// consumers were updated to the 5-field tuple).
     pub fn partial_dut_info_rows(
-        &self,
+        &mut self,
         heads: &[i64],
         sites: &[i64],
         file_id: i64,
-    ) -> Result<Vec<(i64, Option<String>, String, String)>, StdfHelperError> {
+    ) -> Result<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>, StdfHelperError>
+    {
         if heads.is_empty() || sites.is_empty() {
             return Ok(Vec::new());
         }
-        let mut sql = format!(
-            "SELECT DUTIndex, PartID,              'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM,              printf(\"%s - 0x%02X\", CASE                  WHEN Supersede=1 THEN 'Superseded'                  WHEN Flag & 24 = 0 THEN 'Pass'                  WHEN Flag & 24 = 8 THEN 'Failed'                  ELSE 'Unknown' END, Flag)              FROM Dut_Info WHERE Fid=? AND HEAD_NUM IN ({})",
-            Self::in_clause_placeholders(heads.len())
-        );
-        let mut params: Vec<i64> = vec![file_id];
-        params.extend_from_slice(heads);
-        if sites.contains(&-1) {
-            sql.push_str(" AND SITE_NUM >= 0");
-        } else {
-            sql.push_str(" AND SITE_NUM IN (");
-            sql.push_str(&Self::in_clause_placeholders(sites.len()));
-            sql.push(')');
-            params.extend_from_slice(sites);
+        let Ok(fid) = usize::try_from(file_id) else {
+            return Ok(Vec::new());
+        };
+        self.ensure_partial_info(fid)?;
+        let all_sites = sites.contains(&-1);
+        let mut out = Vec::new();
+        let rows = self.partial_info.get(&fid).expect("just ensured");
+        for row in rows {
+            if !heads.contains(&(row.head as i64)) {
+                continue;
+            }
+            if !all_sites && !sites.contains(&(row.site as i64)) {
+                continue;
+            }
+            out.push((
+                (row.row_index + 1) as i64,
+                row.part_id.clone(),
+                format!("Head {} - Site {}", row.head, row.site),
+                row.part_text.clone(),
+                format_dut_flag(row.superseded, row.flag),
+            ));
         }
-        sql.push_str(" ORDER By DUTIndex");
-        let mut stmt = self.conn.prepare_cached(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+        Ok(out)
     }
 }
 
@@ -1313,16 +1553,8 @@ impl DataFetcher {
         is_rtn: bool,
         fid: i64,
     ) -> Result<Vec<(i64, String, String, i64, i64, String)>, StdfHelperError> {
-        let sql = "SELECT A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM \
-                   FROM ((SELECT ROWID, PMR_INDX FROM TestPin_Map \
-                       WHERE PIN_TYPE=? AND TEST_ID in \
-                           (SELECT TEST_ID FROM Test_Info \
-                            WHERE TEST_NUM=? AND TEST_NAME=? AND Fid=?)) as A \
-                       INNER JOIN Pin_Map \
-                       ON A.PMR_INDX=Pin_Map.PMR_INDX AND Pin_Map.Fid=?) \
-                   ORDER BY A.ROWID";
         let pin_type = if is_rtn { "RTN" } else { "PGM" };
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PIN_NAMES)?;
         let rows = stmt
             .query_map(
                 rusqlite::params![pin_type, test_num, test_name, fid, fid],
@@ -1344,10 +1576,7 @@ impl DataFetcher {
 
     /// All `Wafer_Info` rows ordered by `WaferIndex` (as the reference query).
     pub fn wafer_info_rows(&self) -> Result<Vec<WaferInfoRow>, StdfHelperError> {
-        let sql = "SELECT Fid, HEAD_NUM, WaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, \
-                   GOOD_CNT, FUNC_CNT, WAFER_ID, FABWF_ID, FRAME_ID, MASK_ID, \
-                   USR_DESC, EXC_DESC FROM Wafer_Info ORDER by WaferIndex";
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_WAFER_INFO)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(WaferInfoRow {
@@ -1373,10 +1602,7 @@ impl DataFetcher {
 
     /// `File_Info` rows used to extend `getWaferInfo()` (SubFid=0 die fields).
     pub fn wafer_ext_rows(&self, fid: i64) -> Result<Vec<(String, Option<String>)>, StdfHelperError> {
-        let sql = "SELECT Field, Value FROM File_Info \
-                   WHERE Fid=? AND SubFid=0 AND Field in \
-                   ('DIE_WID', 'DIE_HT', 'POS_X', 'POS_Y', 'WF_UNITS')";
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_WAFER_EXT)?;
         let rows = stmt
             .query_map([fid], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -1452,18 +1678,7 @@ impl DataFetcher {
     /// `getDTR_GDRs()` rows — (Record Type, Value, Approx. Location) formatted
     /// like the reference DATALOG_QUERY (the reference iterates three columns).
     pub fn datalog_rows(&self) -> Result<Vec<(String, String, String)>, StdfHelperError> {
-        let sql = "SELECT RecordType AS \"Record Type\", \
-                   '\\n' || Value || '\\n' AS \"Value\", \
-                   printf(\"%s ··· %s ··· %s\", \
-                       CASE WHEN AfterDUTIndex == 0 THEN \"|\" \
-                            ELSE printf(\"PIR #%d\", AfterDUTIndex) END, \
-                       CASE WHEN isBeforePRR == 1 THEN RecordType \
-                            ELSE printf(\"PRR #%d\", AfterDUTIndex) END, \
-                       CASE WHEN AfterDUTIndex == 0 THEN \"PIR #1\" \
-                            WHEN isBeforePRR == 1 THEN printf(\"PRR #%d\", AfterDUTIndex) \
-                            ELSE RecordType END) AS \"Approx. Location\" \
-                   FROM Datalog";
-        let mut stmt = self.conn.prepare_cached(sql)?;
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DATALOG)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -1475,4 +1690,90 @@ impl DataFetcher {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+}
+
+/// Merge a sorted unique `b` into a sorted unique `a` (result stays sorted,
+/// no duplicates) — used to combine per-head/per-site index lists.
+fn merge_sorted_unique(a: &mut Vec<usize>, b: &[usize]) {
+    if b.is_empty() {
+        return;
+    }
+    if a.is_empty() {
+        *a = b.to_vec();
+        return;
+    }
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] {
+            out.push(a[i]);
+            i += 1;
+            j += 1;
+        } else if a[i] < b[j] {
+            out.push(a[i]);
+            i += 1;
+        } else {
+            out.push(b[j]);
+            j += 1;
+        }
+    }
+    out.extend_from_slice(&a[i..]);
+    out.extend_from_slice(&b[j..]);
+    *a = out;
+}
+
+/// Mirrors the SQL `printf("%s - 0x%02X", CASE …, Flag)`: NULL Flag yields
+/// NULL, exactly like the Python reference query.
+fn format_dut_flag(superseded: bool, flag: Option<i64>) -> Option<String> {
+    let flag = flag?;
+    let state = if superseded {
+        "Superseded"
+    } else {
+        match flag & 24 {
+            0 => "Pass",
+            8 => "Failed",
+            _ => "Unknown",
+        }
+    };
+    Some(format!("{} - 0x{:02X}", state, flag))
+}
+
+/// Finalize one test group of the dynamic-limit loader. Sides whose index set
+/// stayed empty are discarded (they can never be queried), and a test without
+/// any valid dynamic side is not cached at all.
+fn flush_dynamic_entry(
+    limits: &mut HashMap<TestId, DynamicLimitEntry>,
+    active: &mut Option<TestId>,
+    n: &mut usize,
+    ll_arr: &mut Option<Array1<f32>>,
+    hl_arr: &mut Option<Array1<f32>>,
+    ll_def: &mut Option<f32>,
+    hl_def: &mut Option<f32>,
+    ll_valid: &mut Vec<usize>,
+    hl_valid: &mut Vec<usize>,
+) {
+    let Some(test_id) = active.take() else {
+        return;
+    };
+    *n = 0;
+    let ll_arr = if ll_valid.is_empty() { None } else { ll_arr.take() };
+    let hl_arr = if hl_valid.is_empty() { None } else { hl_arr.take() };
+    let ll_def = if ll_arr.is_some() { ll_def.take() } else { None };
+    let hl_def = if hl_arr.is_some() { hl_def.take() } else { None };
+    if ll_arr.is_none() && hl_arr.is_none() {
+        ll_valid.clear();
+        hl_valid.clear();
+        return;
+    }
+    limits.insert(
+        test_id,
+        DynamicLimitEntry {
+            llimit: ll_arr,
+            hlimit: hl_arr,
+            ll_default: ll_def,
+            hl_default: hl_def,
+            ll_valid_idx: std::mem::take(ll_valid),
+            hl_valid_idx: std::mem::take(hl_valid),
+        },
+    );
 }

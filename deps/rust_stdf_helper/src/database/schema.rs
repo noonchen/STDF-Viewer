@@ -400,7 +400,20 @@ pub(crate) static FETCH_SELECT_DUT_HEAD_SITE: &str = "SELECT
     FROM 
         Dut_Info 
     WHERE 
-        Fid=? AND Supersede=0";
+        Fid=? AND Supersede=0 
+    ORDER BY 
+        DUTIndex";
+
+pub(crate) static FETCH_SELECT_DUT_HEAD_SITE_ALL: &str = "SELECT 
+        DUTIndex, 
+        HEAD_NUM, 
+        SITE_NUM 
+    FROM 
+        Dut_Info 
+    WHERE 
+        Fid=? 
+    ORDER BY 
+        DUTIndex";
 
 pub(crate) static FETCH_SELECT_SITE_LIST: &str = "SELECT 
         DISTINCT SITE_NUM 
@@ -411,28 +424,6 @@ pub(crate) static FETCH_SELECT_HEAD_LIST: &str = "SELECT
         DISTINCT HEAD_NUM 
     FROM 
         Dut_Info";
-
-pub(crate) static FETCH_SELECT_TEST_INFO: &str = "SELECT 
-        TEST_ID, 
-        SUB_CODE, 
-        TEST_NUM, 
-        TEST_NAME, 
-        RES_SCAL, 
-        LLimit, 
-        HLimit, 
-        Unit, 
-        OPT_FLAG, 
-        FailCount, 
-        RTN_ICNT, 
-        RSLT_PGM_CNT, 
-        LSpec, 
-        HSpec, 
-        VECT_NAM, 
-        SEQ_NAME 
-    FROM 
-        Test_Info 
-    WHERE 
-        Fid=? AND TEST_NUM=? AND TEST_NAME=?";
 
 pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT 
         DUTIndex, 
@@ -566,46 +557,144 @@ pub(crate) static FETCH_SELECT_FILE_INFO: &str = "SELECT
 
 /****** DUT-level queries (mirrors deps/DatabaseFetcher.py) ******/
 
-pub(crate) static FETCH_SELECT_DUT_COUNT_TOTAL: &str = "SELECT 
-        Fid, count(*) 
+/****** Queries moved out of database/fetcher.rs (fixed SQL, no appended conditions) ******/
+
+pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT 
+        DUTIndex, 
+        Dut_Info.Fid AS \"File ID\", 
+        PartID, 
+        PartText, 
+        'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM, 
+        TestCount, 
+        TestTime || ' ms', 
+        'Bin ' || HBIN, 
+        'Bin ' || SBIN, 
+        wf.WAFER_ID, 
+        '(' || XCOORD || ', ' || YCOORD || ')', 
+        printf(\"%s - 0x%02X\", CASE 
+                WHEN Supersede=1 THEN 'Superseded' 
+                WHEN Flag & 24 = 0 THEN 'Pass' 
+                WHEN Flag & 24 = 8 THEN 'Failed' 
+                ELSE 'Unknown' END, Flag) 
+    FROM 
+        (Dut_Info 
+            LEFT JOIN (SELECT Fid, WaferIndex, WAFER_ID FROM Wafer_Info) AS wf 
+            ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)";
+
+pub(crate) static FETCH_SELECT_DATALOG: &str = "SELECT 
+        RecordType AS \"Record Type\", 
+        '\\n' || Value || '\\n' AS \"Value\", 
+        printf(\"%s ··· %s ··· %s\", 
+            CASE WHEN AfterDUTIndex == 0 THEN \"|\" 
+                 ELSE printf(\"PIR #%d\", AfterDUTIndex) END, 
+            CASE WHEN isBeforePRR == 1 THEN RecordType 
+                 ELSE printf(\"PRR #%d\", AfterDUTIndex) END, 
+            CASE WHEN AfterDUTIndex == 0 THEN \"PIR #1\" 
+                 WHEN isBeforePRR == 1 THEN printf(\"PRR #%d\", AfterDUTIndex) 
+                 ELSE RecordType END) AS \"Approx. Location\" 
+    FROM 
+        Datalog";
+
+pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT 
+        Fid, HEAD_NUM, WaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, 
+        GOOD_CNT, FUNC_CNT, WAFER_ID, FABWF_ID, FRAME_ID, MASK_ID, 
+        USR_DESC, EXC_DESC 
+    FROM 
+        Wafer_Info 
+    ORDER by 
+        WaferIndex";
+
+pub(crate) static FETCH_SELECT_WAFER_EXT: &str = "SELECT 
+        Field, Value 
+    FROM 
+        File_Info 
+    WHERE 
+        Fid=? AND SubFid=0 AND Field in 
+        ('DIE_WID', 'DIE_HT', 'POS_X', 'POS_Y', 'WF_UNITS')";
+
+pub(crate) static FETCH_SELECT_PIN_NAMES: &str = "SELECT 
+        A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM 
+    FROM 
+        ((SELECT ROWID, PMR_INDX FROM TestPin_Map 
+            WHERE PIN_TYPE=? AND TEST_ID in 
+                (SELECT TEST_ID FROM Test_Info 
+                 WHERE TEST_NUM=? AND TEST_NAME=? AND Fid=?)) as A 
+        INNER JOIN 
+            Pin_Map 
+        ON 
+            A.PMR_INDX=Pin_Map.PMR_INDX AND Pin_Map.Fid=?) 
+    ORDER BY A.ROWID";
+
+// {column} is filled in with a caller-supplied identifier (see
+// is_dut_info_column_empty); no other text is ever appended.
+pub(crate) static FETCH_EXISTS_DUT_COLUMN: &str = "SELECT EXISTS (
+        SELECT 1 
+        FROM Dut_Info 
+        WHERE {column} IS NOT NULL 
+            AND 
+            (typeof({column}) != 'text' OR trim({column}) != \"\"))";
+
+// Single conditional-aggregation pass replacing the five grouped counts.
+pub(crate) static FETCH_SELECT_DUT_COUNTS: &str = "SELECT 
+        Fid, 
+        count(*), 
+        sum(CASE WHEN Supersede=0 AND (Flag & 24)=0 THEN 1 ELSE 0 END), 
+        sum(CASE WHEN Supersede=0 AND (Flag & 24)=8 THEN 1 ELSE 0 END), 
+        sum(CASE WHEN Flag IS NULL OR (Supersede=0 AND (Flag & 16)=16) THEN 1 ELSE 0 END), 
+        sum(CASE WHEN Supersede=1 THEN 1 ELSE 0 END) 
     FROM 
         Dut_Info 
     GROUP by Fid 
     ORDER by Fid";
 
-pub(crate) static FETCH_SELECT_DUT_COUNT_PASS: &str = "SELECT 
-        Fid, count(*) 
+
+pub(crate) static FETCH_SELECT_PARTIAL_RAW: &str = "SELECT 
+        DUTIndex, 
+        PartID, 
+        PartText, 
+        HEAD_NUM, 
+        SITE_NUM, 
+        Supersede, 
+        Flag 
     FROM 
         Dut_Info 
-    WHERE Supersede=0 AND Flag & 24 = 0 
-    GROUP by Fid 
-    ORDER by Fid";
+    WHERE 
+        Fid=? 
+    ORDER BY 
+        DUTIndex";
 
-pub(crate) static FETCH_SELECT_DUT_COUNT_FAIL: &str = "SELECT 
-        Fid, count(*) 
+
+// Full Test_Info row set, used to prime the eager test_info cache.
+pub(crate) static FETCH_SELECT_ALL_TEST_INFO: &str = "SELECT 
+        Fid, 
+        TEST_ID, 
+        SUB_CODE, 
+        TEST_NUM, 
+        TEST_NAME, 
+        RES_SCAL, 
+        LLimit, 
+        HLimit, 
+        Unit, 
+        OPT_FLAG, 
+        FailCount, 
+        RTN_ICNT, 
+        RSLT_PGM_CNT, 
+        LSpec, 
+        HSpec, 
+        VECT_NAM, 
+        SEQ_NAME 
     FROM 
-        Dut_Info 
-    WHERE Supersede=0 AND Flag & 24 = 8 
-    GROUP by Fid 
-    ORDER by Fid";
+        Test_Info";
 
-pub(crate) static FETCH_SELECT_DUT_COUNT_UNKNOWN: &str = "SELECT 
-        Fid, count(*) 
+// Full Dynamic_Limits table for the eager cache build.
+pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_ALL: &str = "SELECT 
+        TEST_ID, DUTIndex, LLimit, HLimit 
     FROM 
-        Dut_Info 
-    WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16) 
-    GROUP by Fid 
-    ORDER by Fid";
+        Dynamic_Limits 
+    ORDER BY 
+        TEST_ID, DUTIndex";
 
-pub(crate) static FETCH_SELECT_DUT_COUNT_SUPERSEDED: &str = "SELECT 
-        Fid, count(*) 
-    FROM 
-        Dut_Info 
-    WHERE Supersede=1 
-    GROUP by Fid 
-    ORDER by Fid";
-
-// Single-count variants for getDUTCountOnConditions(); {extra} holds the
+// Single-count templates for getDUTCountOnConditions(); {extra} carries the
 // optional " AND COL=?" pieces appended by the caller.
 pub(crate) static FETCH_COUNT_ON_COND_PASS: &str = "SELECT 
         count(*) 
@@ -630,25 +719,6 @@ pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT
     FROM 
         Dut_Info 
     WHERE Supersede=1{extra}";
-
-pub(crate) static FETCH_SELECT_DUT_INDEX_HEAD_SITE: &str = "SELECT 
-        Fid, DUTIndex 
-    FROM 
-        Dut_Info 
-    WHERE {file_cond}{head_cond}{site_cond}
-    ORDER By Fid, DUTIndex";
-
-pub(crate) static FETCH_SELECT_DUT_INDEX_BIN: &str = "SELECT 
-        Fid, DUTIndex 
-    FROM 
-        Dut_Info 
-    WHERE {bin_col} IN ({bin_list}) AND Fid={fid}";
-
-pub(crate) static FETCH_SELECT_DUT_INDEX_XY: &str = "SELECT 
-        Fid, DUTIndex 
-    FROM 
-        Dut_Info 
-    WHERE XCOORD={x} AND YCOORD={y}{wafer_cond}{fid_cond}";
 
 pub(crate) static FETCH_SELECT_WAFER_BOUNDS: &str = "SELECT 
         max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 

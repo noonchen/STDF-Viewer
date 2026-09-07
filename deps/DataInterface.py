@@ -773,13 +773,11 @@ class DataInterface:
             if test_site_fid["SUB_CODE"] == REC.MPR:
                 nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
             elif test_site_fid["SUB_CODE"] == REC.PTR:
-                # dynamic limit
+                # dynamic limit (defaults are filled by the fetcher itself)
                 dyL, dyH = self.DatabaseFetcher.getDynamicLimits(test_site_fid["TEST_NUM"],
                                                                  test_site_fid["TEST_NAME"],
                                                                  nestSiteData["dutList"],
-                                                                 fid,
-                                                                 test_site_fid["LLimit"],
-                                                                 test_site_fid["HLimit"])
+                                                                 fid)
                 nestSiteData["dyLLimit"] = dyL
                 nestSiteData["dyHLimit"] = dyH
             # info that are same for all sites 

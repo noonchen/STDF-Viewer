@@ -23,7 +23,7 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pydantic import BaseModel, Field, field_validator, field_serializer
-from rust_stdf_helper import TestSubCode, get_icon_src
+from rust_stdf_helper import TestSubCode, dut_summary_query, get_icon_src
 
 
 class TrendPlotConfig(BaseModel):
@@ -286,46 +286,7 @@ FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
                 All Files (*.*)'''
 
 
-DUT_SUMMARY_QUERY = '''SELECT
-                            DUTIndex,
-                            Dut_Info.Fid AS "File ID",
-                            PartID AS "Part ID",
-                            PartText AS "Part Text",
-                            'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
-                            TestCount AS "Tests Executed",
-                            TestTime || ' ms' AS "Test Time",
-                            'Bin ' || HBIN AS "Hardware Bin",
-                            'Bin ' || SBIN AS "Software Bin",
-                            wf.WAFER_ID AS "Wafer ID",
-                            '(' || XCOORD || ', ' || YCOORD || ')' AS "(X, Y)",
-                            printf("%s - 0x%02X", CASE 
-                                    WHEN Supersede=1 THEN 'Superseded' 
-                                    WHEN Flag & 24 = 0 THEN 'Pass' 
-                                    WHEN Flag & 24 = 8 THEN 'Failed' 
-                                    ELSE 'Unknown' 
-                                    END, Flag) AS "DUT Flag"
-                        FROM (Dut_Info 
-                            LEFT JOIN (SELECT 
-                                            Fid, WaferIndex, WAFER_ID 
-                                        FROM 
-                                            Wafer_Info) AS "wf" 
-                            ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)'''
-
-
-# ********** python equivalent ******** #
-# # generate approx location
-# if AfterDUTIndex == 0:
-#     leftStr = "|"
-#     midStr = RecordType
-#     rightStr = "PIR #1"
-# elif isBeforePRR:
-#     leftStr = f"PIR #{AfterDUTIndex}"
-#     midStr = RecordType
-#     rightStr = f"PRR #{AfterDUTIndex}"
-# else:
-#     leftStr = f"PIR #{AfterDUTIndex}"
-#     midStr = f"PRR #{AfterDUTIndex}"
-#     rightStr = RecordType
+DUT_SUMMARY_QUERY = dut_summary_query()
 DATALOG_QUERY = '''SELECT
                         Fid as "File ID",
                         RecordType AS "Record Type",

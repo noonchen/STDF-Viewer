@@ -961,7 +961,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setDutIndexMap(d["dut2ind"])
         self.tmodel_data.setDutInfoMap(d["dutInfo"])
         self.tmodel_data.setTestLists(d["TestLists"])
-        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
+        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site"), self.tr("Part Text")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
         self.tmodel_data.setFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))

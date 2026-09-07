@@ -566,7 +566,7 @@ class DatabaseFetcher:
                 dutList.append(dutIndex)
                 dataList.append(rslt)
                 flagList.append(flag)
-            return {"dutList": np.array(dutList, dtype=np.uint32), 
+            return {"dutList": np.array(dutList, dtype=np.uint64), 
                     "dataList": np.array(dataList, dtype=np.float32), 
                     "flagList": np.array(flagList, dtype=np.uint8)}
         
@@ -583,7 +583,7 @@ class DatabaseFetcher:
                 dataList.append(np.frombuffer(bytearray.fromhex(rslts_hex), dtype=np.float32))
                 stateList.append(np.frombuffer(bytearray.fromhex(stats_hex), dtype=np.uint8))
                 flagList.append(flag)
-            return {"dutList": np.array(dutList, dtype=np.uint32), 
+            return {"dutList": np.array(dutList, dtype=np.uint64), 
                     # after transpose, row: pmr, col: dutIndex
                     "dataList": np.array(dataList).T, 
                     "stateList": np.array(stateList).T,
@@ -601,7 +601,7 @@ class DatabaseFetcher:
                                                         '''):
                 dutList.append(dutIndex)
                 flagList.append(flag)
-            return {"dutList": np.array(dutList, dtype=np.uint32), 
+            return {"dutList": np.array(dutList, dtype=np.uint64), 
                     "flagList": np.array(flagList, dtype=np.uint8)}
 
     
@@ -648,7 +648,7 @@ class DatabaseFetcher:
         else:
             dut_condition = f''' AND DUTIndex IN ({commaJoin(duts)})'''
         
-        dutList = np.array(sorted(duts), dtype=np.uint32)
+        dutList = np.array(sorted(duts), dtype=np.uint64)
         dutMap = dict(zip(dutList, range(dutsCount)))
         maxDutIndex = np.max(dutList)
         # initiate default value, shape of dataList is related to 
@@ -915,20 +915,32 @@ class DatabaseFetcher:
         return dutIndexList
     
     
-    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, fileId:int, LLimit:float, HLimit:float):
+    def getDynamicLimits(self, test_num:int, test_name:str, dutList:np.ndarray, fileId:int):
         '''
         return (dynamic llim arr, dynamic hlim arr)
+
+        Static defaults come from this file's Test_Info row; dynamic rows
+        (same file's TEST_ID) override per DUT. A side is empty when none of
+        the requested DUTs carries a dynamic value for that side.
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
+        dyL = np.array([], dtype=np.float32)
+        dyH = np.array([], dtype=np.float32)
+        
+        default_row = self.cursor.execute("SELECT LLimit, HLimit FROM Test_Info \
+                                               WHERE Fid=? AND TEST_NUM=? AND TEST_NAME=?", \
+                                          (fileId, test_num, test_name)).fetchone()
+        if default_row is None:
+            return dyL, dyH
+        LLimit = np.nan if default_row[0] is None else default_row[0]
+        HLimit = np.nan if default_row[1] is None else default_row[1]
         hasValidLow = ~np.isnan(LLimit)
         hasValidHigh = ~np.isnan(HLimit)
         hasDynamicLow = False
         hasDynamicHigh = False
-        dyL = np.array([], dtype=np.float32)
-        dyH = np.array([], dtype=np.float32)
         
         if hasValidLow or hasValidHigh:
-            # dutIndex -> dynamic limit
+            # default value for each dut, dynamic rows overwrite it
             tmpL = np.full(dutList.size, LLimit, np.float32)
             tmpH = np.full(dutList.size, HLimit, np.float32)
             dyLLimitsDict = dict(zip(dutList, tmpL))
@@ -951,7 +963,6 @@ class DatabaseFetcher:
             sql_param = [test_num, test_name, fileId]
                 
             for dutIndex, dyLL, dyHL in self.cursor.execute(sql, sql_param):
-                # replace the limit in the list of the same index as the dutIndex in dutList
                 if hasValidLow and (dyLL is not None):
                     hasDynamicLow = True
                     dyLLimitsDict[dutIndex] = dyLL
@@ -959,15 +970,13 @@ class DatabaseFetcher:
                     hasDynamicHigh = True
                     dyHLimitsDict[dutIndex] = dyHL
                     
-            # replace with empty dict if no dynamic limit
             if hasDynamicLow:
                 dyL = np.array([dyLLimitsDict[dutIndex] for dutIndex in dutList], dtype=np.float32)
             if hasDynamicHigh:
                 dyH = np.array([dyHLimitsDict[dutIndex] for dutIndex in dutList], dtype=np.float32)
         
         return dyL, dyH
-    
-    
+
     def getDTR_GDRs(self) -> list[tuple]:
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -981,7 +990,7 @@ class DatabaseFetcher:
     
     def getPartialDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileId: int) -> dict:
         '''
-        return a dict of dutIndex -> (part id, head-site, dut flag)
+        return a dict of dutIndex -> (part id, head-site, part text, dut flag)
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -995,6 +1004,7 @@ class DatabaseFetcher:
                     DUTIndex,
                     PartID AS "Part ID",
                     'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
+                    PartText AS "Part Text",
                     printf("%s - 0x%02X", CASE 
                             WHEN Supersede=1 THEN 'Superseded' 
                             WHEN Flag & 24 = 0 THEN 'Pass' 
@@ -1005,12 +1015,11 @@ class DatabaseFetcher:
                 ORDER By DUTIndex'''
         
         info = {}
-        for dutIndex, partId, hsStr, flagStr in self.cursor.execute(sql):
-            info[dutIndex] = (partId, hsStr, flagStr)
+        for dutIndex, partId, hsStr, partText, flagStr in self.cursor.execute(sql):
+            info[dutIndex] = (partId, hsStr, partText, flagStr)
             
         return info
 
-    
     def getFullDUTInfoFromDutArray(self, dutArray: np.ndarray, fid: int) -> dict:
         '''
         return a dict of dutIndex -> full dut info

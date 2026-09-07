@@ -50,7 +50,7 @@ impl PyDataFetcher {
         Ok(self.inner.file_paths())
     }
 
-    pub fn get_site_list(&self) -> PyResult<Vec<i64>> {
+    pub fn get_site_list(&mut self) -> PyResult<Vec<i64>> {
         Ok(self
             .inner
             .get_site_list()?
@@ -59,7 +59,7 @@ impl PyDataFetcher {
             .collect())
     }
 
-    pub fn get_head_list(&self) -> PyResult<Vec<i64>> {
+    pub fn get_head_list(&mut self) -> PyResult<Vec<i64>> {
         Ok(self
             .inner
             .get_head_list()?
@@ -211,12 +211,11 @@ impl PyDataFetcher {
     pub fn get_dut_count_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let counts = self.inner.dut_count_dict()?;
         let dict = PyDict::new(py);
-        // core order: [Total, Pass, Failed, Unknown, Superseded]
-        for (key, idx) in [("Total", 0usize), ("Pass", 1), ("Failed", 2),
-                           ("Superseded", 4), ("Unknown", 3)]
-        {
-            dict.set_item(key, counts[idx].clone())?;
-        }
+        dict.set_item("Total", counts.total)?;
+        dict.set_item("Pass", counts.pass)?;
+        dict.set_item("Failed", counts.failed)?;
+        dict.set_item("Superseded", counts.superseded)?;
+        dict.set_item("Unknown", counts.unknown)?;
         Ok(dict)
     }
 
@@ -266,21 +265,35 @@ impl PyDataFetcher {
         Ok(self.inner.wafer_bounds(wafer_index, fid)?)
     }
 
-    pub fn get_dynamic_limit_rows(
-        &self,
-        test_num: i64,
+    /// `getDynamicLimits()` — per-side arrays for the requested DUTs of one
+    /// file: dynamic override where a row exists, else the static default.
+    /// A side is empty when no requested DUT has a dynamic value.
+    pub fn get_dynamic_limits<'py>(
+        &mut self,
+        py: Python<'py>,
+        file_id: usize,
+        test_num: u32,
         test_name: &str,
         duts: Vec<i64>,
-    ) -> PyResult<Vec<(i64, Option<f64>, Option<f64>)>> {
-        Ok(self.inner.dynamic_limit_rows(test_num, test_name, &duts)?)
+    ) -> PyResult<(Vec<f32>, Vec<f32>)> {
+        let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
+        let limits = py.detach(|| -> Result<(Vec<f32>, Vec<f32>), crate::generic::error::StdfHelperError> {
+            match self.inner.get_test_info((test_num, test_name), file_id)? {
+                Some(info) => Ok(self.inner.dynamic_limits_for(info.test_id, &duts_u64)),
+                None => Ok((Vec::new(), Vec::new())),
+            }
+        })?;
+        Ok(limits)
     }
 
+    /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
+    /// "Head h - Site s", PartText, "State - 0xFL").
     pub fn get_partial_dut_info_rows(
-        &self,
+        &mut self,
         heads: Vec<i64>,
         sites: Vec<i64>,
         file_id: i64,
-    ) -> PyResult<Vec<(i64, Option<String>, String, String)>> {
+    ) -> PyResult<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>> {
         Ok(self.inner.partial_dut_info_rows(&heads, &sites, file_id)?)
     }
 

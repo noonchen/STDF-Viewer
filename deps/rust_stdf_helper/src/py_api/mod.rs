@@ -23,6 +23,13 @@ pub mod stdf_to_xlsx;
 use crate::stdf::record_tracker::{TestIDType, TestSubCode};
 use pyo3::prelude::*;
 
+/// Single source of truth for the DUT summary / datalog SQL, exported so the
+/// Python reference fetcher (SharedSrc) uses the exact same query text.
+#[pyfunction]
+fn dut_summary_query() -> &'static str {
+    crate::database::schema::FETCH_SELECT_DUT_SUMMARY
+}
+
 pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     let test_id_type = PyModule::new(py, "TestIDType")?;
     test_id_type.add("TestNumberAndName", TestIDType::TestNumberAndName)?;
@@ -48,6 +55,7 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(statistics::norm_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::empirical_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_ppf, module)?)?;
+    module.add_function(wrap_pyfunction!(dut_summary_query, module)?)?;
     module.add_class::<fetcher::PyDataFetcher>()?;
 
     Ok(())
