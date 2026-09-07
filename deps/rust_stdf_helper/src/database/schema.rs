@@ -466,3 +466,192 @@ pub(crate) static FETCH_SELECT_MPR_DATA: &str = "SELECT
         TEST_ID=? 
     ORDER BY 
         DUTIndex";
+
+/****** Metadata / summary queries (mirrors deps/DatabaseFetcher.py) ******/
+
+pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT 
+        A.Fid, B.wafercnt 
+    FROM 
+        (SELECT DISTINCT Fid FROM File_List) as A 
+    LEFT JOIN 
+        (SELECT Fid, count(*) as wafercnt FROM Wafer_Info GROUP by Fid) as B 
+    ON 
+        A.Fid = B.Fid 
+    ORDER by 
+        A.Fid";
+
+pub(crate) static FETCH_SELECT_BYTE_ORDER: &str = "SELECT 
+        (CASE WHEN Value=\"Little endian\" THEN 1 ELSE 0 END) AS \"IsLB\" 
+    FROM 
+        File_Info 
+    WHERE 
+        Field=\"BYTE_ORD\" 
+    ORDER BY Fid";
+
+pub(crate) static FETCH_SELECT_TEST_ITEMS: &str = "SELECT 
+        Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX 
+    FROM 
+        Test_Info 
+    LEFT JOIN 
+        TestPin_Map 
+    ON 
+        Test_Info.TEST_ID = TestPin_Map.TEST_ID 
+    ORDER by 
+        Test_Info.TEST_ID, TestPin_Map.ROWID";
+
+pub(crate) static FETCH_SELECT_TEST_RECORD_TYPES: &str = "SELECT 
+        TEST_NUM, TEST_NAME, SUB_CODE 
+    FROM 
+        Test_Info";
+
+pub(crate) static FETCH_SELECT_WAFER_LIST: &str = "SELECT 
+        Fid, WaferIndex, WAFER_ID 
+    FROM 
+        Wafer_Info 
+    ORDER by 
+        WaferIndex";
+
+pub(crate) static FETCH_SELECT_TEST_FAIL_CNT: &str = "SELECT 
+        TEST_NUM, TEST_NAME, Fid, FailCount 
+    FROM 
+        Test_Info";
+
+pub(crate) static FETCH_SELECT_BIN_INFO: &str = "SELECT 
+        BIN_NUM, BIN_NAME, BIN_PF 
+    FROM 
+        Bin_Info 
+    WHERE 
+        BIN_TYPE = ? 
+    ORDER by 
+        BIN_NUM";
+
+pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD: &str = "SELECT 
+        Fid, HBIN, count(HBIN) 
+    FROM 
+        Dut_Info 
+    WHERE 
+        HEAD_NUM=? AND Supersede=0 
+    GROUP by Fid, HBIN";
+
+pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD_SITE: &str = "SELECT 
+        Fid, HBIN, count(HBIN) 
+    FROM 
+        Dut_Info 
+    WHERE 
+        HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 
+    GROUP by Fid, HBIN";
+
+pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD: &str = "SELECT 
+        Fid, SBIN, count(SBIN) 
+    FROM 
+        Dut_Info 
+    WHERE 
+        HEAD_NUM=? AND Supersede=0 
+    GROUP by Fid, SBIN";
+
+pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD_SITE: &str = "SELECT 
+        Fid, SBIN, count(SBIN) 
+    FROM 
+        Dut_Info 
+    WHERE 
+        HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 
+    GROUP by Fid, SBIN";
+
+pub(crate) static FETCH_SELECT_FILE_INFO: &str = "SELECT 
+        Fid, Field, Value 
+    FROM 
+        File_Info 
+    ORDER By 
+        Fid, Field, SubFid";
+
+/****** DUT-level queries (mirrors deps/DatabaseFetcher.py) ******/
+
+pub(crate) static FETCH_SELECT_DUT_COUNT_TOTAL: &str = "SELECT 
+        Fid, count(*) 
+    FROM 
+        Dut_Info 
+    GROUP by Fid 
+    ORDER by Fid";
+
+pub(crate) static FETCH_SELECT_DUT_COUNT_PASS: &str = "SELECT 
+        Fid, count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=0 AND Flag & 24 = 0 
+    GROUP by Fid 
+    ORDER by Fid";
+
+pub(crate) static FETCH_SELECT_DUT_COUNT_FAIL: &str = "SELECT 
+        Fid, count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=0 AND Flag & 24 = 8 
+    GROUP by Fid 
+    ORDER by Fid";
+
+pub(crate) static FETCH_SELECT_DUT_COUNT_UNKNOWN: &str = "SELECT 
+        Fid, count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16) 
+    GROUP by Fid 
+    ORDER by Fid";
+
+pub(crate) static FETCH_SELECT_DUT_COUNT_SUPERSEDED: &str = "SELECT 
+        Fid, count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=1 
+    GROUP by Fid 
+    ORDER by Fid";
+
+// Single-count variants for getDUTCountOnConditions(); {extra} holds the
+// optional " AND COL=?" pieces appended by the caller.
+pub(crate) static FETCH_COUNT_ON_COND_PASS: &str = "SELECT 
+        count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=0 AND Flag & 24=0{extra}";
+
+pub(crate) static FETCH_COUNT_ON_COND_FAIL: &str = "SELECT 
+        count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=0 AND Flag & 24 = 8{extra}";
+
+pub(crate) static FETCH_COUNT_ON_COND_UNKNOWN: &str = "SELECT 
+        count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){extra}";
+
+pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT 
+        count(*) 
+    FROM 
+        Dut_Info 
+    WHERE Supersede=1{extra}";
+
+pub(crate) static FETCH_SELECT_DUT_INDEX_HEAD_SITE: &str = "SELECT 
+        Fid, DUTIndex 
+    FROM 
+        Dut_Info 
+    WHERE {file_cond}{head_cond}{site_cond}
+    ORDER By Fid, DUTIndex";
+
+pub(crate) static FETCH_SELECT_DUT_INDEX_BIN: &str = "SELECT 
+        Fid, DUTIndex 
+    FROM 
+        Dut_Info 
+    WHERE {bin_col} IN ({bin_list}) AND Fid={fid}";
+
+pub(crate) static FETCH_SELECT_DUT_INDEX_XY: &str = "SELECT 
+        Fid, DUTIndex 
+    FROM 
+        Dut_Info 
+    WHERE XCOORD={x} AND YCOORD={y}{wafer_cond}{fid_cond}";
+
+pub(crate) static FETCH_SELECT_WAFER_BOUNDS: &str = "SELECT 
+        max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
+    FROM 
+        Dut_Info 
+    WHERE {condition}";

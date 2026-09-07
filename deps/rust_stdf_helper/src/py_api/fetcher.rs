@@ -16,7 +16,8 @@ use crate::database::fetcher::{DataFetcher, FetchedTestData, TestSubCode};
 use numpy::ndarray::Array1;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::IntoPyObjectExt;
+use pyo3::types::{PyAny, PyDict, PyTuple};
 
 #[pyclass(name = "DataFetcher", module = "rust_stdf_helper", unsendable)]
 pub struct PyDataFetcher {
@@ -152,6 +153,252 @@ impl PyDataFetcher {
         }
         Ok(Some(dict))
     }
+
+    // ----- Metadata / summary queries (port of remaining DatabaseFetcher methods) -----
+    pub fn get_wafer_count(&self) -> PyResult<Vec<i64>> {
+        Ok(self.inner.wafer_count()?)
+    }
+
+    pub fn get_byte_order(&self) -> PyResult<Vec<bool>> {
+        Ok(self.inner.byte_order()?)
+    }
+
+    pub fn get_test_items(&self) -> PyResult<Vec<String>> {
+        Ok(self.inner.test_items()?)
+    }
+
+    /// Rows of `(TEST_NUM, TEST_NAME, SUB_CODE)` in DB order.
+    pub fn get_test_record_type_rows(&self) -> PyResult<Vec<(i64, String, u8)>> {
+        Ok(self.inner.test_record_type_rows()?)
+    }
+
+    pub fn get_wafer_list(&self) -> PyResult<Vec<String>> {
+        Ok(self.inner.wafer_list()?)
+    }
+
+    /// Rows of `(TEST_NUM, TEST_NAME, per-file FailCount list)`.
+    pub fn get_test_fail_cnt(&self) -> PyResult<Vec<(i64, String, Vec<Option<i64>>)>> {
+        Ok(self.inner.test_fail_cnt_rows()?)
+    }
+
+    pub fn get_bin_info_rows(
+        &self,
+        is_hbin: bool,
+    ) -> PyResult<Vec<(i64, Option<String>, Option<String>)>> {
+        Ok(self.inner.bin_info_rows(is_hbin)?)
+    }
+
+    pub fn get_bin_stats_rows(
+        &self,
+        head: i64,
+        site: i64,
+        is_hbin: bool,
+    ) -> PyResult<Vec<(i64, i64, i64)>> {
+        Ok(self.inner.bin_stats_rows(head, site, is_hbin)?)
+    }
+
+    pub fn is_dut_info_column_empty(&self, column: &str) -> PyResult<bool> {
+        Ok(self.inner.is_dut_info_column_empty(column)?)
+    }
+
+    /// Rows of `(Fid, Field, Value)` ordered by `Fid, Field, SubFid`.
+    pub fn get_file_info_rows(&self) -> PyResult<Vec<(i64, String, Option<String>)>> {
+        Ok(self.inner.file_info_rows()?)
+    }
+
+    // ----- DUT-level summary queries (port batch A) -----
+
+    pub fn get_dut_count_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let counts = self.inner.dut_count_dict()?;
+        let dict = PyDict::new(py);
+        // core order: [Total, Pass, Failed, Unknown, Superseded]
+        for (key, idx) in [("Total", 0usize), ("Pass", 1), ("Failed", 2),
+                           ("Superseded", 4), ("Unknown", 3)]
+        {
+            dict.set_item(key, counts[idx].clone())?;
+        }
+        Ok(dict)
+    }
+
+    pub fn get_dut_count_on_conditions(
+        &self,
+        head: i64,
+        site: i64,
+        waferid: i64,
+        fid: i64,
+    ) -> PyResult<Vec<i64>> {
+        Ok(self.inner.dut_count_on_conditions(head, site, waferid, fid)?)
+    }
+
+    pub fn get_dut_index_rows_by_head_site(
+        &self,
+        heads: Vec<i64>,
+        sites: Vec<i64>,
+        file_ids: Vec<i64>,
+    ) -> PyResult<Vec<(i64, i64)>> {
+        Ok(self
+            .inner
+            .dut_index_rows_by_head_site(&heads, &sites, &file_ids)?)
+    }
+
+    /// `selections`: list of (fid, isHBIN, [bin numbers]).
+    pub fn get_dut_index_rows_by_bin(
+        &self,
+        selections: Vec<(i64, bool, Vec<i64>)>,
+    ) -> PyResult<Vec<(i64, i64)>> {
+        Ok(self.inner.dut_index_rows_by_bin(&selections)?)
+    }
+
+    /// `selections`: list of (waferIndex, fid, (x, y)); waferIndex == -1
+    /// means the stacked map (fid ignored).
+    pub fn get_dut_index_rows_by_xy(
+        &self,
+        selections: Vec<(i64, i64, (i64, i64))>,
+    ) -> PyResult<Vec<(i64, i64)>> {
+        Ok(self.inner.dut_index_rows_by_xy(&selections)?)
+    }
+
+    pub fn get_wafer_bounds(
+        &self,
+        wafer_index: i64,
+        fid: i64,
+    ) -> PyResult<(Option<i64>, Option<i64>, Option<i64>, Option<i64>)> {
+        Ok(self.inner.wafer_bounds(wafer_index, fid)?)
+    }
+
+    pub fn get_dynamic_limit_rows(
+        &self,
+        test_num: i64,
+        test_name: &str,
+        duts: Vec<i64>,
+    ) -> PyResult<Vec<(i64, Option<f64>, Option<f64>)>> {
+        Ok(self.inner.dynamic_limit_rows(test_num, test_name, &duts)?)
+    }
+
+    pub fn get_partial_dut_info_rows(
+        &self,
+        heads: Vec<i64>,
+        sites: Vec<i64>,
+        file_id: i64,
+    ) -> PyResult<Vec<(i64, Option<String>, String, String)>> {
+        Ok(self.inner.partial_dut_info_rows(&heads, &sites, file_id)?)
+    }
+
+    /// DUT summary rows as python tuples `(DUTIndex, File ID, Part ID, ...)`
+    /// with the same cell typing (int / str / None) as the Python reference.
+    pub fn get_full_dut_summary_rows<'py>(
+        &self,
+        py: Python<'py>,
+        fid: i64,
+    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+        let rows = self.inner.full_dut_summary_rows(fid)?;
+        rows.into_iter()
+            .map(|r| {
+                let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(12);
+                items.push(r.dut_index.into_bound_py_any(py)?);
+                items.push(fid.into_bound_py_any(py)?);
+                push_opt_str(&mut items, r.part_id, py)?;
+                push_opt_str(&mut items, r.part_text, py)?;
+                items.push(r.head_site.into_bound_py_any(py)?);
+                match r.tests_executed {
+                    Some(v) => items.push(v.into_bound_py_any(py)?),
+                    None => items.push(py.None().into_bound(py)),
+                }
+                push_opt_str(&mut items, r.test_time, py)?;
+                push_opt_str(&mut items, r.hbin, py)?;
+                push_opt_str(&mut items, r.sbin, py)?;
+                push_opt_str(&mut items, r.wafer_id, py)?;
+                push_opt_str(&mut items, r.xy, py)?;
+                push_opt_str(&mut items, r.dut_flag, py)?;
+                Ok(PyTuple::new(py, items)?)
+            })
+            .collect()
+    }
+
+    // ----- DUT/pin/wafer queries (port batch B) -----
+
+    pub fn get_pin_name_rows(
+        &self,
+        test_num: i64,
+        test_name: &str,
+        is_rtn: bool,
+        fid: i64,
+    ) -> PyResult<Vec<(i64, String, String, i64, i64, String)>> {
+        Ok(self.inner.pin_name_rows(test_num, test_name, is_rtn, fid)?)
+    }
+
+    /// Wafer_Info rows as tuples in column order (ints / str / None).
+    pub fn get_wafer_info_rows<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+        let rows = self.inner.wafer_info_rows()?;
+        rows.into_iter()
+            .map(|r| {
+                let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(14);
+                items.push(r.fid.into_bound_py_any(py)?);
+                push_opt_i64(&mut items, r.head_num, py)?;
+                items.push(r.wafer_index.into_bound_py_any(py)?);
+                push_opt_i64(&mut items, r.part_cnt, py)?;
+                push_opt_i64(&mut items, r.rtst_cnt, py)?;
+                push_opt_i64(&mut items, r.abrt_cnt, py)?;
+                push_opt_i64(&mut items, r.good_cnt, py)?;
+                push_opt_i64(&mut items, r.func_cnt, py)?;
+                push_opt_str(&mut items, r.wafer_id, py)?;
+                push_opt_str(&mut items, r.fabwf_id, py)?;
+                push_opt_str(&mut items, r.frame_id, py)?;
+                push_opt_str(&mut items, r.mask_id, py)?;
+                push_opt_str(&mut items, r.usr_desc, py)?;
+                push_opt_str(&mut items, r.exc_desc, py)?;
+                Ok(PyTuple::new(py, items)?)
+            })
+            .collect()
+    }
+
+    pub fn get_wafer_ext_rows(&self, fid: i64) -> PyResult<Vec<(String, Option<String>)>> {
+        Ok(self.inner.wafer_ext_rows(fid)?)
+    }
+
+    pub fn get_wafer_coord_rows(
+        &self,
+        wafer_index: i64,
+        sites: Vec<i64>,
+        fid: i64,
+    ) -> PyResult<Vec<(i64, i64, i64)>> {
+        Ok(self.inner.wafer_coord_rows(wafer_index, &sites, fid)?)
+    }
+
+    pub fn get_stacked_wafer_rows(&self, sites: Vec<i64>) -> PyResult<Vec<(i64, i64, i64, i64)>> {
+        Ok(self.inner.stacked_wafer_rows(&sites)?)
+    }
+
+    pub fn get_datalog_rows(&self) -> PyResult<Vec<(String, String, String)>> {
+        Ok(self.inner.datalog_rows()?)
+    }
+}
+
+fn push_opt_i64<'py>(
+    items: &mut Vec<Bound<'py, PyAny>>,
+    value: Option<i64>,
+    py: Python<'py>,
+) -> PyResult<()> {
+    match value {
+        Some(v) => items.push(v.into_bound_py_any(py)?),
+        None => items.push(py.None().into_bound(py)),
+    }
+    Ok(())
+}
+
+fn push_opt_str<'py>(
+    items: &mut Vec<Bound<'py, PyAny>>,
+    value: Option<String>,
+    py: Python<'py>,
+) -> PyResult<()> {
+    match value {
+        Some(s) => items.push(s.into_bound_py_any(py)?),
+        None => items.push(py.None().into_bound(py)),
+    }
+    Ok(())
 }
 
 /// Shape the fetched arrays exactly like the Python reference fetcher:
