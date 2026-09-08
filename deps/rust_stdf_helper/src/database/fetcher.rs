@@ -17,21 +17,21 @@ use crate::database::schema::{
     FETCH_SELECT_BIN_STATS_H_HEAD_SITE, FETCH_SELECT_BIN_STATS_S_HEAD,
     FETCH_SELECT_BIN_STATS_S_HEAD_SITE, FETCH_SELECT_BYTE_ORDER,
     FETCH_SELECT_DATALOG, FETCH_SELECT_DUT_COUNTS, FETCH_SELECT_DUT_HEAD_SITE,
-    FETCH_SELECT_DUT_HEAD_SITE_ALL, FETCH_SELECT_DUT_SUMMARY, FETCH_SELECT_DYNAMIC_LIMITS_ALL,
-    FETCH_SELECT_FILE_INFO, FETCH_SELECT_FILE_LIST, FETCH_SELECT_FTR_DATA,
-    FETCH_SELECT_HEAD_LIST, FETCH_SELECT_MAX_DUT_INDEX, FETCH_SELECT_MPR_DATA,
+    FETCH_SELECT_DUT_HEAD_SITE_ALL, FETCH_SELECT_DUT_INDEX_BY_XY,
+    FETCH_SELECT_DUT_INDEX_BY_XY_WAFER, FETCH_SELECT_DUT_SUMMARY,
+    FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST, FETCH_SELECT_FILE_INFO, FETCH_SELECT_FILE_LIST,
+    FETCH_SELECT_FTR_DATA, FETCH_SELECT_MAX_DUT_INDEX, FETCH_SELECT_MPR_DATA,
     FETCH_SELECT_PARTIAL_RAW, FETCH_SELECT_PIN_NAMES, FETCH_SELECT_PTR_DATA,
-    FETCH_SELECT_ALL_TEST_INFO, FETCH_SELECT_SITE_LIST, FETCH_SELECT_TEST_FAIL_CNT,
-    FETCH_SELECT_TEST_ITEMS, FETCH_SELECT_TEST_RECORD_TYPES,
-    FETCH_SELECT_WAFER_COUNT, FETCH_SELECT_WAFER_EXT, FETCH_SELECT_WAFER_INFO,
-    FETCH_SELECT_WAFER_LIST,
+    FETCH_SELECT_ALL_TEST_INFO, FETCH_SELECT_STACKED_WAFER, FETCH_SELECT_TEST_FAIL_CNT,
+    FETCH_SELECT_TEST_ITEMS, FETCH_SELECT_TEST_RECORD_TYPES, FETCH_SELECT_WAFER_BOUNDS_STACKED,
+    FETCH_SELECT_WAFER_BOUNDS_WAFER, FETCH_SELECT_WAFER_COORDS, FETCH_SELECT_WAFER_COUNT,
+    FETCH_SELECT_WAFER_EXT, FETCH_SELECT_WAFER_INFO, FETCH_SELECT_WAFER_LIST,
 };
 use crate::generic::error::StdfHelperError;
 use lru::LruCache;
 use ndarray::{Array1, Array2};
 use rusqlite::Connection;
-use std::collections::HashMap;
-use std::num::NonZeroUsize;
+use std::collections::{BTreeSet, HashMap};
 
 pub type HeadNum = u8;
 pub type SiteNum = u8;
@@ -121,7 +121,7 @@ fn estimate_entry_bytes(entry: &TestDataCacheEntry) -> usize {
     const ENTRY_OVERHEAD: usize = 64;
     entry.data.len() * 4
         + entry.flags.len() * 2
-        + entry.states.as_ref().map_or(0, |s| s.len() * 1)
+        + entry.states.as_ref().map_or(0, |s| s.len())
         + entry.valid_test_idx.len() * 8
         + ENTRY_OVERHEAD
 }
@@ -139,15 +139,13 @@ struct TestDataLru {
 
 impl TestDataLru {
     fn new(budget_bytes: usize) -> Self {
-        // The byte budget is the binding constraint; the count capacity only
-        // guards hashbrown bookkeeping. Every resident entry costs at least
-        // ENTRY_OVERHEAD (64) bytes, so `budget_bytes / 64` is a safe upper
-        // bound on the number of resident entries — a larger count capacity
-        // (e.g. usize::MAX) overflows hashbrown's capacity arithmetic.
-        // Clamped to keep the hash table allocation sane for huge budgets.
-        let count_capacity = (budget_bytes / 64).clamp(1, 1 << 30);
+        // The byte budget is the binding constraint. Use an unbounded LRU (no
+        // pre-allocated hash table) and let `insert`'s byte-budget loop do all
+        // eviction: pre-allocating `budget_bytes / 64` entries for the default
+        // 128 MiB budget reserved ~2M slots at open, and a huge budget could
+        // request a ~1-billion-slot allocation.
         Self {
-            cache: LruCache::new(NonZeroUsize::new(count_capacity).expect("capacity >= 1")),
+            cache: LruCache::unbounded(),
             budget_bytes,
             used_bytes: 0,
         }
@@ -166,8 +164,12 @@ impl TestDataLru {
         if bytes > self.budget_bytes {
             return;
         }
+        // `put` returns the replaced entry on a duplicate key; subtract its
+        // footprint so `used_bytes` stays accurate.
+        if let Some(old) = self.cache.put(key, entry) {
+            self.used_bytes = self.used_bytes.saturating_sub(estimate_entry_bytes(&old));
+        }
         self.used_bytes += bytes;
-        self.cache.put(key, entry);
         while self.used_bytes > self.budget_bytes {
             match self.cache.pop_lru() {
                 Some((_, evicted)) => self.used_bytes -= estimate_entry_bytes(&evicted),
@@ -194,13 +196,14 @@ pub struct DataFetcher {
     head_site_idx_all: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
     // (fid, test_num) -> test_name -> TestInfo, so lookups borrow the &str key.
     test_info: HashMap<(usize, TestNum), HashMap<String, TestInfo>>,
-    // Eager, permanent dynamic-limit cache (no LRU; cleared on close).
-    dynamic_limits: HashMap<TestId, DynamicLimitEntry>,
+    // Lazily loaded dynamic-limit cache: `None` means "loaded, no dynamic
+    // limits" (so a test with no dynamic rows is not queried again).
+    dynamic_limits: HashMap<TestId, Option<DynamicLimitEntry>>,
     // Per-file raw Dut_Info rows for the partial-DUT-info cache.
     partial_info: HashMap<usize, Vec<PartialDutRow>>,
-    // Lazily cached distinct site/head lists (immutable DB).
-    site_list_cache: Option<Vec<SiteNum>>,
-    head_list_cache: Option<Vec<HeadNum>>,
+    // Distinct site/head lists, filled once in `build_file_caches`.
+    site_list: Vec<SiteNum>,
+    head_list: Vec<HeadNum>,
     test_data: TestDataLru,
 }
 
@@ -221,14 +224,14 @@ impl DataFetcher {
             test_info: HashMap::new(),
             dynamic_limits: HashMap::new(),
             partial_info: HashMap::new(),
-            site_list_cache: None,
-            head_list_cache: None,
+            site_list: Vec::new(),
+            head_list: Vec::new(),
             test_data: TestDataLru::new(budget_bytes),
         };
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
         fetcher.load_test_info()?;
-        fetcher.load_dynamic_limits()?;
+        // Dynamic limits are loaded lazily per TEST_ID on first request.
         Ok(fetcher)
     }
 
@@ -240,8 +243,8 @@ impl DataFetcher {
         self.test_info.clear();
         self.dynamic_limits.clear();
         self.partial_info.clear();
-        self.site_list_cache = None;
-        self.head_list_cache = None;
+        self.site_list.clear();
+        self.head_list.clear();
         self.test_data.clear();
     }
 
@@ -276,12 +279,14 @@ impl DataFetcher {
     }
 
     fn build_file_caches(&mut self) -> Result<(), StdfHelperError> {
+        let mut all_heads: BTreeSet<HeadNum> = BTreeSet::new();
+        let mut all_sites: BTreeSet<SiteNum> = BTreeSet::new();
         for fid in 0..self.num_files() {
             let n: i64 = self
                 .conn
                 .query_row(FETCH_SELECT_MAX_DUT_INDEX, [fid as i64], |row| row.get(0))?;
             let n = n.max(0) as usize;
-            // u64 matches the db-gen counter type (see TODO-resolved decision).
+            // u64 matches the db-gen counter type.
             self.full_dut.insert(fid, Array1::from_iter(1..=n as u64));
 
             // Both queries ORDER BY DUTIndex, so the per-key subsequences are
@@ -303,7 +308,9 @@ impl DataFetcher {
                     })?;
                     for row in rows {
                         let (dut_index, head, site) = row?;
-                        let idx = (dut_index as usize) - 1;
+                        let idx = dut_index.saturating_sub(1) as usize;
+                        all_heads.insert(head);
+                        all_sites.insert(site);
                         site_lists.entry((head, site)).or_default().push(idx);
                         head_lists.entry(head).or_default().push(idx);
                     }
@@ -316,31 +323,17 @@ impl DataFetcher {
                 }
             }
         }
+        self.site_list = all_sites.into_iter().collect();
+        self.head_list = all_heads.into_iter().collect();
         Ok(())
     }
 
-    pub fn get_site_list(&mut self) -> Result<Vec<SiteNum>, StdfHelperError> {
-        if let Some(sites) = &self.site_list_cache {
-            return Ok(sites.clone());
-        }
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_SITE_LIST)?;
-        let sites = stmt
-            .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
-            .collect::<Result<Vec<_>, _>>()?;
-        self.site_list_cache = Some(sites.clone());
-        Ok(sites)
+    pub fn get_site_list(&self) -> Result<Vec<SiteNum>, StdfHelperError> {
+        Ok(self.site_list.clone())
     }
 
-    pub fn get_head_list(&mut self) -> Result<Vec<HeadNum>, StdfHelperError> {
-        if let Some(heads) = &self.head_list_cache {
-            return Ok(heads.clone());
-        }
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_HEAD_LIST)?;
-        let heads = stmt
-            .query_map([], |row| Ok(row.get::<_, i64>(0)? as u8))?
-            .collect::<Result<Vec<_>, _>>()?;
-        self.head_list_cache = Some(heads.clone());
-        Ok(heads)
+    pub fn get_head_list(&self) -> Result<Vec<HeadNum>, StdfHelperError> {
+        Ok(self.head_list.clone())
     }
 
     /// Eagerly cache the whole `Test_Info` table at open — the smallest but
@@ -408,6 +401,7 @@ impl DataFetcher {
         &mut self,
         test_id: TestId,
         sub_code: TestSubCode,
+        rslt_pgm_cnt: Option<u16>,
         file_id: usize,
     ) -> Result<Option<TestDataCacheEntry>, StdfHelperError> {
         let key = (test_id, file_id);
@@ -433,7 +427,7 @@ impl DataFetcher {
                     })?;
                     for row in rows {
                         let (dut_index, result, flag) = row?;
-                        let pos = dut_index as usize - 1;
+                        let pos = dut_index.saturating_sub(1) as usize;
                         if pos < n {
                             data[[pos, 0]] = result;
                             flags[pos] = flag as i16;
@@ -458,7 +452,7 @@ impl DataFetcher {
                     })?;
                     for row in rows {
                         let (dut_index, flag) = row?;
-                        let pos = dut_index as usize - 1;
+                        let pos = dut_index.saturating_sub(1) as usize;
                         if pos < n {
                             flags[pos] = flag as i16;
                             valid.push(pos);
@@ -486,12 +480,18 @@ impl DataFetcher {
                     })?;
                     rows.collect::<Result<Vec<_>, _>>()?
                 };
-                let rslt_cnt = if rows_vec.is_empty() {
-                    0
-                } else {
-                    rows_vec[0].1.len() / 8
-                };
+                // Width is authoritative in Test_Info.RSLT_PGM_CNT; a NULL
+                // column means zero result columns.
+                let rslt_cnt = rslt_pgm_cnt.unwrap_or(0) as usize;
                 if rslt_cnt == 0 {
+                    // No result columns, but the rows still carry TEST_FLAG.
+                    for (dut_index, _rslt_hex, _stat_hex, flag) in rows_vec {
+                        let pos = dut_index.saturating_sub(1) as usize;
+                        if pos < n {
+                            flags[pos] = flag as i16;
+                            valid.push(pos);
+                        }
+                    }
                     TestDataCacheEntry {
                         sub_code,
                         data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
@@ -503,18 +503,35 @@ impl DataFetcher {
                     let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
                     let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
                     for (dut_index, rslt_hex, stat_hex, flag) in rows_vec {
-                        let pos = dut_index as usize - 1;
-                        if pos < n {
-                            let result = hex_to_f32s(&rslt_hex);
-                            let stat = hex_to_u8s(&stat_hex);
-                            flags[pos] = flag as i16;
-                            valid.push(pos);
-                            for (j, value) in result.into_iter().enumerate() {
-                                data[[pos, j]] = value;
-                            }
-                            for (j, value) in stat.into_iter().enumerate() {
-                                states[[pos, j]] = value;
-                            }
+                        let pos = dut_index.saturating_sub(1) as usize;
+                        if pos >= n {
+                            continue;
+                        }
+                        // TODO(mpr-blob): write data as BLOB in db gen, so the
+                        // TEXT-hex round trip can be avoided. Needs a DB format
+                        // version/migration and a Python decoder update.
+                        let result = hex_to_f32s(&rslt_hex);
+                        let stat = hex_to_u8s(&stat_hex);
+                        if result.len() != rslt_cnt || stat.len() != rslt_cnt {
+                            return Err(StdfHelperError {
+                                msg: format!(
+                                    "MPR data width mismatch for TEST_ID {} DUTIndex {}: \
+                                     RSLT_PGM_CNT={} but RTN_RSLT={} f32 / RTN_STAT={} u8",
+                                    test_id,
+                                    dut_index,
+                                    rslt_cnt,
+                                    result.len(),
+                                    stat.len()
+                                ),
+                            });
+                        }
+                        flags[pos] = flag as i16;
+                        valid.push(pos);
+                        for (j, value) in result.into_iter().enumerate() {
+                            data[[pos, j]] = value;
+                        }
+                        for (j, value) in stat.into_iter().enumerate() {
+                            states[[pos, j]] = value;
                         }
                     }
                     TestDataCacheEntry {
@@ -534,6 +551,12 @@ impl DataFetcher {
                 valid_test_idx: valid,
             },
         };
+
+        // All-sentinel entries (no data rows for this test) are not worth
+        // caching: they would evict useful entries. Hand them back directly.
+        if entry.valid_test_idx.is_empty() {
+            return Ok(Some(entry));
+        }
 
         let bytes = estimate_entry_bytes(&entry);
         if bytes > self.test_data.budget_bytes {
@@ -558,42 +581,52 @@ impl DataFetcher {
             None => return Ok(None),
         };
 
+        let all_sites = sites.contains(&None);
         let mut selected: Vec<usize> = Vec::new();
         for &head in heads {
-            if sites.contains(&None) {
+            if all_sites {
                 if let Some(list) = self.head_site_idx.get(&(file_id, head, None)) {
-                    selected.extend_from_slice(list);
+                    merge_sorted_unique(&mut selected, list);
                 }
             } else {
                 for &site in sites {
                     if let Some(site) = site {
                         if let Some(list) = self.head_site_idx.get(&(file_id, head, Some(site))) {
-                            selected.extend_from_slice(list);
+                            merge_sorted_unique(&mut selected, list);
                         }
                     }
                 }
             }
         }
-        selected.sort_unstable();
-        selected.dedup();
 
         // Valid rows only (plan §3.4): intersect the head/site rows with the
         // rows that actually carry data for this test, so no NaN is returned.
-        let oversized = self.ensure_test_data(info.test_id, info.sub_code, file_id)?;
+        let oversized =
+            self.ensure_test_data(info.test_id, info.sub_code, info.rslt_pgm_cnt, file_id)?;
         let fetched = match oversized {
             // Single entry bigger than the byte budget: use it directly.
             Some(entry) => {
                 let idx = intersect_sorted(&selected, &entry.valid_test_idx);
-                let full_dut = self.full_dut.get(&file_id).expect("fid cache exists");
+                let full_dut = self.full_dut.get(&file_id).ok_or_else(|| {
+                    StdfHelperError {
+                        msg: format!("missing full-DUT cache for file {}", file_id),
+                    }
+                })?;
                 make_fetched_data(full_dut, &entry, &idx)
             }
             // Normal path: gather with select straight from the cached entry
             // (no per-call clone of the full cached arrays).
             None => {
                 let key = (info.test_id, file_id);
-                let entry = self.test_data.get(&key).expect("entry was just cached");
+                let entry = self.test_data.get(&key).ok_or_else(|| StdfHelperError {
+                    msg: format!("test-data cache miss for {:?}", key),
+                })?;
                 let idx = intersect_sorted(&selected, &entry.valid_test_idx);
-                let full_dut = self.full_dut.get(&file_id).expect("fid cache exists");
+                let full_dut = self.full_dut.get(&file_id).ok_or_else(|| {
+                    StdfHelperError {
+                        msg: format!("missing full-DUT cache for file {}", file_id),
+                    }
+                })?;
                 make_fetched_data(full_dut, entry, &idx)
             }
         };
@@ -614,7 +647,8 @@ impl DataFetcher {
             return Ok(None);
         }
 
-        let oversized = self.ensure_test_data(info.test_id, info.sub_code, file_id)?;
+        let oversized =
+            self.ensure_test_data(info.test_id, info.sub_code, info.rslt_pgm_cnt, file_id)?;
         let mut sorted_duts = duts.to_vec();
         sorted_duts.sort_unstable();
         let fetched = match oversized {
@@ -626,7 +660,9 @@ impl DataFetcher {
             // Normal path: read rows straight from the cached entry.
             None => {
                 let key = (info.test_id, file_id);
-                let entry = self.test_data.get(&key).expect("entry was just cached");
+                let entry = self.test_data.get(&key).ok_or_else(|| StdfHelperError {
+                    msg: format!("test-data cache miss for {:?}", key),
+                })?;
                 let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
                 gather_dut_rows(entry, n, &sorted_duts)
             }
@@ -1166,10 +1202,12 @@ impl DataFetcher {
     }
 
     /// `getDutIndexDictFromHeadSite()` rows — (Fid, DUTIndex) for non-empty
-    /// head/site selections, ordered by Fid then DUTIndex.
+    /// head/site selections.
     ///
     /// Served from `head_site_idx_all`: the Python method has *no* Supersede
     /// filter, so it must use the all-rows index (not the Supersede=0 cache).
+    // TODO: return the dict-shaped result directly from Rust/PyO3 so Python
+    // does not need to rebuild `{fid: [dut_index, ...]}` from row tuples.
     pub fn dut_index_rows_by_head_site(
         &self,
         heads: &[i64],
@@ -1248,12 +1286,9 @@ impl DataFetcher {
         selections: &[(i64, i64, (i64, i64))],
     ) -> Result<Vec<(i64, i64)>, StdfHelperError> {
         let mut out: Vec<(i64, i64)> = Vec::new();
-        // Kept inline: the WHERE clause grows appended conditions per call
-        // (site lists), which does not fit the fixed-constant schema.rs rule.
         for (wafer_index, fid, (x, y)) in selections {
             if *wafer_index == -1 {
-                let sql = "SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD=? AND YCOORD=?";
-                let mut stmt = self.conn.prepare_cached(sql)?;
+                let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DUT_INDEX_BY_XY)?;
                 let rows = stmt
                     .query_map(rusqlite::params![x, y], |row| {
                         Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
@@ -1261,8 +1296,9 @@ impl DataFetcher {
                     .collect::<Result<Vec<_>, _>>()?;
                 out.extend(rows);
             } else {
-                let sql = "SELECT Fid, DUTIndex FROM Dut_Info WHERE XCOORD=? AND YCOORD=?                            AND WaferIndex=? AND Fid=?";
-                let mut stmt = self.conn.prepare_cached(sql)?;
+                let mut stmt = self
+                    .conn
+                    .prepare_cached(FETCH_SELECT_DUT_INDEX_BY_XY_WAFER)?;
                 let rows = stmt
                     .query_map(rusqlite::params![x, y, wafer_index, fid], |row| {
                         Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
@@ -1281,116 +1317,107 @@ impl DataFetcher {
         wafer_index: i64,
         fid: i64,
     ) -> Result<(Option<i64>, Option<i64>, Option<i64>, Option<i64>), StdfHelperError> {
-        let condition = if wafer_index == -1 {
-            "Fid >= 0 AND WaferIndex > 0".to_string()
+        if wafer_index == -1 {
+            Ok(self
+                .conn
+                .query_row(FETCH_SELECT_WAFER_BOUNDS_STACKED, [], |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                })?)
         } else {
-            format!("Fid = {} AND WaferIndex = {}", fid, wafer_index)
-        };
-        let sql =
-            crate::database::schema::FETCH_SELECT_WAFER_BOUNDS.replace("{condition}", &condition);
-        Ok(self.conn.query_row(&sql, [], |row| {
-            Ok((
-                row.get::<_, Option<i64>>(0)?,
-                row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-            ))
-        })?)
+            Ok(self.conn.query_row(
+                FETCH_SELECT_WAFER_BOUNDS_WAFER,
+                rusqlite::params![fid, wafer_index],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                },
+            )?)
+        }
     }
 
-    /// Eagerly load every `Dynamic_Limits` row into per-TEST_ID arrays
-    /// (permanent cache, no LRU; cleared on close).
-    ///
-    /// Defaults come from the eagerly cached `Test_Info` map, so no extra DB
-    /// read is needed. Rows are ORDER BY TEST_ID, DUTIndex, so one merge pass
-    /// fills each test's arrays directly (no per-test staging map). A side is
-    /// only kept when it has a static default *and* at least one dynamic row;
-    /// tests without any valid dynamic side are not cached at all.
-    fn load_dynamic_limits(&mut self) -> Result<(), StdfHelperError> {
-        let mut defaults: HashMap<TestId, (usize, Option<f32>, Option<f32>)> = HashMap::new();
-        for (&(fid, _), by_name) in &self.test_info {
-            for info in by_name.values() {
-                defaults.insert(info.test_id, (fid, info.llimit, info.hlimit));
-            }
+    /// Lazily load one test's `Dynamic_Limits` rows into the permanent cache
+    /// (no LRU; cleared on close). `None` is stored when the test has no
+    /// static default or no dynamic rows, so it is not queried again.
+    fn load_dynamic_limits_for(
+        &mut self,
+        info: &TestInfo,
+        fid: usize,
+    ) -> Result<(), StdfHelperError> {
+        let test_id = info.test_id;
+        if self.dynamic_limits.contains_key(&test_id) {
+            return Ok(());
+        }
+        // Python treats a NaN static default as "no dynamic limits" for that
+        // side; legacy DBs may store NaN instead of NULL.
+        let ll_def = info.llimit.filter(|v| !v.is_nan());
+        let hl_def = info.hlimit.filter(|v| !v.is_nan());
+        let n = self.full_dut.get(&fid).map(|a| a.len()).unwrap_or(0);
+        if n == 0 || (ll_def.is_none() && hl_def.is_none()) {
+            self.dynamic_limits.insert(test_id, None);
+            return Ok(());
         }
 
-        let mut limits: HashMap<TestId, DynamicLimitEntry> = HashMap::new();
-        let mut active: Option<TestId> = None;
-        let mut n = 0usize;
-        let mut ll_arr: Option<Array1<f32>> = None;
-        let mut hl_arr: Option<Array1<f32>> = None;
-        let mut ll_def: Option<f32> = None;
-        let mut hl_def: Option<f32> = None;
+        let mut ll_arr = ll_def.map(|v| Array1::from_elem(n, v));
+        let mut hl_arr = hl_def.map(|v| Array1::from_elem(n, v));
         let mut ll_valid: Vec<usize> = Vec::new();
         let mut hl_valid: Vec<usize> = Vec::new();
 
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DYNAMIC_LIMITS_ALL)?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<f32>>(2)?,
-                row.get::<_, Option<f32>>(3)?,
-            ))
-        })?;
-        for r in rows {
-            let (test_id, dut_index, ll, hl) = r?;
-            if active != Some(test_id) {
-                flush_dynamic_entry(
-                    &mut limits,
-                    &mut active,
-                    &mut n,
-                    &mut ll_arr,
-                    &mut hl_arr,
-                    &mut ll_def,
-                    &mut hl_def,
-                    &mut ll_valid,
-                    &mut hl_valid,
-                );
-                active = Some(test_id);
-                ll_arr = None;
-                hl_arr = None;
-                ll_def = None;
-                hl_def = None;
-                match defaults.get(&test_id) {
-                    Some(&(fid, lld, hld)) => {
-                        n = self.full_dut.get(&fid).map(|a| a.len()).unwrap_or(0);
-                        ll_def = lld;
-                        hl_def = hld;
-                        // No static default -> no side array (Python treats a
-                        // NaN default as "no dynamic limits" for that side).
-                        ll_arr = ll_def.map(|v| Array1::from_elem(n, v));
-                        hl_arr = hl_def.map(|v| Array1::from_elem(n, v));
-                    }
-                    None => n = 0,
+        {
+            let mut stmt = self
+                .conn
+                .prepare_cached(FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST)?;
+            let rows = stmt.query_map([test_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<f32>>(1)?,
+                    row.get::<_, Option<f32>>(2)?,
+                ))
+            })?;
+            for r in rows {
+                let (dut_index, ll, hl) = r?;
+                let idx = dut_index.saturating_sub(1) as usize;
+                if idx >= n {
+                    continue;
                 }
-            }
-            if n > 0 {
-                let idx = (dut_index as usize).saturating_sub(1);
-                if idx < n {
-                    if let (Some(arr), Some(v)) = (ll_arr.as_mut(), ll) {
-                        arr[idx] = v;
-                        ll_valid.push(idx);
-                    }
-                    if let (Some(arr), Some(v)) = (hl_arr.as_mut(), hl) {
-                        arr[idx] = v;
-                        hl_valid.push(idx);
-                    }
+                if let (Some(arr), Some(v)) = (ll_arr.as_mut(), ll) {
+                    arr[idx] = v;
+                    ll_valid.push(idx);
+                }
+                if let (Some(arr), Some(v)) = (hl_arr.as_mut(), hl) {
+                    arr[idx] = v;
+                    hl_valid.push(idx);
                 }
             }
         }
-        flush_dynamic_entry(
-            &mut limits,
-            &mut active,
-            &mut n,
-            &mut ll_arr,
-            &mut hl_arr,
-            &mut ll_def,
-            &mut hl_def,
-            &mut ll_valid,
-            &mut hl_valid,
-        );
-        self.dynamic_limits = limits;
+
+        let ll_arr = if ll_valid.is_empty() { None } else { ll_arr };
+        let hl_arr = if hl_valid.is_empty() { None } else { hl_arr };
+        let ll_def = if ll_arr.is_some() { ll_def } else { None };
+        let hl_def = if hl_arr.is_some() { hl_def } else { None };
+        if ll_arr.is_none() && hl_arr.is_none() {
+            self.dynamic_limits.insert(test_id, None);
+        } else {
+            self.dynamic_limits.insert(
+                test_id,
+                Some(DynamicLimitEntry {
+                    llimit: ll_arr,
+                    hlimit: hl_arr,
+                    ll_default: ll_def,
+                    hl_default: hl_def,
+                    ll_valid_idx: ll_valid,
+                    hl_valid_idx: hl_valid,
+                }),
+            );
+        }
         Ok(())
     }
 
@@ -1400,9 +1427,16 @@ impl DataFetcher {
     /// (mirrors the Python `hasDynamicLow/High` contract). The returned arrays
     /// always have the same length as `duts` (out-of-range requests fall back
     /// to the static default, exactly like the dict-based reference).
-    pub fn dynamic_limits_for(&self, test_id: TestId, duts: &[u64]) -> (Vec<f32>, Vec<f32>) {
-        let Some(entry) = self.dynamic_limits.get(&test_id) else {
-            return (Vec::new(), Vec::new());
+    pub fn dynamic_limits_for(
+        &mut self,
+        info: &TestInfo,
+        fid: usize,
+        duts: &[u64],
+    ) -> Result<(Vec<f32>, Vec<f32>), StdfHelperError> {
+        let test_id = info.test_id;
+        self.load_dynamic_limits_for(info, fid)?;
+        let Some(Some(entry)) = self.dynamic_limits.get(&test_id) else {
+            return Ok((Vec::new(), Vec::new()));
         };
         // requested row positions (may include out-of-range entries, kept so
         // the output length always matches the request)
@@ -1450,7 +1484,7 @@ impl DataFetcher {
         } else {
             Vec::new()
         };
-        (low, high)
+        Ok((low, high))
     }
 
     /// Lazily build (once per file) the raw `Dut_Info` row cache used by the
@@ -1463,7 +1497,7 @@ impl DataFetcher {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PARTIAL_RAW)?;
         let rows = stmt.query_map([fid as i64], |row| {
             Ok(PartialDutRow {
-                row_index: (row.get::<_, i64>(0)? as usize) - 1,
+                row_index: row.get::<_, i64>(0)?.saturating_sub(1) as usize,
                 part_id: row.get(1)?,
                 part_text: row.get(2)?,
                 head: row.get(3)?,
@@ -1500,7 +1534,9 @@ impl DataFetcher {
         self.ensure_partial_info(fid)?;
         let all_sites = sites.contains(&-1);
         let mut out = Vec::new();
-        let rows = self.partial_info.get(&fid).expect("just ensured");
+        let rows = self.partial_info.get(&fid).ok_or_else(|| StdfHelperError {
+            msg: format!("missing partial-info cache for file {}", fid),
+        })?;
         for row in rows {
             if !heads.contains(&(row.head as i64)) {
                 continue;
@@ -1619,20 +1655,20 @@ impl DataFetcher {
         sites: &[i64],
         fid: i64,
     ) -> Result<Vec<(i64, i64, i64)>, StdfHelperError> {
-        let mut sql = String::from(
-            "SELECT SBIN, XCOORD, YCOORD FROM Dut_Info \
-             WHERE WaferIndex=? AND Fid=? AND Supersede=0 AND XCOORD IS NOT NULL \
-             AND YCOORD IS NOT NULL",
-        );
+        if sites.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut site_condition = String::new();
         let mut params: Vec<i64> = vec![wafer_index, fid];
         if sites.contains(&-1) {
-            sql.push_str(" AND SITE_NUM >= 0");
+            site_condition.push_str(" AND SITE_NUM >= 0");
         } else {
-            sql.push_str(" AND SITE_NUM IN (");
-            sql.push_str(&Self::in_clause_placeholders(sites.len()));
-            sql.push(')');
+            site_condition.push_str(" AND SITE_NUM IN (");
+            site_condition.push_str(&Self::in_clause_placeholders(sites.len()));
+            site_condition.push(')');
             params.extend_from_slice(sites);
         }
+        let sql = FETCH_SELECT_WAFER_COORDS.replace("{site_condition}", &site_condition);
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
@@ -1646,21 +1682,20 @@ impl DataFetcher {
     /// X/Y/Flag, skipping NULL coordinates/flags (mirrors the reference
     /// isinstance() guards; Flag & 24 == 8 filtering is done by the caller).
     pub fn stacked_wafer_rows(&self, sites: &[i64]) -> Result<Vec<(i64, i64, i64, i64)>, StdfHelperError> {
-        let mut sql = String::from(
-            "SELECT XCOORD, YCOORD, Flag, count(Flag) FROM Dut_Info \
-             WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL \
-             AND YCOORD IS NOT NULL AND Flag IS NOT NULL",
-        );
+        if sites.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut site_condition = String::new();
         let mut params: Vec<i64> = Vec::new();
         if sites.contains(&-1) {
-            sql.push_str(" AND SITE_NUM >= 0");
+            site_condition.push_str(" AND SITE_NUM >= 0");
         } else {
-            sql.push_str(" AND SITE_NUM IN (");
-            sql.push_str(&Self::in_clause_placeholders(sites.len()));
-            sql.push(')');
+            site_condition.push_str(" AND SITE_NUM IN (");
+            site_condition.push_str(&Self::in_clause_placeholders(sites.len()));
+            site_condition.push(')');
             params.extend_from_slice(sites);
         }
-        sql.push_str(" GROUP By XCOORD, YCOORD, Flag");
+        let sql = FETCH_SELECT_STACKED_WAFER.replace("{site_condition}", &site_condition);
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
@@ -1736,44 +1771,4 @@ fn format_dut_flag(superseded: bool, flag: Option<i64>) -> Option<String> {
         }
     };
     Some(format!("{} - 0x{:02X}", state, flag))
-}
-
-/// Finalize one test group of the dynamic-limit loader. Sides whose index set
-/// stayed empty are discarded (they can never be queried), and a test without
-/// any valid dynamic side is not cached at all.
-fn flush_dynamic_entry(
-    limits: &mut HashMap<TestId, DynamicLimitEntry>,
-    active: &mut Option<TestId>,
-    n: &mut usize,
-    ll_arr: &mut Option<Array1<f32>>,
-    hl_arr: &mut Option<Array1<f32>>,
-    ll_def: &mut Option<f32>,
-    hl_def: &mut Option<f32>,
-    ll_valid: &mut Vec<usize>,
-    hl_valid: &mut Vec<usize>,
-) {
-    let Some(test_id) = active.take() else {
-        return;
-    };
-    *n = 0;
-    let ll_arr = if ll_valid.is_empty() { None } else { ll_arr.take() };
-    let hl_arr = if hl_valid.is_empty() { None } else { hl_arr.take() };
-    let ll_def = if ll_arr.is_some() { ll_def.take() } else { None };
-    let hl_def = if hl_arr.is_some() { hl_def.take() } else { None };
-    if ll_arr.is_none() && hl_arr.is_none() {
-        ll_valid.clear();
-        hl_valid.clear();
-        return;
-    }
-    limits.insert(
-        test_id,
-        DynamicLimitEntry {
-            llimit: ll_arr,
-            hlimit: hl_arr,
-            ll_default: ll_def,
-            hl_default: hl_def,
-            ll_valid_idx: std::mem::take(ll_valid),
-            hl_valid_idx: std::mem::take(hl_valid),
-        },
-    );
 }

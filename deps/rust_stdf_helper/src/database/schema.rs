@@ -415,16 +415,6 @@ pub(crate) static FETCH_SELECT_DUT_HEAD_SITE_ALL: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-pub(crate) static FETCH_SELECT_SITE_LIST: &str = "SELECT 
-        DISTINCT SITE_NUM 
-    FROM 
-        Dut_Info";
-
-pub(crate) static FETCH_SELECT_HEAD_LIST: &str = "SELECT 
-        DISTINCT HEAD_NUM 
-    FROM 
-        Dut_Info";
-
 pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT 
         DUTIndex, 
         RESULT, 
@@ -686,13 +676,15 @@ pub(crate) static FETCH_SELECT_ALL_TEST_INFO: &str = "SELECT
     FROM 
         Test_Info";
 
-// Full Dynamic_Limits table for the eager cache build.
-pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_ALL: &str = "SELECT 
-        TEST_ID, DUTIndex, LLimit, HLimit 
+// Per-test Dynamic_Limits rows for the lazy cache.
+pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST: &str = "SELECT 
+        DUTIndex, LLimit, HLimit 
     FROM 
         Dynamic_Limits 
+    WHERE 
+        TEST_ID=? 
     ORDER BY 
-        TEST_ID, DUTIndex";
+        DUTIndex";
 
 // Single-count templates for getDUTCountOnConditions(); {extra} carries the
 // optional " AND COL=?" pieces appended by the caller.
@@ -720,8 +712,37 @@ pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT
         Dut_Info 
     WHERE Supersede=1{extra}";
 
-pub(crate) static FETCH_SELECT_WAFER_BOUNDS: &str = "SELECT 
+pub(crate) static FETCH_SELECT_WAFER_BOUNDS_STACKED: &str = "SELECT 
         max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
     FROM 
         Dut_Info 
-    WHERE {condition}";
+    WHERE Fid >= 0 AND WaferIndex > 0";
+
+pub(crate) static FETCH_SELECT_WAFER_BOUNDS_WAFER: &str = "SELECT 
+        max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
+    FROM 
+        Dut_Info 
+    WHERE Fid = ? AND WaferIndex = ?";
+
+// {site_condition} is either \" AND SITE_NUM >= 0\" or an IN-list built by
+// the caller; it is always the last clause so base parameters stay first.
+pub(crate) static FETCH_SELECT_WAFER_COORDS: &str = "SELECT 
+        SBIN, XCOORD, YCOORD 
+    FROM 
+        Dut_Info 
+    WHERE WaferIndex=? AND Fid=? AND Supersede=0 AND XCOORD IS NOT NULL 
+        AND YCOORD IS NOT NULL{site_condition}";
+
+pub(crate) static FETCH_SELECT_STACKED_WAFER: &str = "SELECT 
+        XCOORD, YCOORD, Flag, count(Flag) 
+    FROM 
+        Dut_Info 
+    WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL 
+        AND YCOORD IS NOT NULL AND Flag IS NOT NULL{site_condition} 
+    GROUP By XCOORD, YCOORD, Flag";
+
+pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY: &str = "SELECT Fid, DUTIndex 
+    FROM Dut_Info WHERE XCOORD=? AND YCOORD=?";
+
+pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY_WAFER: &str = "SELECT Fid, DUTIndex 
+    FROM Dut_Info WHERE XCOORD=? AND YCOORD=? AND WaferIndex=? AND Fid=?";

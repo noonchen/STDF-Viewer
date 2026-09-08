@@ -28,13 +28,15 @@ pub struct PyDataFetcher {
 impl PyDataFetcher {
     #[new]
     #[pyo3(signature = (path, cache_budget_mb=None))]
-    pub fn new(path: &str, cache_budget_mb: Option<usize>) -> PyResult<Self> {
+    pub fn new(py: Python<'_>, path: &str, cache_budget_mb: Option<usize>) -> PyResult<Self> {
         // cache_budget_mb: Tier-2 test-data LRU byte budget in MiB
         // (plan §3.3/§7). Defaults to 128 MiB when not given.
-        let inner = match cache_budget_mb {
-            Some(mb) => DataFetcher::open_with_budget(path, mb.saturating_mul(1024 * 1024))?,
-            None => DataFetcher::open(path)?,
-        };
+        // DB open scans Dut_Info/Test_Info per file, so release the GIL while
+        // the caches are built.
+        let inner = py.detach(|| match cache_budget_mb {
+            Some(mb) => DataFetcher::open_with_budget(path, mb.saturating_mul(1024 * 1024)),
+            None => DataFetcher::open(path),
+        })?;
         Ok(Self { inner })
     }
 
@@ -50,7 +52,7 @@ impl PyDataFetcher {
         Ok(self.inner.file_paths())
     }
 
-    pub fn get_site_list(&mut self) -> PyResult<Vec<i64>> {
+    pub fn get_site_list(&self) -> PyResult<Vec<i64>> {
         Ok(self
             .inner
             .get_site_list()?
@@ -59,7 +61,7 @@ impl PyDataFetcher {
             .collect())
     }
 
-    pub fn get_head_list(&mut self) -> PyResult<Vec<i64>> {
+    pub fn get_head_list(&self) -> PyResult<Vec<i64>> {
         Ok(self
             .inner
             .get_head_list()?
@@ -277,12 +279,14 @@ impl PyDataFetcher {
         duts: Vec<i64>,
     ) -> PyResult<(Vec<f32>, Vec<f32>)> {
         let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
-        let limits = py.detach(|| -> Result<(Vec<f32>, Vec<f32>), crate::generic::error::StdfHelperError> {
-            match self.inner.get_test_info((test_num, test_name), file_id)? {
-                Some(info) => Ok(self.inner.dynamic_limits_for(info.test_id, &duts_u64)),
-                None => Ok((Vec::new(), Vec::new())),
-            }
-        })?;
+        let limits = py.detach(
+            || -> Result<(Vec<f32>, Vec<f32>), crate::generic::error::StdfHelperError> {
+                match self.inner.get_test_info((test_num, test_name), file_id)? {
+                    Some(info) => self.inner.dynamic_limits_for(&info, file_id, &duts_u64),
+                    None => Ok((Vec::new(), Vec::new())),
+                }
+            },
+        )?;
         Ok(limits)
     }
 
