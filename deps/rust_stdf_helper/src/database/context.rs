@@ -36,8 +36,8 @@ struct FtrRow {
 struct MprRow {
     dut: u64,
     tid: TestId,
-    rslt: String,
-    stat: String,
+    rslt: Vec<u8>,
+    stat: Vec<u8>,
     flag: u8,
 }
 
@@ -314,8 +314,8 @@ impl<'con> DatabaseCtx<'con> {
         &mut self,
         dut: u64,
         tid: TestId,
-        rslt: String,
-        stat: String,
+        rslt: Vec<u8>,
+        stat: Vec<u8>,
         flag: u8,
     ) -> Result<(), StdfHelperError> {
         self.mpr_batch.push(MprRow {

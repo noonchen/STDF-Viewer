@@ -299,17 +299,16 @@ fn on_mpr_view(
 
     let mut rtn_rslt = mpr.rtn_rslt();
     rtn_rslt.iter_mut().for_each(|x| *x *= 10f32.powi(scale));
-    let rslt_hex = hex::encode_upper(unsafe {
-        let u8ptr = std::mem::transmute::<*const _, *const u8>(rtn_rslt.as_ptr());
-        std::slice::from_raw_parts(u8ptr, rtn_rslt.len() * 4)
-    });
-    let stat_hex = hex::encode_upper(mpr.rtn_stat());
+    // Store raw little-endian bytes (BLOB); the fetcher decodes directly,
+    // avoiding the previous TEXT-hex encode/decode round trip.
+    let rslt: Vec<u8> = rtn_rslt.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let stat: Vec<u8> = mpr.rtn_stat().to_vec();
 
     ops.push(DbOp::Mpr {
         dut_index,
         test_id,
-        rslt_hex,
-        stat_hex,
+        rslt,
+        stat,
         flag: test_flg[0],
     });
 

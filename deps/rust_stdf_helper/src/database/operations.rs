@@ -46,8 +46,10 @@ pub enum DbOp {
     Mpr {
         dut_index: u64,
         test_id: TestId,
-        rslt_hex: String,
-        stat_hex: String,
+        /// Raw little-endian f32 result bytes (stored as BLOB).
+        rslt: Vec<u8>,
+        /// Raw RTN_STAT bytes (stored as BLOB).
+        stat: Vec<u8>,
         flag: u8,
     },
     Datalog {
@@ -234,10 +236,10 @@ impl DbOp {
             DbOp::Mpr {
                 dut_index,
                 test_id,
-                rslt_hex,
-                stat_hex,
+                rslt,
+                stat,
                 flag,
-            } => db_ctx.insert_mpr_data_batched(dut_index, test_id, rslt_hex, stat_hex, flag),
+            } => db_ctx.insert_mpr_data_batched(dut_index, test_id, rslt, stat, flag),
             DbOp::Datalog {
                 fid,
                 rec_type,

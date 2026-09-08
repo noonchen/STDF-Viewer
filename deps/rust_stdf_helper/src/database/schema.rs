@@ -127,8 +127,8 @@ pub(crate) static CREATE_TABLE_SQL: &str = "DROP TABLE IF EXISTS File_List;
                                 CREATE TABLE IF NOT EXISTS MPR_Data (
                                                         DUTIndex INTEGER,
                                                         TEST_ID INTEGER, 
-                                                        RTN_RSLT TEXT,
-                                                        RTN_STAT TEXT,
+                                                        RTN_RSLT BLOB,
+                                                        RTN_STAT BLOB,
                                                         TEST_FLAG INTEGER,
                                                         PRIMARY KEY (DUTIndex, TEST_ID)) WITHOUT ROWID;
                                                             
@@ -367,7 +367,12 @@ pub(crate) static CREATE_INDEX_FOR_QUERY: &str = "CREATE INDEX
                                         CREATE INDEX 
                                             ftrKey
                                         ON 
-                                            FTR_Data (TEST_ID, DUTIndex);";
+                                            FTR_Data (TEST_ID, DUTIndex);
+
+                                        CREATE INDEX 
+                                            dynKey
+                                        ON 
+                                            Dynamic_Limits (TEST_ID, DUTIndex);";
 
 pub(crate) static COMMIT_AND_SET_LOCKING: &str = "COMMIT;
                                         PRAGMA locking_mode = NORMAL";

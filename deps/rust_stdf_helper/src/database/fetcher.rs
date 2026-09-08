@@ -468,13 +468,15 @@ impl DataFetcher {
                 }
             }
             TestSubCode::Mpr => {
-                let rows_vec: Vec<(i64, String, String, u8)> = {
+                // RTN_RSLT / RTN_STAT are stored as BLOBs (raw little-endian
+                // bytes); no TEXT-hex path is supported.
+                let rows_vec: Vec<(i64, Vec<u8>, Vec<u8>, u8)> = {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
                         Ok((
                             row.get::<_, i64>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, Vec<u8>>(2)?,
                             row.get::<_, i64>(3)? as u8,
                         ))
                     })?;
@@ -485,7 +487,7 @@ impl DataFetcher {
                 let rslt_cnt = rslt_pgm_cnt.unwrap_or(0) as usize;
                 if rslt_cnt == 0 {
                     // No result columns, but the rows still carry TEST_FLAG.
-                    for (dut_index, _rslt_hex, _stat_hex, flag) in rows_vec {
+                    for (dut_index, _rslt, _stat, flag) in rows_vec {
                         let pos = dut_index.saturating_sub(1) as usize;
                         if pos < n {
                             flags[pos] = flag as i16;
@@ -502,16 +504,12 @@ impl DataFetcher {
                 } else {
                     let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
                     let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
-                    for (dut_index, rslt_hex, stat_hex, flag) in rows_vec {
+                    for (dut_index, rslt, stat, flag) in rows_vec {
                         let pos = dut_index.saturating_sub(1) as usize;
                         if pos >= n {
                             continue;
                         }
-                        // TODO(mpr-blob): write data as BLOB in db gen, so the
-                        // TEXT-hex round trip can be avoided. Needs a DB format
-                        // version/migration and a Python decoder update.
-                        let result = hex_to_f32s(&rslt_hex);
-                        let stat = hex_to_u8s(&stat_hex);
+                        let result = bytes_to_f32s(&rslt);
                         if result.len() != rslt_cnt || stat.len() != rslt_cnt {
                             return Err(StdfHelperError {
                                 msg: format!(
@@ -552,11 +550,26 @@ impl DataFetcher {
             },
         };
 
-        // All-sentinel entries (no data rows for this test) are not worth
-        // caching: they would evict useful entries. Hand them back directly.
-        if entry.valid_test_idx.is_empty() {
-            return Ok(Some(entry));
-        }
+        // All-sentinel entries (no data rows for this test) are cached as
+        // zero-length arrays: the entry keeps the result width (so the
+        // DUT-index path can still synthesize its sentinel rows) but occupies
+        // almost no space, and the test is never re-queried.
+        let entry = if entry.valid_test_idx.is_empty() {
+            let width = entry.data.shape()[1];
+            let states = entry
+                .states
+                .as_ref()
+                .map(|s| Array2::from_shape_fn((0, s.shape()[1]), |_| 0xFu8));
+            TestDataCacheEntry {
+                sub_code: entry.sub_code,
+                data: Array2::from_shape_fn((0, width), |_| f32::NAN),
+                flags: Array1::from_elem(0, -1i16),
+                states,
+                valid_test_idx: Vec::new(),
+            }
+        } else {
+            entry
+        };
 
         let bytes = estimate_entry_bytes(&entry);
         if bytes > self.test_data.budget_bytes {
@@ -694,14 +707,22 @@ fn gather_dut_rows(entry: &TestDataCacheEntry, n: usize, sorted_duts: &[u64]) ->
         .as_ref()
         .map(|s| Array2::from_elem((dut_count, s.shape()[1]), 0xFu8));
 
+    // A cached all-sentinel entry has zero-length arrays; every requested DUT
+    // then keeps its pre-filled sentinel row (NaN / -1 / 0xF).
+    let cached_rows = entry.data.nrows();
     for (i, &dut) in sorted_duts.iter().enumerate() {
         if dut >= 1 && (dut as usize) <= n {
             let pos = dut as usize - 1;
+            if pos >= cached_rows {
+                continue;
+            }
             data.row_mut(i).assign(&entry.data.row(pos));
             if let (Some(dst), Some(src)) = (states.as_mut(), entry.states.as_ref()) {
                 dst.row_mut(i).assign(&src.row(pos));
             }
-            flags[i] = entry.flags[pos];
+            if pos < entry.flags.len() {
+                flags[i] = entry.flags[pos];
+            }
         }
         // DUT outside 1..=n keeps the pre-filled sentinel row (NaN / -1 / 0xF).
     }
@@ -779,28 +800,12 @@ fn intersect_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
     result
 }
 
-fn hex_to_f32s(hex: &str) -> Vec<f32> {
-    hex_bytes(hex)
+/// Decode the raw little-endian f32 payload of an MPR row (BLOB).
+fn bytes_to_f32s(bytes: &[u8]) -> Vec<f32> {
+    bytes
         .chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
-}
-
-fn hex_to_u8s(hex: &str) -> Vec<u8> {
-    hex_bytes(hex)
-}
-
-fn hex_bytes(hex: &str) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(hex.len() / 2);
-    let chars: Vec<char> = hex.chars().collect();
-    let mut i = 0;
-    while i + 1 < chars.len() {
-        if let (Some(hi), Some(lo)) = (chars[i].to_digit(16), chars[i + 1].to_digit(16)) {
-            bytes.push(((hi << 4) | lo) as u8);
-        }
-        i += 2;
-    }
-    bytes
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,8 +1211,6 @@ impl DataFetcher {
     ///
     /// Served from `head_site_idx_all`: the Python method has *no* Supersede
     /// filter, so it must use the all-rows index (not the Supersede=0 cache).
-    // TODO: return the dict-shaped result directly from Rust/PyO3 so Python
-    // does not need to rebuild `{fid: [dut_index, ...]}` from row tuples.
     pub fn dut_index_rows_by_head_site(
         &self,
         heads: &[i64],

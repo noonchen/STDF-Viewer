@@ -231,15 +231,28 @@ impl PyDataFetcher {
         Ok(self.inner.dut_count_on_conditions(head, site, waferid, fid)?)
     }
 
-    pub fn get_dut_index_rows_by_head_site(
+    /// `getDutIndexDictFromHeadSite()` — `{fid: [dut_index, ...]}` built in
+    /// Rust so Python never rebuilds it from row tuples.
+    pub fn get_dut_index_dict_by_head_site<'py>(
         &self,
+        py: Python<'py>,
         heads: Vec<i64>,
         sites: Vec<i64>,
         file_ids: Vec<i64>,
-    ) -> PyResult<Vec<(i64, i64)>> {
-        Ok(self
+    ) -> PyResult<Bound<'py, PyDict>> {
+        use std::collections::BTreeMap;
+        let rows = self
             .inner
-            .dut_index_rows_by_head_site(&heads, &sites, &file_ids)?)
+            .dut_index_rows_by_head_site(&heads, &sites, &file_ids)?;
+        let mut grouped: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+        for (fid, dut) in rows {
+            grouped.entry(fid).or_default().push(dut);
+        }
+        let dict = PyDict::new(py);
+        for (fid, duts) in grouped {
+            dict.set_item(fid, duts)?;
+        }
+        Ok(dict)
     }
 
     /// `selections`: list of (fid, isHBIN, [bin numbers]).
