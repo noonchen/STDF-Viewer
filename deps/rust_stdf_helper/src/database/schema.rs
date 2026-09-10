@@ -383,7 +383,9 @@ pub(crate) static START_NEW_TRANSACTION: &str = "COMMIT; BEGIN;";
 /*** Fetcher Queries ***/
 /***********************/
 
-pub(crate) static FETCH_SELECT_FILE_LIST: &str = "SELECT 
+pub(crate) mod fetcher_queries {
+
+    pub(crate) static FETCH_SELECT_FILE_LIST: &str = "SELECT 
         Fid, 
         Filename 
     FROM 
@@ -391,14 +393,14 @@ pub(crate) static FETCH_SELECT_FILE_LIST: &str = "SELECT
     ORDER BY 
         Fid, SubFid";
 
-pub(crate) static FETCH_SELECT_MAX_DUT_INDEX: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_MAX_DUT_INDEX: &str = "SELECT 
         MAX(DUTIndex) 
     FROM 
         Dut_Info 
     WHERE 
         Fid=?";
 
-pub(crate) static FETCH_SELECT_DUT_HEAD_SITE: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_DUT_HEAD_SITE: &str = "SELECT 
         DUTIndex, 
         HEAD_NUM, 
         SITE_NUM 
@@ -409,7 +411,7 @@ pub(crate) static FETCH_SELECT_DUT_HEAD_SITE: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-pub(crate) static FETCH_SELECT_DUT_HEAD_SITE_ALL: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_DUT_HEAD_SITE_ALL: &str = "SELECT 
         DUTIndex, 
         HEAD_NUM, 
         SITE_NUM 
@@ -420,7 +422,7 @@ pub(crate) static FETCH_SELECT_DUT_HEAD_SITE_ALL: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT 
         DUTIndex, 
         RESULT, 
         TEST_FLAG 
@@ -431,7 +433,7 @@ pub(crate) static FETCH_SELECT_PTR_DATA: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-pub(crate) static FETCH_SELECT_FTR_DATA: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_FTR_DATA: &str = "SELECT 
         DUTIndex, 
         TEST_FLAG 
     FROM 
@@ -441,7 +443,7 @@ pub(crate) static FETCH_SELECT_FTR_DATA: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-pub(crate) static FETCH_SELECT_MPR_DATA: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_MPR_DATA: &str = "SELECT 
         DUTIndex, 
         RTN_RSLT, 
         RTN_STAT, 
@@ -453,9 +455,9 @@ pub(crate) static FETCH_SELECT_MPR_DATA: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-/****** Metadata / summary queries (mirrors deps/DatabaseFetcher.py) ******/
+    /****** Metadata / summary queries (mirrors deps/DatabaseFetcher.py) ******/
 
-pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT 
         A.Fid, B.wafercnt 
     FROM 
         (SELECT DISTINCT Fid FROM File_List) as A 
@@ -466,7 +468,7 @@ pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT
     ORDER by 
         A.Fid";
 
-pub(crate) static FETCH_SELECT_BYTE_ORDER: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BYTE_ORDER: &str = "SELECT 
         (CASE WHEN Value=\"Little endian\" THEN 1 ELSE 0 END) AS \"IsLB\" 
     FROM 
         File_Info 
@@ -474,7 +476,7 @@ pub(crate) static FETCH_SELECT_BYTE_ORDER: &str = "SELECT
         Field=\"BYTE_ORD\" 
     ORDER BY Fid";
 
-pub(crate) static FETCH_SELECT_TEST_ITEMS: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_TEST_ITEMS: &str = "SELECT 
         Test_Info.TEST_NUM, Test_Info.TEST_NAME, TestPin_Map.PMR_INDX 
     FROM 
         Test_Info 
@@ -485,24 +487,24 @@ pub(crate) static FETCH_SELECT_TEST_ITEMS: &str = "SELECT
     ORDER by 
         Test_Info.TEST_ID, TestPin_Map.ROWID";
 
-pub(crate) static FETCH_SELECT_TEST_RECORD_TYPES: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_TEST_RECORD_TYPES: &str = "SELECT 
         TEST_NUM, TEST_NAME, SUB_CODE 
     FROM 
         Test_Info";
 
-pub(crate) static FETCH_SELECT_WAFER_LIST: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_LIST: &str = "SELECT 
         Fid, WaferIndex, WAFER_ID 
     FROM 
         Wafer_Info 
     ORDER by 
         WaferIndex";
 
-pub(crate) static FETCH_SELECT_TEST_FAIL_CNT: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_TEST_FAIL_CNT: &str = "SELECT 
         TEST_NUM, TEST_NAME, Fid, FailCount 
     FROM 
         Test_Info";
 
-pub(crate) static FETCH_SELECT_BIN_INFO: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BIN_INFO: &str = "SELECT 
         BIN_NUM, BIN_NAME, BIN_PF 
     FROM 
         Bin_Info 
@@ -511,7 +513,7 @@ pub(crate) static FETCH_SELECT_BIN_INFO: &str = "SELECT
     ORDER by 
         BIN_NUM";
 
-pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD: &str = "SELECT 
         Fid, HBIN, count(HBIN) 
     FROM 
         Dut_Info 
@@ -519,7 +521,7 @@ pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD: &str = "SELECT
         HEAD_NUM=? AND Supersede=0 
     GROUP by Fid, HBIN";
 
-pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD_SITE: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD_SITE: &str = "SELECT 
         Fid, HBIN, count(HBIN) 
     FROM 
         Dut_Info 
@@ -527,7 +529,7 @@ pub(crate) static FETCH_SELECT_BIN_STATS_H_HEAD_SITE: &str = "SELECT
         HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 
     GROUP by Fid, HBIN";
 
-pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD: &str = "SELECT 
         Fid, SBIN, count(SBIN) 
     FROM 
         Dut_Info 
@@ -535,7 +537,7 @@ pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD: &str = "SELECT
         HEAD_NUM=? AND Supersede=0 
     GROUP by Fid, SBIN";
 
-pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD_SITE: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD_SITE: &str = "SELECT 
         Fid, SBIN, count(SBIN) 
     FROM 
         Dut_Info 
@@ -543,18 +545,18 @@ pub(crate) static FETCH_SELECT_BIN_STATS_S_HEAD_SITE: &str = "SELECT
         HEAD_NUM=? AND SITE_NUM=? AND Supersede=0 
     GROUP by Fid, SBIN";
 
-pub(crate) static FETCH_SELECT_FILE_INFO: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_FILE_INFO: &str = "SELECT 
         Fid, Field, Value 
     FROM 
         File_Info 
     ORDER By 
         Fid, Field, SubFid";
 
-/****** DUT-level queries (mirrors deps/DatabaseFetcher.py) ******/
+    /****** DUT-level queries (mirrors deps/DatabaseFetcher.py) ******/
 
-/****** Queries moved out of database/fetcher.rs (fixed SQL, no appended conditions) ******/
+    /****** Queries moved out of database/fetcher.rs (fixed SQL, no appended conditions) ******/
 
-pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT 
         DUTIndex, 
         Dut_Info.Fid AS \"File ID\", 
         PartID, 
@@ -576,7 +578,7 @@ pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT
             LEFT JOIN (SELECT Fid, WaferIndex, WAFER_ID FROM Wafer_Info) AS wf 
             ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)";
 
-pub(crate) static FETCH_SELECT_DATALOG: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_DATALOG: &str = "SELECT 
         RecordType AS \"Record Type\", 
         '\\n' || Value || '\\n' AS \"Value\", 
         printf(\"%s ··· %s ··· %s\", 
@@ -590,7 +592,7 @@ pub(crate) static FETCH_SELECT_DATALOG: &str = "SELECT
     FROM 
         Datalog";
 
-pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT 
         Fid, HEAD_NUM, WaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, 
         GOOD_CNT, FUNC_CNT, WAFER_ID, FABWF_ID, FRAME_ID, MASK_ID, 
         USR_DESC, EXC_DESC 
@@ -599,7 +601,7 @@ pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT
     ORDER by 
         WaferIndex";
 
-pub(crate) static FETCH_SELECT_WAFER_EXT: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_EXT: &str = "SELECT 
         Field, Value 
     FROM 
         File_Info 
@@ -607,7 +609,7 @@ pub(crate) static FETCH_SELECT_WAFER_EXT: &str = "SELECT
         Fid=? AND SubFid=0 AND Field in 
         ('DIE_WID', 'DIE_HT', 'POS_X', 'POS_Y', 'WF_UNITS')";
 
-pub(crate) static FETCH_SELECT_PIN_NAMES: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_PIN_NAMES: &str = "SELECT 
         A.PMR_INDX, PHY_NAM, LOG_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM 
     FROM 
         ((SELECT ROWID, PMR_INDX FROM TestPin_Map 
@@ -620,17 +622,17 @@ pub(crate) static FETCH_SELECT_PIN_NAMES: &str = "SELECT
             A.PMR_INDX=Pin_Map.PMR_INDX AND Pin_Map.Fid=?) 
     ORDER BY A.ROWID";
 
-// {column} is filled in with a caller-supplied identifier (see
-// is_dut_info_column_empty); no other text is ever appended.
-pub(crate) static FETCH_EXISTS_DUT_COLUMN: &str = "SELECT EXISTS (
+    // {column} is filled in with a caller-supplied identifier (see
+    // is_dut_info_column_empty); no other text is ever appended.
+    pub(crate) static FETCH_EXISTS_DUT_COLUMN: &str = "SELECT EXISTS (
         SELECT 1 
         FROM Dut_Info 
         WHERE {column} IS NOT NULL 
             AND 
             (typeof({column}) != 'text' OR trim({column}) != \"\"))";
 
-// Single conditional-aggregation pass replacing the five grouped counts.
-pub(crate) static FETCH_SELECT_DUT_COUNTS: &str = "SELECT 
+    // Single conditional-aggregation pass replacing the five grouped counts.
+    pub(crate) static FETCH_SELECT_DUT_COUNTS: &str = "SELECT 
         Fid, 
         count(*), 
         sum(CASE WHEN Supersede=0 AND (Flag & 24)=0 THEN 1 ELSE 0 END), 
@@ -642,8 +644,7 @@ pub(crate) static FETCH_SELECT_DUT_COUNTS: &str = "SELECT
     GROUP by Fid 
     ORDER by Fid";
 
-
-pub(crate) static FETCH_SELECT_PARTIAL_RAW: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_PARTIAL_RAW: &str = "SELECT 
         DUTIndex, 
         PartID, 
         PartText, 
@@ -658,9 +659,8 @@ pub(crate) static FETCH_SELECT_PARTIAL_RAW: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-
-// Full Test_Info row set, used to prime the eager test_info cache.
-pub(crate) static FETCH_SELECT_ALL_TEST_INFO: &str = "SELECT 
+    // Full Test_Info row set, used to prime the eager test_info cache.
+    pub(crate) static FETCH_SELECT_ALL_TEST_INFO: &str = "SELECT 
         Fid, 
         TEST_ID, 
         SUB_CODE, 
@@ -681,8 +681,8 @@ pub(crate) static FETCH_SELECT_ALL_TEST_INFO: &str = "SELECT
     FROM 
         Test_Info";
 
-// Per-test Dynamic_Limits rows for the lazy cache.
-pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST: &str = "SELECT 
+    // Per-test Dynamic_Limits rows for the lazy cache.
+    pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST: &str = "SELECT 
         DUTIndex, LLimit, HLimit 
     FROM 
         Dynamic_Limits 
@@ -691,54 +691,54 @@ pub(crate) static FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST: &str = "SELECT
     ORDER BY 
         DUTIndex";
 
-// Single-count templates for getDUTCountOnConditions(); {extra} carries the
-// optional " AND COL=?" pieces appended by the caller.
-pub(crate) static FETCH_COUNT_ON_COND_PASS: &str = "SELECT 
+    // Single-count templates for getDUTCountOnConditions(); {extra} carries the
+    // optional " AND COL=?" pieces appended by the caller.
+    pub(crate) static FETCH_COUNT_ON_COND_PASS: &str = "SELECT 
         count(*) 
     FROM 
         Dut_Info 
     WHERE Supersede=0 AND Flag & 24=0{extra}";
 
-pub(crate) static FETCH_COUNT_ON_COND_FAIL: &str = "SELECT 
+    pub(crate) static FETCH_COUNT_ON_COND_FAIL: &str = "SELECT 
         count(*) 
     FROM 
         Dut_Info 
     WHERE Supersede=0 AND Flag & 24 = 8{extra}";
 
-pub(crate) static FETCH_COUNT_ON_COND_UNKNOWN: &str = "SELECT 
+    pub(crate) static FETCH_COUNT_ON_COND_UNKNOWN: &str = "SELECT 
         count(*) 
     FROM 
         Dut_Info 
     WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){extra}";
 
-pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT 
+    pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT 
         count(*) 
     FROM 
         Dut_Info 
     WHERE Supersede=1{extra}";
 
-pub(crate) static FETCH_SELECT_WAFER_BOUNDS_STACKED: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_BOUNDS_STACKED: &str = "SELECT 
         max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
     FROM 
         Dut_Info 
     WHERE Fid >= 0 AND WaferIndex > 0";
 
-pub(crate) static FETCH_SELECT_WAFER_BOUNDS_WAFER: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_BOUNDS_WAFER: &str = "SELECT 
         max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
     FROM 
         Dut_Info 
     WHERE Fid = ? AND WaferIndex = ?";
 
-// {site_condition} is either \" AND SITE_NUM >= 0\" or an IN-list built by
-// the caller; it is always the last clause so base parameters stay first.
-pub(crate) static FETCH_SELECT_WAFER_COORDS: &str = "SELECT 
+    // {site_condition} is either \" AND SITE_NUM >= 0\" or an IN-list built by
+    // the caller; it is always the last clause so base parameters stay first.
+    pub(crate) static FETCH_SELECT_WAFER_COORDS: &str = "SELECT 
         SBIN, XCOORD, YCOORD 
     FROM 
         Dut_Info 
     WHERE WaferIndex=? AND Fid=? AND Supersede=0 AND XCOORD IS NOT NULL 
         AND YCOORD IS NOT NULL{site_condition}";
 
-pub(crate) static FETCH_SELECT_STACKED_WAFER: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_STACKED_WAFER: &str = "SELECT 
         XCOORD, YCOORD, Flag, count(Flag) 
     FROM 
         Dut_Info 
@@ -746,8 +746,9 @@ pub(crate) static FETCH_SELECT_STACKED_WAFER: &str = "SELECT
         AND YCOORD IS NOT NULL AND Flag IS NOT NULL{site_condition} 
     GROUP By XCOORD, YCOORD, Flag";
 
-pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY: &str = "SELECT Fid, DUTIndex 
+    pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY: &str = "SELECT Fid, DUTIndex 
     FROM Dut_Info WHERE XCOORD=? AND YCOORD=?";
 
-pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY_WAFER: &str = "SELECT Fid, DUTIndex 
+    pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY_WAFER: &str = "SELECT Fid, DUTIndex 
     FROM Dut_Info WHERE XCOORD=? AND YCOORD=? AND WaferIndex=? AND Fid=?";
+}

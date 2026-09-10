@@ -27,7 +27,7 @@ use pyo3::prelude::*;
 /// Python reference fetcher (SharedSrc) uses the exact same query text.
 #[pyfunction]
 fn dut_summary_query() -> &'static str {
-    crate::database::schema::FETCH_SELECT_DUT_SUMMARY
+    crate::database::schema::fetcher_queries::FETCH_SELECT_DUT_SUMMARY
 }
 
 pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {

@@ -12,12 +12,14 @@
 // Copyright (c) 2026 noonchen
 //
 
-use crate::database::fetcher::{DataFetcher, FetchedTestData, TestSubCode};
+use crate::database::fetcher::{DataFetcher, FetchedTestData, FileId};
+use crate::stdf::record_tracker::TestSubCode;
 use numpy::ndarray::Array1;
 use numpy::IntoPyArray;
+use numpy::PyArray1;
 use pyo3::prelude::*;
-use pyo3::IntoPyObjectExt;
 use pyo3::types::{PyAny, PyDict, PyTuple};
+use pyo3::IntoPyObjectExt;
 
 #[pyclass(name = "DataFetcher", module = "rust_stdf_helper", unsendable)]
 pub struct PyDataFetcher {
@@ -75,7 +77,7 @@ impl PyDataFetcher {
         py: Python<'py>,
         test_num: u32,
         test_name: &str,
-        file_id: usize,
+        file_id: FileId,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         // Quick single-row lookup; still run it GIL-free so the SQLite hit
         // never stalls the UI thread.
@@ -112,7 +114,7 @@ impl PyDataFetcher {
         test_name: &str,
         heads: Vec<i64>,
         sites: Vec<i64>,
-        file_id: usize,
+        file_id: FileId,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         let heads_u8: Vec<u8> = heads.iter().map(|&h| h as u8).collect();
         let sites_opt: Vec<Option<u8>> = sites
@@ -142,7 +144,7 @@ impl PyDataFetcher {
         test_num: u32,
         test_name: &str,
         duts: Vec<i64>,
-        file_id: usize,
+        file_id: FileId,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
         let fetched = py.detach(|| {
@@ -228,7 +230,9 @@ impl PyDataFetcher {
         waferid: i64,
         fid: i64,
     ) -> PyResult<Vec<i64>> {
-        Ok(self.inner.dut_count_on_conditions(head, site, waferid, fid)?)
+        Ok(self
+            .inner
+            .dut_count_on_conditions(head, site, waferid, fid)?)
     }
 
     /// `getDutIndexDictFromHeadSite()` — `{fid: [dut_index, ...]}` built in
@@ -236,21 +240,15 @@ impl PyDataFetcher {
     pub fn get_dut_index_dict_by_head_site<'py>(
         &self,
         py: Python<'py>,
-        heads: Vec<i64>,
-        sites: Vec<i64>,
-        file_ids: Vec<i64>,
+        heads: Vec<i32>,
+        sites: Vec<i32>,
+        file_ids: Vec<FileId>,
     ) -> PyResult<Bound<'py, PyDict>> {
-        use std::collections::BTreeMap;
-        let rows = self
-            .inner
-            .dut_index_rows_by_head_site(&heads, &sites, &file_ids)?;
-        let mut grouped: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-        for (fid, dut) in rows {
-            grouped.entry(fid).or_default().push(dut);
-        }
         let dict = PyDict::new(py);
-        for (fid, duts) in grouped {
-            dict.set_item(fid, duts)?;
+        for fid in file_ids {
+            let duts_in_fid = self.inner.get_dut_index_by_head_site(&heads, &sites, fid)?;
+
+            dict.set_item(fid, duts_in_fid.into_pyarray(py))?;
         }
         Ok(dict)
     }
@@ -286,32 +284,32 @@ impl PyDataFetcher {
     pub fn get_dynamic_limits<'py>(
         &mut self,
         py: Python<'py>,
-        file_id: usize,
+        file_id: FileId,
         test_num: u32,
         test_name: &str,
         duts: Vec<i64>,
-    ) -> PyResult<(Vec<f32>, Vec<f32>)> {
-        let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
+    ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
+        let duts = unsafe { std::slice::from_raw_parts(duts.as_ptr() as *const u64, duts.len()) };
         let limits = py.detach(
-            || -> Result<(Vec<f32>, Vec<f32>), crate::generic::error::StdfHelperError> {
+            || -> Result<(Array1<f32>, Array1<f32>), crate::generic::error::StdfHelperError> {
                 match self.inner.get_test_info((test_num, test_name), file_id)? {
-                    Some(info) => self.inner.dynamic_limits_for(&info, file_id, &duts_u64),
-                    None => Ok((Vec::new(), Vec::new())),
+                    Some(info) => self.inner.get_dynamic_limits(&info, file_id, duts),
+                    None => Ok((Array1::zeros(0), Array1::zeros(0))),
                 }
             },
         )?;
-        Ok(limits)
+        Ok((limits.0.into_pyarray(py), limits.1.into_pyarray(py)))
     }
 
     /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
     /// "Head h - Site s", PartText, "State - 0xFL").
-    pub fn get_partial_dut_info_rows(
+    pub fn get_partial_dut_info(
         &mut self,
-        heads: Vec<i64>,
-        sites: Vec<i64>,
-        file_id: i64,
+        heads: Vec<i32>,
+        sites: Vec<i32>,
+        file_id: FileId,
     ) -> PyResult<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>> {
-        Ok(self.inner.partial_dut_info_rows(&heads, &sites, file_id)?)
+        Ok(self.inner.get_partial_dut_info(&heads, &sites, file_id)?)
     }
 
     /// DUT summary rows as python tuples `(DUTIndex, File ID, Part ID, ...)`
@@ -319,7 +317,7 @@ impl PyDataFetcher {
     pub fn get_full_dut_summary_rows<'py>(
         &self,
         py: Python<'py>,
-        fid: i64,
+        fid: FileId,
     ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
         let rows = self.inner.full_dut_summary_rows(fid)?;
         rows.into_iter()
@@ -340,7 +338,7 @@ impl PyDataFetcher {
                 push_opt_str(&mut items, r.wafer_id, py)?;
                 push_opt_str(&mut items, r.xy, py)?;
                 push_opt_str(&mut items, r.dut_flag, py)?;
-                Ok(PyTuple::new(py, items)?)
+                PyTuple::new(py, items)
             })
             .collect()
     }
@@ -349,19 +347,16 @@ impl PyDataFetcher {
 
     pub fn get_pin_name_rows(
         &self,
-        test_num: i64,
+        test_num: u32,
         test_name: &str,
         is_rtn: bool,
-        fid: i64,
+        fid: FileId,
     ) -> PyResult<Vec<(i64, String, String, i64, i64, String)>> {
         Ok(self.inner.pin_name_rows(test_num, test_name, is_rtn, fid)?)
     }
 
     /// Wafer_Info rows as tuples in column order (ints / str / None).
-    pub fn get_wafer_info_rows<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+    pub fn get_wafer_info_rows<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
         let rows = self.inner.wafer_info_rows()?;
         rows.into_iter()
             .map(|r| {
@@ -380,25 +375,25 @@ impl PyDataFetcher {
                 push_opt_str(&mut items, r.mask_id, py)?;
                 push_opt_str(&mut items, r.usr_desc, py)?;
                 push_opt_str(&mut items, r.exc_desc, py)?;
-                Ok(PyTuple::new(py, items)?)
+                PyTuple::new(py, items)
             })
             .collect()
     }
 
-    pub fn get_wafer_ext_rows(&self, fid: i64) -> PyResult<Vec<(String, Option<String>)>> {
+    pub fn get_wafer_ext_rows(&self, fid: FileId) -> PyResult<Vec<(String, Option<String>)>> {
         Ok(self.inner.wafer_ext_rows(fid)?)
     }
 
     pub fn get_wafer_coord_rows(
         &self,
-        wafer_index: i64,
-        sites: Vec<i64>,
-        fid: i64,
+        wafer_index: u64,
+        sites: Vec<i32>,
+        fid: FileId,
     ) -> PyResult<Vec<(i64, i64, i64)>> {
         Ok(self.inner.wafer_coord_rows(wafer_index, &sites, fid)?)
     }
 
-    pub fn get_stacked_wafer_rows(&self, sites: Vec<i64>) -> PyResult<Vec<(i64, i64, i64, i64)>> {
+    pub fn get_stacked_wafer_rows(&self, sites: Vec<i32>) -> PyResult<Vec<(i64, i64, i64, i64)>> {
         Ok(self.inner.stacked_wafer_rows(&sites)?)
     }
 

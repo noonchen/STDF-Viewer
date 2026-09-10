@@ -51,3 +51,22 @@ pub fn get_file_size(file_path: &str) -> io::Result<u64> {
         Ok(fp.metadata()?.len())
     }
 }
+
+#[inline]
+/// takes sorted slice `a` and `b` and produce sorted intersect.
+pub fn intersect_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
+    let mut result = Vec::with_capacity(a.len().min(b.len()));
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] {
+            result.push(a[i]);
+            i += 1;
+            j += 1;
+        } else if a[i] < b[j] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    result
+}

@@ -12,22 +12,10 @@
 //
 
 use crate::database::operations::TestId;
-use crate::database::schema::{
-    FETCH_EXISTS_DUT_COLUMN, FETCH_SELECT_BIN_INFO, FETCH_SELECT_BIN_STATS_H_HEAD,
-    FETCH_SELECT_BIN_STATS_H_HEAD_SITE, FETCH_SELECT_BIN_STATS_S_HEAD,
-    FETCH_SELECT_BIN_STATS_S_HEAD_SITE, FETCH_SELECT_BYTE_ORDER,
-    FETCH_SELECT_DATALOG, FETCH_SELECT_DUT_COUNTS, FETCH_SELECT_DUT_HEAD_SITE,
-    FETCH_SELECT_DUT_HEAD_SITE_ALL, FETCH_SELECT_DUT_INDEX_BY_XY,
-    FETCH_SELECT_DUT_INDEX_BY_XY_WAFER, FETCH_SELECT_DUT_SUMMARY,
-    FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST, FETCH_SELECT_FILE_INFO, FETCH_SELECT_FILE_LIST,
-    FETCH_SELECT_FTR_DATA, FETCH_SELECT_MAX_DUT_INDEX, FETCH_SELECT_MPR_DATA,
-    FETCH_SELECT_PARTIAL_RAW, FETCH_SELECT_PIN_NAMES, FETCH_SELECT_PTR_DATA,
-    FETCH_SELECT_ALL_TEST_INFO, FETCH_SELECT_STACKED_WAFER, FETCH_SELECT_TEST_FAIL_CNT,
-    FETCH_SELECT_TEST_ITEMS, FETCH_SELECT_TEST_RECORD_TYPES, FETCH_SELECT_WAFER_BOUNDS_STACKED,
-    FETCH_SELECT_WAFER_BOUNDS_WAFER, FETCH_SELECT_WAFER_COORDS, FETCH_SELECT_WAFER_COUNT,
-    FETCH_SELECT_WAFER_EXT, FETCH_SELECT_WAFER_INFO, FETCH_SELECT_WAFER_LIST,
-};
+use crate::database::schema::fetcher_queries::*;
 use crate::generic::error::StdfHelperError;
+use crate::generic::helper::intersect_sorted;
+use crate::stdf::record_tracker::TestSubCode;
 use lru::LruCache;
 use ndarray::{Array1, Array2};
 use rusqlite::Connection;
@@ -35,13 +23,10 @@ use std::collections::{BTreeSet, HashMap};
 
 pub type HeadNum = u8;
 pub type SiteNum = u8;
+pub type FileId = u64;
 pub type TestNum = u32;
 
-/// Single source of truth for the `SUB_CODE` column values (PTR/MPR/FTR),
-/// defined with the STDF tracker and re-exported here so the database and
-/// PyO3 layers never spell out the raw 10/15/20 codes.
-pub use crate::stdf::record_tracker::TestSubCode;
-
+/// Represents the cached information for a single test.
 #[derive(Debug, Clone)]
 pub struct TestInfo {
     pub test_id: TestId,
@@ -62,14 +47,34 @@ pub struct TestInfo {
     pub seq_name: Option<String>,
 }
 
+/// Represents a cached entry of test data of PTR, MPR and FTR.
+/// Each entry contains data of ALL DUTs,
+/// and `valid_test_idx` indicates which DUTs have valid test data.
 pub struct TestDataCacheEntry {
     pub sub_code: TestSubCode,
+    /// 1d array for PTR test, 2d array for MPR (rows: pins, columns: DUTs)
     pub data: Array2<f32>,
-    pub flags: Array1<i16>,
+    /// pin states from MPR (rows: pins, columns: DUTs)
     pub states: Option<Array2<u8>>,
+    pub flags: Array1<i16>,
     pub valid_test_idx: Vec<usize>,
 }
 
+impl TestDataCacheEntry {
+    /// Rough estimation of a current cache entry in bytes.
+    fn entry_size(&self) -> usize {
+        const ENTRY_OVERHEAD: usize = 64;
+        self.data.len() * 4
+            + self.flags.len() * 2
+            + self.states.as_ref().map_or(0, |s| s.len())
+            + self.valid_test_idx.len() * 8
+            // TODO: what is this overhead?
+            + ENTRY_OVERHEAD
+    }
+}
+
+/// Test data fetched for DUTs of interest.
+/// DUTs of interest are also included.
 pub struct FetchedTestData {
     pub sub_code: TestSubCode,
     pub dut_list: Array1<u64>,
@@ -78,16 +83,9 @@ pub struct FetchedTestData {
     pub states: Option<Array2<u8>>,
 }
 
-/// Per-test dynamic-limit cache entry, aligned to the file's full-DUT array.
-///
-/// Values are *fill-first*: a side array exists only when the test has a
-/// static default for that side (`Test_Info.LLimit/HLimit`, f32 as stored in
-/// the STDF file); elements start as that default and `Dynamic_Limits` rows
-/// overwrite their DUT. A side whose index set stayed empty is discarded (it
-/// can never be returned), and a side without a static default has no array at
-/// all — mirroring Python, where a NaN static default disables that side.
-/// `ll_valid_idx` / `hl_valid_idx` record which DUTs carry a *dynamic*
-/// override and gate whether a side's output is empty (`hasDynamicLow/High`).
+/// Represents a cached entry of dynamic limits for a single PTR test.
+/// Each entry contains dynamic limits of ALL DUTs,
+/// and `??_valid_idx` tracks DUTs that have valid dynamic limits.
 pub struct DynamicLimitEntry {
     pub llimit: Option<Array1<f32>>,
     pub hlimit: Option<Array1<f32>>,
@@ -97,53 +95,33 @@ pub struct DynamicLimitEntry {
     pub hl_valid_idx: Vec<usize>,
 }
 
-/// One raw `Dut_Info` row used by the partial-DUT-info cache
-/// (`getPartialDUTInfoOnCondition`), including superseded rows. Formatted
-/// strings ("Head h - Site s", "State - 0x%02X") are built per call so the
-/// cache only keeps raw fields.
-pub struct PartialDutRow {
-    pub row_index: usize,
+/// Subset of DUT Summary row, used in DUT Data Table.
+/// Raw fields only; formatted strings are built per call.
+pub struct PartialDutInfoRow {
+    pub dut_index: u64,
     pub part_id: Option<String>,
     pub part_text: Option<String>,
     pub head: HeadNum,
     pub site: SiteNum,
     pub superseded: bool,
-    pub flag: Option<i64>,
+    pub flag: u8,
 }
 
-/// Default byte budget for the Tier-2 test-data LRU (see plan §3.3/§7).
-const DEFAULT_TEST_CACHE_BUDGET_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
+/// Default cache upper limit for test data LRU.
+const DEFAULT_TEST_CACHE_LIMIT: usize = 128 * 1024 * 1024; // 128 MiB
 
-/// Rough in-memory footprint of one cached test-data entry, in bytes.
-/// Mirrors the plan §7 estimate: data f32 ×1, flags i16 ×2 (plan allows i16 or u8),
-/// states u8 ×1 (MPR), valid_test_idx usize ×8, plus a small constant overhead.
-fn estimate_entry_bytes(entry: &TestDataCacheEntry) -> usize {
-    const ENTRY_OVERHEAD: usize = 64;
-    entry.data.len() * 4
-        + entry.flags.len() * 2
-        + entry.states.as_ref().map_or(0, |s| s.len())
-        + entry.valid_test_idx.len() * 8
-        + ENTRY_OVERHEAD
-}
-
-/// Tier-2 test-data cache: LRU eviction ordered by recency but bounded by a
-/// byte budget instead of an entry count (plan §3.3 "memory-bounded LRU").
-/// Entries are stored per `(test_id, fid)` and aligned to the shared full-DUT
-/// array, so MPR entries cost `rslt_cnt ×` more than PTR ones — a byte budget
-/// is required, an entry count is not sufficient.
+/// LRU Test data cache with byte-budgeted eviction.
 struct TestDataLru {
-    cache: LruCache<(TestId, usize), TestDataCacheEntry>,
+    cache: LruCache<(TestId, FileId), TestDataCacheEntry>,
     budget_bytes: usize,
     used_bytes: usize,
 }
 
 impl TestDataLru {
     fn new(budget_bytes: usize) -> Self {
-        // The byte budget is the binding constraint. Use an unbounded LRU (no
-        // pre-allocated hash table) and let `insert`'s byte-budget loop do all
-        // eviction: pre-allocating `budget_bytes / 64` entries for the default
-        // 128 MiB budget reserved ~2M slots at open, and a huge budget could
-        // request a ~1-billion-slot allocation.
+        // Use an unbounded LRU to avoid prealloc huge number of slot.
+        // Eviction will be handled manually by estimating
+        // each entry's memory footprint in bytes.
         Self {
             cache: LruCache::unbounded(),
             budget_bytes,
@@ -151,28 +129,29 @@ impl TestDataLru {
         }
     }
 
-    fn get(&mut self, key: &(TestId, usize)) -> Option<&TestDataCacheEntry> {
+    fn get(&mut self, key: &(TestId, FileId)) -> Option<&TestDataCacheEntry> {
         self.cache.get(key)
     }
 
-    /// Insert an entry and evict least-recently-used entries until the byte
-    /// budget is satisfied again. Entries larger than the whole budget are not
-    /// cached (they would evict everything and immediately re-blow the budget);
-    /// the caller still returns the freshly computed data to Python.
-    fn insert(&mut self, key: (TestId, usize), entry: TestDataCacheEntry) {
-        let bytes = estimate_entry_bytes(&entry);
+    /// Store a test data cache,
+    /// evict least-used ones if not enough remaining budget.
+    fn insert(&mut self, key: (TestId, FileId), entry: TestDataCacheEntry) {
+        let bytes = entry.entry_size();
         if bytes > self.budget_bytes {
+            // Entry is too large to fit in the cache, skip insertion.
             return;
         }
-        // `put` returns the replaced entry on a duplicate key; subtract its
-        // footprint so `used_bytes` stays accurate.
+        // In case an entry with the same key already exists,
+        // subtract old size first.
         if let Some(old) = self.cache.put(key, entry) {
-            self.used_bytes = self.used_bytes.saturating_sub(estimate_entry_bytes(&old));
+            self.used_bytes = self.used_bytes.saturating_sub(old.entry_size());
         }
+        // Add the new entry's size to the used bytes.
         self.used_bytes += bytes;
+        // Evict least-used entries until the used bytes are within the budget.
         while self.used_bytes > self.budget_bytes {
             match self.cache.pop_lru() {
-                Some((_, evicted)) => self.used_bytes -= estimate_entry_bytes(&evicted),
+                Some((_, evicted)) => self.used_bytes -= evicted.entry_size(),
                 None => break,
             }
         }
@@ -184,46 +163,48 @@ impl TestDataLru {
     }
 }
 
+/// Rust version of DatabaseFetcher, owns the database connection
+/// and manages caches for fast access.
 pub struct DataFetcher {
     conn: Connection,
     file_paths: Vec<Vec<String>>,
-    // fid -> [1, 2, .., N]; u64 matches the db-gen counter type.
-    full_dut: HashMap<usize, Array1<u64>>,
-    // (fid, head, site/None) -> sorted row indices of non-superseded DUTs.
-    head_site_idx: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
-    // Same shape but *including* superseded rows: getDutIndexDictFromHeadSite
-    // has no Supersede filter, so it cannot reuse head_site_idx.
-    head_site_idx_all: HashMap<(usize, HeadNum, Option<SiteNum>), Vec<usize>>,
-    // (fid, test_num) -> test_name -> TestInfo, so lookups borrow the &str key.
-    test_info: HashMap<(usize, TestNum), HashMap<String, TestInfo>>,
-    // Lazily loaded dynamic-limit cache: `None` means "loaded, no dynamic
-    // limits" (so a test with no dynamic rows is not queried again).
+    /// fid -> full dut array (starts from 1).
+    full_dut: HashMap<FileId, Array1<u64>>,
+    /// (fid, head, site?) -> sorted dut array indices of non-superseded DUTs.
+    head_site_dutarr_idx: HashMap<(FileId, HeadNum, Option<SiteNum>), Vec<usize>>,
+    /// (fid, head, site?) -> sorted dut array indices of all DUTs, including superseded ones.
+    head_site_dutarr_idx_all: HashMap<(FileId, HeadNum, Option<SiteNum>), Vec<usize>>,
+    /// (fid, test_num) -> test_name -> TestInfo.
+    test_info: HashMap<(FileId, TestNum), HashMap<String, TestInfo>>,
+    /// test_id -> dynamic limit cache.
+    /// `None` cache means already queried but no dynamic limit found.
     dynamic_limits: HashMap<TestId, Option<DynamicLimitEntry>>,
-    // Per-file raw Dut_Info rows for the partial-DUT-info cache.
-    partial_info: HashMap<usize, Vec<PartialDutRow>>,
-    // Distinct site/head lists, filled once in `build_file_caches`.
+    /// fid -> partial DUT info.
+    partial_dut_info: HashMap<FileId, Vec<PartialDutInfoRow>>,
     site_list: Vec<SiteNum>,
     head_list: Vec<HeadNum>,
+    /// LRU cache for test data.
     test_data: TestDataLru,
 }
 
 impl DataFetcher {
+    /// Open a database, set test data cache with default budget.
     pub fn open(path: &str) -> Result<Self, StdfHelperError> {
-        Self::open_with_budget(path, DEFAULT_TEST_CACHE_BUDGET_BYTES)
+        Self::open_with_budget(path, DEFAULT_TEST_CACHE_LIMIT)
     }
 
-    /// Open a database with a custom Tier-2 cache byte budget.
+    /// Open a database, set test data cache with the specified budget.
     pub fn open_with_budget(path: &str, budget_bytes: usize) -> Result<Self, StdfHelperError> {
         let conn = Connection::open(path)?;
         let mut fetcher = Self {
             conn,
             file_paths: Vec::new(),
             full_dut: HashMap::new(),
-            head_site_idx: HashMap::new(),
-            head_site_idx_all: HashMap::new(),
+            head_site_dutarr_idx: HashMap::new(),
+            head_site_dutarr_idx_all: HashMap::new(),
             test_info: HashMap::new(),
             dynamic_limits: HashMap::new(),
-            partial_info: HashMap::new(),
+            partial_dut_info: HashMap::new(),
             site_list: Vec::new(),
             head_list: Vec::new(),
             test_data: TestDataLru::new(budget_bytes),
@@ -231,18 +212,17 @@ impl DataFetcher {
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
         fetcher.load_test_info()?;
-        // Dynamic limits are loaded lazily per TEST_ID on first request.
         Ok(fetcher)
     }
 
     pub fn close(&mut self) {
         self.file_paths.clear();
         self.full_dut.clear();
-        self.head_site_idx.clear();
-        self.head_site_idx_all.clear();
+        self.head_site_dutarr_idx.clear();
+        self.head_site_dutarr_idx_all.clear();
         self.test_info.clear();
         self.dynamic_limits.clear();
-        self.partial_info.clear();
+        self.partial_dut_info.clear();
         self.site_list.clear();
         self.head_list.clear();
         self.test_data.clear();
@@ -268,10 +248,10 @@ impl DataFetcher {
                 d.entry(fid).or_default().push(path);
             }
         }
-        let mut keys: Vec<usize> = d.keys().copied().collect();
-        keys.sort_unstable();
+        let mut fids: Vec<usize> = d.keys().copied().collect();
+        fids.sort_unstable();
         let mut paths = Vec::new();
-        for fid in keys {
+        for fid in fids {
             paths.push(d.remove(&fid).unwrap());
         }
         self.file_paths = paths;
@@ -282,18 +262,23 @@ impl DataFetcher {
         let mut all_heads: BTreeSet<HeadNum> = BTreeSet::new();
         let mut all_sites: BTreeSet<SiteNum> = BTreeSet::new();
         for fid in 0..self.num_files() {
-            let n: i64 = self
-                .conn
-                .query_row(FETCH_SELECT_MAX_DUT_INDEX, [fid as i64], |row| row.get(0))?;
-            let n = n.max(0) as usize;
-            // u64 matches the db-gen counter type.
-            self.full_dut.insert(fid, Array1::from_iter(1..=n as u64));
+            let fid = fid as FileId;
+            let max_dut: i64 =
+                self.conn
+                    .query_row(FETCH_SELECT_MAX_DUT_INDEX, [fid as i64], |row| row.get(0))?;
+            let max_dut = max_dut.max(1) as usize;
+            // DUT array starts from 1, and consecutive up to max_dut.
+            self.full_dut
+                .insert(fid, Array1::from_iter(1..=max_dut as u64));
 
             // Both queries ORDER BY DUTIndex, so the per-key subsequences are
             // already sorted and no explicit sort is needed.
             for (sql, target) in [
-                (FETCH_SELECT_DUT_HEAD_SITE, &mut self.head_site_idx),
-                (FETCH_SELECT_DUT_HEAD_SITE_ALL, &mut self.head_site_idx_all),
+                (FETCH_SELECT_DUT_HEAD_SITE, &mut self.head_site_dutarr_idx),
+                (
+                    FETCH_SELECT_DUT_HEAD_SITE_ALL,
+                    &mut self.head_site_dutarr_idx_all,
+                ),
             ] {
                 let mut site_lists: HashMap<(HeadNum, SiteNum), Vec<usize>> = HashMap::new();
                 let mut head_lists: HashMap<HeadNum, Vec<usize>> = HashMap::new();
@@ -308,6 +293,8 @@ impl DataFetcher {
                     })?;
                     for row in rows {
                         let (dut_index, head, site) = row?;
+                        // Convert DUTIndex (1-based) to dut array index (0-based),
+                        // simply subtract 1.
                         let idx = dut_index.saturating_sub(1) as usize;
                         all_heads.insert(head);
                         all_sites.insert(site);
@@ -336,14 +323,13 @@ impl DataFetcher {
         Ok(self.head_list.clone())
     }
 
-    /// Eagerly cache the whole `Test_Info` table at open — the smallest but
-    /// most-used cache. `get_test_info` and the dynamic-limit defaults both
-    /// read from it, so no further `Test_Info` queries happen.
+    /// Eagerly cache the whole `Test_Info` table, small but frequently accessed,
+    /// when database connection is established.
     fn load_test_info(&mut self) -> Result<(), StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_ALL_TEST_INFO)?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, i64>(0)? as usize, // Fid
+                row.get::<_, i64>(0)? as FileId, // Fid
                 TestInfo {
                     test_id: row.get(1)?,
                     sub_code: TestSubCode::from_code(row.get(2)?),
@@ -377,9 +363,8 @@ impl DataFetcher {
     pub fn get_test_info(
         &mut self,
         test_tup: (TestNum, &str),
-        file_id: usize,
+        file_id: FileId,
     ) -> Result<Option<TestInfo>, StdfHelperError> {
-        // Nested map allows the &str test_name lookup without cloning the key.
         Ok(self
             .test_info
             .get(&(file_id, test_tup.0))
@@ -387,35 +372,31 @@ impl DataFetcher {
             .cloned())
     }
 
-    /// Make sure the full-length cached arrays for `(test_id, file_id)` exist.
-    /// On a cache hit this only touches the LRU recency order — it does NOT
-    /// clone the entry (plan §3.5/§3.6: gather with `select` on cached arrays;
-    /// only the final result is an owned copy).
+    /// Cache the test data of given test info.
+    /// If already cached, update the recent order of the test data entry in LRU.
     ///
     /// Returns:
-    /// - `Ok(None)` — the entry is now in the byte-budget LRU; callers read it
-    ///   back with `self.test_data.get(&key)`.
-    /// - `Ok(Some(entry))` — the entry is bigger than the whole budget and is
-    ///   therefore not cached; callers must gather from this owned entry.
+    /// - `Ok(None)` — cache completed.
+    /// - `Ok(Some(entry))` — super large entry, not cached..
     fn ensure_test_data(
         &mut self,
-        test_id: TestId,
-        sub_code: TestSubCode,
-        rslt_pgm_cnt: Option<u16>,
-        file_id: usize,
+        info: &TestInfo,
+        file_id: FileId,
     ) -> Result<Option<TestDataCacheEntry>, StdfHelperError> {
+        let test_id = info.test_id;
+        let sub_code = info.sub_code;
         let key = (test_id, file_id);
         if self.test_data.get(&key).is_some() {
             return Ok(None);
         }
 
-        let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
-        let mut flags = Array1::from_elem(n, -1i16);
+        let dut_cnt = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
+        let mut flags = Array1::from_elem(dut_cnt, -1i16);
         let mut valid = Vec::new();
 
         let entry = match sub_code {
             TestSubCode::Ptr => {
-                let mut data = Array2::from_elem((n, 1), f32::NAN);
+                let mut data = Array2::from_elem((1, dut_cnt), f32::NAN);
                 {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PTR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
@@ -427,9 +408,10 @@ impl DataFetcher {
                     })?;
                     for row in rows {
                         let (dut_index, result, flag) = row?;
+                        // pos = dut array idx (0-based) = dut_index - 1
                         let pos = dut_index.saturating_sub(1) as usize;
-                        if pos < n {
-                            data[[pos, 0]] = result;
+                        if pos < dut_cnt {
+                            data[[0, pos]] = result;
                             flags[pos] = flag as i16;
                             valid.push(pos);
                         }
@@ -444,7 +426,7 @@ impl DataFetcher {
                 }
             }
             TestSubCode::Ftr => {
-                let data = Array2::from_elem((n, 0), 0.0f32);
+                let data = Array2::from_elem((0, dut_cnt), f32::NAN);
                 {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FTR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
@@ -453,7 +435,7 @@ impl DataFetcher {
                     for row in rows {
                         let (dut_index, flag) = row?;
                         let pos = dut_index.saturating_sub(1) as usize;
-                        if pos < n {
+                        if pos < dut_cnt {
                             flags[pos] = flag as i16;
                             valid.push(pos);
                         }
@@ -468,13 +450,12 @@ impl DataFetcher {
                 }
             }
             TestSubCode::Mpr => {
-                // RTN_RSLT / RTN_STAT are stored as BLOBs (raw little-endian
-                // bytes); no TEXT-hex path is supported.
-                let rows_vec: Vec<(i64, Vec<u8>, Vec<u8>, u8)> = {
+                // RTN_RSLT / RTN_STAT are stored as BLOBs (little-endian bytes).
+                let rows_vec: Vec<(u64, Vec<u8>, Vec<u8>, u8)> = {
                     let mut stmt = self.conn.prepare_cached(FETCH_SELECT_MPR_DATA)?;
                     let rows = stmt.query_map([test_id], |row| {
                         Ok((
-                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(0)? as u64,
                             row.get::<_, Vec<u8>>(1)?,
                             row.get::<_, Vec<u8>>(2)?,
                             row.get::<_, i64>(3)? as u8,
@@ -482,100 +463,84 @@ impl DataFetcher {
                     })?;
                     rows.collect::<Result<Vec<_>, _>>()?
                 };
-                // Width is authoritative in Test_Info.RSLT_PGM_CNT; a NULL
-                // column means zero result columns.
-                let rslt_cnt = rslt_pgm_cnt.unwrap_or(0) as usize;
-                if rslt_cnt == 0 {
-                    // No result columns, but the rows still carry TEST_FLAG.
-                    for (dut_index, _rslt, _stat, flag) in rows_vec {
-                        let pos = dut_index.saturating_sub(1) as usize;
-                        if pos < n {
-                            flags[pos] = flag as i16;
-                            valid.push(pos);
+                // Number of test data in MPR is determined by RSLT_PGM_CNT from Test_Info,
+                // represents the number of tested pins.
+                let rslt_cnt = info.rslt_pgm_cnt.unwrap_or(0) as usize;
+
+                // use (row: dutIndex, col: pmr) to improve cache hit when updating,
+                // transpose the layout when storing into the cache.
+                let mut data = Array2::from_elem((dut_cnt, rslt_cnt), f32::NAN);
+                let mut states = Array2::from_elem((dut_cnt, rslt_cnt), 0xFu8);
+                for (dut_index, rslt, stat, flag) in rows_vec {
+                    let pos = dut_index.saturating_sub(1) as usize;
+                    if pos >= dut_cnt {
+                        continue;
+                    }
+                    flags[pos] = flag as i16;
+                    valid.push(pos);
+
+                    if rslt_cnt > 0 {
+                        let result = unsafe {
+                            std::slice::from_raw_parts(
+                                rslt.as_ptr() as *const f32,
+                                rslt.len() / size_of::<f32>(),
+                            )
+                        };
+                        if result.len() != rslt_cnt {
+                            println!(
+                                "Warning: MPR [{}] result count ({}) of DUTIndex {} differs from database MPR info ({})",
+                                info.test_name,
+                                result.len(),
+                                dut_index,
+                                rslt_cnt,
+                            );
+                        }
+                        for (j, value) in result[..rslt_cnt].iter().enumerate() {
+                            data[[pos, j]] = *value;
+                        }
+                        for (j, value) in stat[..rslt_cnt].iter().enumerate() {
+                            states[[pos, j]] = *value;
                         }
                     }
-                    TestDataCacheEntry {
-                        sub_code,
-                        data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
-                        flags,
-                        states: Some(Array2::from_shape_fn((n, 0), |_| 0xFu8)),
-                        valid_test_idx: valid,
-                    }
-                } else {
-                    let mut data = Array2::from_elem((n, rslt_cnt), f32::NAN);
-                    let mut states = Array2::from_elem((n, rslt_cnt), 0xFu8);
-                    for (dut_index, rslt, stat, flag) in rows_vec {
-                        let pos = dut_index.saturating_sub(1) as usize;
-                        if pos >= n {
-                            continue;
-                        }
-                        let result = bytes_to_f32s(&rslt);
-                        if result.len() != rslt_cnt || stat.len() != rslt_cnt {
-                            return Err(StdfHelperError {
-                                msg: format!(
-                                    "MPR data width mismatch for TEST_ID {} DUTIndex {}: \
-                                     RSLT_PGM_CNT={} but RTN_RSLT={} f32 / RTN_STAT={} u8",
-                                    test_id,
-                                    dut_index,
-                                    rslt_cnt,
-                                    result.len(),
-                                    stat.len()
-                                ),
-                            });
-                        }
-                        flags[pos] = flag as i16;
-                        valid.push(pos);
-                        for (j, value) in result.into_iter().enumerate() {
-                            data[[pos, j]] = value;
-                        }
-                        for (j, value) in stat.into_iter().enumerate() {
-                            states[[pos, j]] = value;
-                        }
-                    }
-                    TestDataCacheEntry {
-                        sub_code,
-                        data,
-                        flags,
-                        states: Some(states),
-                        valid_test_idx: valid,
-                    }
+                }
+                TestDataCacheEntry {
+                    sub_code,
+                    data: data.reversed_axes(),
+                    flags,
+                    states: Some(states.reversed_axes()),
+                    valid_test_idx: valid,
                 }
             }
             TestSubCode::Other => TestDataCacheEntry {
                 sub_code,
-                data: Array2::from_shape_fn((n, 0), |_| f32::NAN),
+                data: Array2::from_shape_fn((0, dut_cnt), |_| f32::NAN),
                 flags,
                 states: None,
                 valid_test_idx: valid,
             },
         };
 
-        // All-sentinel entries (no data rows for this test) are cached as
-        // zero-length arrays: the entry keeps the result width (so the
-        // DUT-index path can still synthesize its sentinel rows) but occupies
-        // almost no space, and the test is never re-queried.
+        // if the entry has no valid test data, replace data with empty arrays to save memory,
+        // it's safe because data will never be accessed.
         let entry = if entry.valid_test_idx.is_empty() {
-            let width = entry.data.shape()[1];
-            let states = entry
-                .states
-                .as_ref()
-                .map(|s| Array2::from_shape_fn((0, s.shape()[1]), |_| 0xFu8));
             TestDataCacheEntry {
                 sub_code: entry.sub_code,
-                data: Array2::from_shape_fn((0, width), |_| f32::NAN),
+                data: Array2::from_elem((0, dut_cnt), f32::NAN),
                 flags: Array1::from_elem(0, -1i16),
-                states,
+                states: Some(Array2::from_elem((0, dut_cnt), 0xFu8)),
                 valid_test_idx: Vec::new(),
             }
         } else {
             entry
         };
 
-        let bytes = estimate_entry_bytes(&entry);
+        let bytes = entry.entry_size();
         if bytes > self.test_data.budget_bytes {
-            // Single entry larger than the whole budget: caching it would evict
-            // everything and immediately re-blow the budget, so hand it back to
-            // the caller to use directly (it is still returned to Python).
+            // Not storing super large entry into the cache
+            println!(
+                "Test cache [{}] is too large ({}) to cache, increasing cache limit ({}) instead",
+                info.test_name, bytes, self.test_data.budget_bytes
+            );
             return Ok(Some(entry));
         }
         self.test_data.insert(key, entry);
@@ -587,7 +552,7 @@ impl DataFetcher {
         test_tup: (TestNum, &str),
         heads: &[HeadNum],
         sites: &[Option<SiteNum>],
-        file_id: usize,
+        file_id: FileId,
     ) -> Result<Option<FetchedTestData>, StdfHelperError> {
         let info = match self.get_test_info(test_tup, file_id)? {
             Some(info) => info,
@@ -595,54 +560,77 @@ impl DataFetcher {
         };
 
         let all_sites = sites.contains(&None);
-        let mut selected: Vec<usize> = Vec::new();
+        let mut selected_idx: Vec<usize> = Vec::new();
         for &head in heads {
             if all_sites {
-                if let Some(list) = self.head_site_idx.get(&(file_id, head, None)) {
-                    merge_sorted_unique(&mut selected, list);
+                if let Some(list) = self.head_site_dutarr_idx.get(&(file_id, head, None)) {
+                    merge_sorted_unique(&mut selected_idx, list);
                 }
             } else {
                 for &site in sites {
-                    if let Some(site) = site {
-                        if let Some(list) = self.head_site_idx.get(&(file_id, head, Some(site))) {
-                            merge_sorted_unique(&mut selected, list);
-                        }
+                    if let Some(list) = self.head_site_dutarr_idx.get(&(file_id, head, site)) {
+                        merge_sorted_unique(&mut selected_idx, list);
                     }
                 }
             }
         }
 
-        // Valid rows only (plan §3.4): intersect the head/site rows with the
-        // rows that actually carry data for this test, so no NaN is returned.
-        let oversized =
-            self.ensure_test_data(info.test_id, info.sub_code, info.rslt_pgm_cnt, file_id)?;
-        let fetched = match oversized {
-            // Single entry bigger than the byte budget: use it directly.
-            Some(entry) => {
-                let idx = intersect_sorted(&selected, &entry.valid_test_idx);
-                let full_dut = self.full_dut.get(&file_id).ok_or_else(|| {
-                    StdfHelperError {
-                        msg: format!("missing full-DUT cache for file {}", file_id),
-                    }
-                })?;
-                make_fetched_data(full_dut, &entry, &idx)
-            }
-            // Normal path: gather with select straight from the cached entry
-            // (no per-call clone of the full cached arrays).
+        // retrieve cache via test ID and file ID
+        let oversized_entry = self.ensure_test_data(&info, file_id)?;
+        let entry = match &oversized_entry {
+            Some(big_entry) => big_entry,
             None => {
                 let key = (info.test_id, file_id);
-                let entry = self.test_data.get(&key).ok_or_else(|| StdfHelperError {
-                    msg: format!("test-data cache miss for {:?}", key),
-                })?;
-                let idx = intersect_sorted(&selected, &entry.valid_test_idx);
-                let full_dut = self.full_dut.get(&file_id).ok_or_else(|| {
-                    StdfHelperError {
-                        msg: format!("missing full-DUT cache for file {}", file_id),
-                    }
-                })?;
-                make_fetched_data(full_dut, entry, &idx)
+                self.test_data.get(&key).ok_or_else(|| StdfHelperError {
+                    msg: format!(
+                        "Cache miss for test [{}] in file [{}] after ensuring test data, not should happen", 
+                        info.test_name,
+                        file_id
+                )})?
             }
         };
+
+        let full_dut = self.full_dut.get(&file_id).ok_or_else(|| StdfHelperError {
+            msg: format!(
+                "Cache miss for full DUT array in file [{}], should not happen",
+                file_id
+            ),
+        })?;
+        // fetch non-superceded test data, mask is obtained by
+        // intersecting dut array idx of selected with that of valid test idx.
+        let valid_idx = intersect_sorted(&selected_idx, &entry.valid_test_idx);
+        let valid_dut: Array1<u64> = full_dut.select(ndarray::Axis(0), &valid_idx);
+        let fetched = match entry.sub_code {
+            TestSubCode::Ptr => FetchedTestData {
+                sub_code: entry.sub_code,
+                dut_list: valid_dut,
+                data: entry.data.select(ndarray::Axis(1), &valid_idx),
+                flags: entry.flags.select(ndarray::Axis(0), &valid_idx),
+                states: None,
+            },
+            TestSubCode::Mpr => {
+                let states = entry
+                    .states
+                    .as_ref()
+                    .map(|s| s.select(ndarray::Axis(1), &valid_idx));
+                FetchedTestData {
+                    sub_code: entry.sub_code,
+                    dut_list: valid_dut,
+                    data: entry.data.select(ndarray::Axis(1), &valid_idx),
+                    flags: entry.flags.select(ndarray::Axis(0), &valid_idx),
+                    states,
+                }
+            }
+            // FTR and any unknown/legacy code: flags only.
+            TestSubCode::Ftr | TestSubCode::Other => FetchedTestData {
+                sub_code: entry.sub_code,
+                dut_list: valid_dut,
+                data: Array2::from_shape_fn((0, valid_idx.len()), |_| f32::NAN),
+                flags: entry.flags.select(ndarray::Axis(1), &valid_idx),
+                states: None,
+            },
+        };
+
         Ok(Some(fetched))
     }
 
@@ -650,162 +638,280 @@ impl DataFetcher {
         &mut self,
         test_tup: (TestNum, &str),
         duts: &[u64],
-        file_id: usize,
+        file_id: FileId,
     ) -> Result<Option<FetchedTestData>, StdfHelperError> {
+        if duts.is_empty() {
+            return Ok(None);
+        }
         let info = match self.get_test_info(test_tup, file_id)? {
             Some(info) => info,
             None => return Ok(None),
         };
-        if duts.is_empty() {
+        let max_dut_index = self
+            .full_dut
+            .get(&file_id)
+            .map(|a| a.len() as u64)
+            .unwrap_or(0);
+        if max_dut_index == 0 {
             return Ok(None);
         }
 
-        let oversized =
-            self.ensure_test_data(info.test_id, info.sub_code, info.rslt_pgm_cnt, file_id)?;
-        let mut sorted_duts = duts.to_vec();
-        sorted_duts.sort_unstable();
-        let fetched = match oversized {
-            // Single entry bigger than the byte budget: use it directly.
-            Some(entry) => {
-                let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
-                gather_dut_rows(&entry, n, &sorted_duts)
+        // retrieve cache via test ID and file ID
+        let oversized_entry = self.ensure_test_data(&info, file_id)?;
+        let entry = match &oversized_entry {
+            Some(big_entry) => {
+                println!("Cache size of test [{} - {}] in file [{}] ({}) exceeds max cache size ({}), consider increase the cache limit", 
+                    test_tup.0, test_tup.1, file_id,
+                    big_entry.entry_size(),
+                    self.test_data.budget_bytes
+                );
+                big_entry
             }
-            // Normal path: read rows straight from the cached entry.
             None => {
                 let key = (info.test_id, file_id);
-                let entry = self.test_data.get(&key).ok_or_else(|| StdfHelperError {
+                self.test_data.get(&key).ok_or_else(|| StdfHelperError {
                     msg: format!("test-data cache miss for {:?}", key),
-                })?;
-                let n = self.full_dut.get(&file_id).map(|a| a.len()).unwrap_or(0);
-                gather_dut_rows(entry, n, &sorted_duts)
+                })?
             }
         };
-        Ok(Some(fetched))
-    }
-}
 
-/// Gather rows for every requested DUT (plan §3.4).
-///
-/// Contract: EVERY requested DUT is returned, in ascending order, exactly like
-/// the Python fetcher. Requested DUTs always come from `Dut_Info`, so they live
-/// in `1..=n`; a DUT may still carry no data for this test (e.g. it failed an
-/// earlier test and skipped this one), and its row then keeps the sentinel
-/// values (NaN / -1 / 0xF) the cache already holds for it. DUTs outside
-/// `1..=n` are not expected from callers but keep their sentinel row as well,
-/// mirroring Python where such DUTs have no data rows. Duplicate DUTs in a
-/// request are also not expected (request lists are dedup'd selections); each
-/// duplicate row is filled from the same cache row.
-fn gather_dut_rows(entry: &TestDataCacheEntry, n: usize, sorted_duts: &[u64]) -> FetchedTestData {
-    let dut_count = sorted_duts.len();
-    let dut_list: Array1<u64> = Array1::from_iter(sorted_duts.iter().copied());
+        let mut req_duts = duts.to_vec();
+        req_duts.sort_unstable();
+        let req_duts: Array1<u64> = Array1::from_vec(req_duts);
+        let dut_count = req_duts.len();
 
-    let width = entry.data.shape()[1];
-    let mut data = Array2::from_elem((dut_count, width), f32::NAN);
-    let mut flags = Array1::from_elem(dut_count, -1i16);
-    let mut states = entry
-        .states
-        .as_ref()
-        .map(|s| Array2::from_elem((dut_count, s.shape()[1]), 0xFu8));
+        // cannot use ndarray.select() to get test data of selected duts, because:
+        // 1. requested DUTs may out of range or invalid.
+        // 2. returned data must have same length as requested DUTs.
+        let mut data = Array2::from_elem((entry.data.nrows(), dut_count), f32::NAN);
+        let mut flags = Array1::from_elem(dut_count, -1i16);
+        let mut states = entry
+            .states
+            .as_ref()
+            .map(|s| Array2::from_elem((s.nrows(), dut_count), 0xFu8));
 
-    // A cached all-sentinel entry has zero-length arrays; every requested DUT
-    // then keeps its pre-filled sentinel row (NaN / -1 / 0xF).
-    let cached_rows = entry.data.nrows();
-    for (i, &dut) in sorted_duts.iter().enumerate() {
-        if dut >= 1 && (dut as usize) <= n {
-            let pos = dut as usize - 1;
-            if pos >= cached_rows {
-                continue;
-            }
-            data.row_mut(i).assign(&entry.data.row(pos));
-            if let (Some(dst), Some(src)) = (states.as_mut(), entry.states.as_ref()) {
-                dst.row_mut(i).assign(&src.row(pos));
-            }
-            if pos < entry.flags.len() {
+        for (i, &req_dut) in req_duts.iter().enumerate() {
+            if 1 <= req_dut && req_dut <= max_dut_index {
+                let pos = req_dut as usize - 1;
+
+                data.column_mut(i).assign(&entry.data.column(pos));
+                if let (Some(dst), Some(src)) = (states.as_mut(), entry.states.as_ref()) {
+                    dst.column_mut(i).assign(&src.column(pos));
+                }
                 flags[i] = entry.flags[pos];
             }
         }
-        // DUT outside 1..=n keeps the pre-filled sentinel row (NaN / -1 / 0xF).
-    }
 
-    FetchedTestData {
-        sub_code: entry.sub_code,
-        dut_list,
-        data,
-        flags,
-        states,
-    }
-}
-
-fn make_fetched_data(
-    full_dut: &Array1<u64>,
-    entry: &TestDataCacheEntry,
-    idx: &[usize],
-) -> FetchedTestData {
-    let dut_list: Array1<u64> = full_dut.select(ndarray::Axis(0), idx);
-
-    match entry.sub_code {
-        TestSubCode::Ptr => {
-            let data2 = entry.data.select(ndarray::Axis(0), idx);
-            let mut flat = Array1::from_elem(idx.len(), f32::NAN);
-            for (i, row) in data2.outer_iter().enumerate() {
-                flat[i] = row[0];
-            }
-            FetchedTestData {
-                sub_code: entry.sub_code,
-                dut_list,
-                data: flat.into_shape((idx.len(), 1)).unwrap(),
-                flags: entry.flags.select(ndarray::Axis(0), idx),
-                states: None,
-            }
-        }
-        TestSubCode::Mpr => {
-            let data = entry.data.select(ndarray::Axis(0), idx);
-            let states = entry
-                .states
-                .as_ref()
-                .map(|s| s.select(ndarray::Axis(0), idx));
-            FetchedTestData {
-                sub_code: entry.sub_code,
-                dut_list,
-                data,
-                flags: entry.flags.select(ndarray::Axis(0), idx),
-                states,
-            }
-        }
-        // FTR and any unknown/legacy code: flags only.
-        TestSubCode::Ftr | TestSubCode::Other => FetchedTestData {
+        Ok(Some(FetchedTestData {
             sub_code: entry.sub_code,
-            dut_list,
-            data: Array2::from_shape_fn((idx.len(), 0), |_| 0.0f32),
-            flags: entry.flags.select(ndarray::Axis(0), idx),
-            states: None,
-        },
+            dut_list: req_duts,
+            data,
+            flags,
+            states,
+        }))
     }
-}
 
-fn intersect_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
-    let mut result = Vec::with_capacity(a.len().min(b.len()));
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
-        if a[i] == b[j] {
-            result.push(a[i]);
-            i += 1;
-            j += 1;
-        } else if a[i] < b[j] {
-            i += 1;
-        } else {
-            j += 1;
+    /// Cache the dynamic limits of given test info.
+    /// If given test info has no valid limits,
+    /// `None` is stored to avoid re-querying.
+    fn ensure_dynamic_limits(
+        &mut self,
+        info: &TestInfo,
+        fid: FileId,
+    ) -> Result<(), StdfHelperError> {
+        let test_id = info.test_id;
+        if self.dynamic_limits.contains_key(&test_id) {
+            return Ok(());
         }
-    }
-    result
-}
 
-/// Decode the raw little-endian f32 payload of an MPR row (BLOB).
-fn bytes_to_f32s(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
+        let ll_def = info.llimit.filter(|v| !v.is_nan());
+        let hl_def = info.hlimit.filter(|v| !v.is_nan());
+        let max_dut_index = self.full_dut.get(&fid).map(|a| a.len()).unwrap_or(0);
+        // dynamic limits are invalidated if:
+        // 1. default limits are NaN or omitted.
+        // 2. no DUTs are available in given file id.
+        if max_dut_index == 0 || (ll_def.is_none() && hl_def.is_none()) {
+            self.dynamic_limits.insert(test_id, None);
+            return Ok(());
+        }
+
+        let mut ll_arr = ll_def.map(|v| Array1::from_elem(max_dut_index, v));
+        let mut hl_arr = hl_def.map(|v| Array1::from_elem(max_dut_index, v));
+        let mut ll_valid: Vec<usize> = Vec::new();
+        let mut hl_valid: Vec<usize> = Vec::new();
+
+        {
+            // query dynamic limits from the database
+            let mut stmt = self
+                .conn
+                .prepare_cached(FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST)?;
+            let rows = stmt.query_map([test_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<f32>>(1)?,
+                    row.get::<_, Option<f32>>(2)?,
+                ))
+            })?;
+            for r in rows {
+                let (dut_index, ll, hl) = r?;
+                let idx = dut_index.saturating_sub(1) as usize;
+                if idx >= max_dut_index {
+                    continue;
+                }
+                if let (Some(arr), Some(v)) = (ll_arr.as_mut(), ll) {
+                    arr[idx] = v;
+                    ll_valid.push(idx);
+                }
+                if let (Some(arr), Some(v)) = (hl_arr.as_mut(), hl) {
+                    arr[idx] = v;
+                    hl_valid.push(idx);
+                }
+            }
+        }
+
+        if ll_valid.is_empty() && hl_valid.is_empty() {
+            // all dynamic limits are missing,
+            // storing None for this test_id
+            self.dynamic_limits.insert(test_id, None);
+        } else {
+            self.dynamic_limits.insert(
+                test_id,
+                Some(DynamicLimitEntry {
+                    llimit: if ll_valid.is_empty() { None } else { ll_arr },
+                    hlimit: if hl_valid.is_empty() { None } else { hl_arr },
+                    ll_default: ll_def,
+                    hl_default: hl_def,
+                    ll_valid_idx: ll_valid,
+                    hl_valid_idx: hl_valid,
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Returns dynamic (low_limits, high_limits) for
+    /// requested DUTs of a given test.
+    /// Default limits are used if request DUT has none.
+    pub fn get_dynamic_limits(
+        &mut self,
+        info: &TestInfo,
+        fid: FileId,
+        duts: &[u64],
+    ) -> Result<(Array1<f32>, Array1<f32>), StdfHelperError> {
+        self.ensure_dynamic_limits(info, fid)?;
+        let test_id = info.test_id;
+        let Some(Some(entry)) = self.dynamic_limits.get(&test_id) else {
+            return Ok((Array1::zeros(0), Array1::zeros(0)));
+        };
+
+        // check if there are any `duts` has dynamic limits
+        let has_dynamic = |valid_idx: &[usize]| {
+            duts.iter().any(|dut| {
+                let p = *dut as usize - 1;
+                valid_idx.binary_search(&p).is_ok()
+            })
+        };
+
+        let get_dylim = |lim_arr: &Option<Array1<f32>>, lim_def: Option<f32>| -> Vec<f32> {
+            if let (Some(arr), Some(def)) = (lim_arr, lim_def) {
+                duts.iter()
+                    .map(|dut| {
+                        let p = *dut as usize - 1;
+                        if p < arr.len() {
+                            arr[p]
+                        } else {
+                            def
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        };
+        let low = if has_dynamic(&entry.ll_valid_idx) {
+            get_dylim(&entry.llimit, entry.ll_default)
+        } else {
+            Vec::new()
+        };
+        let high = if has_dynamic(&entry.hl_valid_idx) {
+            get_dylim(&entry.hlimit, entry.hl_default)
+        } else {
+            Vec::new()
+        };
+        Ok((Array1::from_vec(low), Array1::from_vec(high)))
+    }
+
+    /// Cache partial DUT info of a given file.
+    fn ensure_partial_dut_info(&mut self, fid: FileId) -> Result<(), StdfHelperError> {
+        if self.partial_dut_info.contains_key(&fid) {
+            return Ok(());
+        }
+        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PARTIAL_RAW)?;
+        let rows = stmt.query_map([fid as i64], |row| {
+            Ok(PartialDutInfoRow {
+                dut_index: row.get::<_, i64>(0)? as u64,
+                part_id: row.get(1)?,
+                part_text: row.get(2)?,
+                head: row.get::<_, i64>(3)? as u8,
+                site: row.get::<_, i64>(4)? as u8,
+                superseded: row.get::<_, i64>(5)? != 0,
+                flag: row.get::<_, i64>(6)? as u8,
+            })
+        })?;
+        let mut all_info = Vec::new();
+        for r in rows {
+            all_info.push(r?);
+        }
+        self.partial_dut_info.insert(fid, all_info);
+        Ok(())
+    }
+
+    /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
+    /// "Head h - Site s", PartText, "State - 0xFL") served from the raw row
+    /// cache. PartText is a new field added to the DUT-info rows (Python
+    /// consumers were updated to the 5-field tuple).
+    pub fn get_partial_dut_info(
+        &mut self,
+        heads: &[i32],
+        sites: &[i32],
+        file_id: FileId,
+    ) -> Result<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>, StdfHelperError>
+    {
+        if heads.is_empty() || sites.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.ensure_partial_dut_info(file_id)?;
+
+        let rows = self
+            .partial_dut_info
+            .get(&file_id)
+            .ok_or_else(|| StdfHelperError {
+                msg: format!(
+                    "Cache missing for DUT info in file [{}] after ensuring test data, not should happen", 
+                    file_id)
+            })?;
+
+        let duts = self.get_dut_index_by_head_site(&heads, &sites, file_id)?;
+        let mut info_out = Vec::with_capacity(duts.len());
+        // Cached dut info contains all DUTs in a file
+        // and is sorted by DutIndex.
+        //
+        // `duts` is sorted subset array of complete DutIndex in a file.
+        //
+        // So it is safe to index cache info directly using `duts`.
+        for dut in duts {
+            let pos = dut.saturating_sub(1) as usize;
+            let row = &rows[pos];
+            info_out.push((
+                row.dut_index as i64,
+                row.part_id.clone(),
+                format!("Head {} - Site {}", row.head, row.site),
+                row.part_text.clone(),
+                format_dut_flag(row.superseded, row.flag),
+            ));
+        }
+        Ok(info_out)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -999,11 +1105,7 @@ impl DataFetcher {
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
                 let bin = row.get::<_, Option<i64>>(1)?;
                 if let Some(bin) = bin {
-                    Ok(Some((
-                        row.get::<_, i64>(0)?,
-                        bin,
-                        row.get::<_, i64>(2)?,
-                    )))
+                    Ok(Some((row.get::<_, i64>(0)?, bin, row.get::<_, i64>(2)?)))
                 } else {
                     Ok(None)
                 }
@@ -1021,7 +1123,9 @@ impl DataFetcher {
         // is enough. The query template itself lives in schema.rs.
         let is_ident = !column.is_empty()
             && (column.as_bytes()[0].is_ascii_alphabetic() || column.as_bytes()[0] == b'_')
-            && column.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            && column
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if !is_ident {
             return Err(StdfHelperError {
                 msg: format!("Invalid Dut_Info column name: {}", column),
@@ -1072,7 +1176,10 @@ pub struct DutSummaryRow {
 impl DataFetcher {
     /// `getFullDUTInfoFromDutArray()` row source — DUT summary rows for one
     /// file, mirroring SharedSrc.DUT_SUMMARY_QUERY (typed cells).
-    pub fn full_dut_summary_rows(&self, fid: i64) -> Result<Vec<DutSummaryRow>, StdfHelperError> {
+    pub fn full_dut_summary_rows(
+        &self,
+        fid: FileId,
+    ) -> Result<Vec<DutSummaryRow>, StdfHelperError> {
         let sql = format!(
             "{} WHERE Dut_Info.Fid=? ORDER BY DUTIndex",
             FETCH_SELECT_DUT_SUMMARY
@@ -1098,7 +1205,6 @@ impl DataFetcher {
         Ok(out?)
     }
 }
-
 
 /// Typed result of the single-pass `getDUTCountDict()` query — one vector per
 /// category, aligned by file position.
@@ -1156,7 +1262,6 @@ impl DataFetcher {
         wafer_index: i64,
         fid: i64,
     ) -> Result<Vec<i64>, StdfHelperError> {
-        use crate::database::schema as s;
         let mut extra = String::new();
         let mut params: Vec<i64> = Vec::new();
         if head != -1 {
@@ -1184,10 +1289,10 @@ impl DataFetcher {
                 })?)
         };
         Ok(vec![
-            run(s::FETCH_COUNT_ON_COND_PASS)?,
-            run(s::FETCH_COUNT_ON_COND_FAIL)?,
-            run(s::FETCH_COUNT_ON_COND_UNKNOWN)?,
-            run(s::FETCH_COUNT_ON_COND_SUPERSEDED)?,
+            run(FETCH_COUNT_ON_COND_PASS)?,
+            run(FETCH_COUNT_ON_COND_FAIL)?,
+            run(FETCH_COUNT_ON_COND_UNKNOWN)?,
+            run(FETCH_COUNT_ON_COND_SUPERSEDED)?,
         ])
     }
 
@@ -1209,43 +1314,46 @@ impl DataFetcher {
     /// `getDutIndexDictFromHeadSite()` rows — (Fid, DUTIndex) for non-empty
     /// head/site selections.
     ///
-    /// Served from `head_site_idx_all`: the Python method has *no* Supersede
+    /// Served from `head_site_dutarr_idx_all`: the Python method has *no* Supersede
     /// filter, so it must use the all-rows index (not the Supersede=0 cache).
-    pub fn dut_index_rows_by_head_site(
+    pub fn get_dut_index_by_head_site(
         &self,
-        heads: &[i64],
-        sites: &[i64],
-        file_ids: &[i64],
-    ) -> Result<Vec<(i64, i64)>, StdfHelperError> {
+        heads: &[i32],
+        sites: &[i32],
+        file_id: FileId,
+    ) -> Result<Array1<u64>, StdfHelperError> {
         if heads.is_empty() || sites.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Array1::from(Vec::new()));
         }
         let all_sites = sites.contains(&-1);
-        let mut out: Vec<(i64, i64)> = Vec::new();
-        for &fid64 in file_ids {
-            let Ok(fid) = usize::try_from(fid64) else { continue };
-            let mut acc: Vec<usize> = Vec::new();
-            for &h64 in heads {
-                let Ok(head) = u8::try_from(h64) else { continue };
-                if all_sites {
-                    if let Some(list) = self.head_site_idx_all.get(&(fid, head, None)) {
+        let mut duts: Vec<u64> = Vec::new();
+
+        let mut acc: Vec<usize> = Vec::new();
+        for &h in heads {
+            let Ok(head) = u8::try_from(h) else {
+                continue;
+            };
+            if all_sites {
+                if let Some(list) = self.head_site_dutarr_idx_all.get(&(file_id, head, None)) {
+                    merge_sorted_unique(&mut acc, list);
+                }
+            } else {
+                for &s in sites {
+                    let Ok(site) = u8::try_from(s) else {
+                        continue;
+                    };
+                    if let Some(list) =
+                        self.head_site_dutarr_idx_all
+                            .get(&(file_id, head, Some(site)))
+                    {
                         merge_sorted_unique(&mut acc, list);
-                    }
-                } else {
-                    for &s64 in sites {
-                        let Ok(site) = u8::try_from(s64) else { continue };
-                        if let Some(list) = self.head_site_idx_all.get(&(fid, head, Some(site))) {
-                            merge_sorted_unique(&mut acc, list);
-                        }
                     }
                 }
             }
-            out.extend(
-                acc.into_iter()
-                    .map(|row| (fid as i64, (row + 1) as i64)),
-            );
         }
-        Ok(out)
+        duts.extend(acc.into_iter().map(|row| (row + 1) as u64));
+
+        Ok(Array1::from(duts))
     }
 
     /// `getDUTIndexFromBin()` — unique (Fid, DUTIndex) pairs in the order the
@@ -1346,217 +1454,6 @@ impl DataFetcher {
             )?)
         }
     }
-
-    /// Lazily load one test's `Dynamic_Limits` rows into the permanent cache
-    /// (no LRU; cleared on close). `None` is stored when the test has no
-    /// static default or no dynamic rows, so it is not queried again.
-    fn load_dynamic_limits_for(
-        &mut self,
-        info: &TestInfo,
-        fid: usize,
-    ) -> Result<(), StdfHelperError> {
-        let test_id = info.test_id;
-        if self.dynamic_limits.contains_key(&test_id) {
-            return Ok(());
-        }
-        // Python treats a NaN static default as "no dynamic limits" for that
-        // side; legacy DBs may store NaN instead of NULL.
-        let ll_def = info.llimit.filter(|v| !v.is_nan());
-        let hl_def = info.hlimit.filter(|v| !v.is_nan());
-        let n = self.full_dut.get(&fid).map(|a| a.len()).unwrap_or(0);
-        if n == 0 || (ll_def.is_none() && hl_def.is_none()) {
-            self.dynamic_limits.insert(test_id, None);
-            return Ok(());
-        }
-
-        let mut ll_arr = ll_def.map(|v| Array1::from_elem(n, v));
-        let mut hl_arr = hl_def.map(|v| Array1::from_elem(n, v));
-        let mut ll_valid: Vec<usize> = Vec::new();
-        let mut hl_valid: Vec<usize> = Vec::new();
-
-        {
-            let mut stmt = self
-                .conn
-                .prepare_cached(FETCH_SELECT_DYNAMIC_LIMITS_BY_TEST)?;
-            let rows = stmt.query_map([test_id], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<f32>>(1)?,
-                    row.get::<_, Option<f32>>(2)?,
-                ))
-            })?;
-            for r in rows {
-                let (dut_index, ll, hl) = r?;
-                let idx = dut_index.saturating_sub(1) as usize;
-                if idx >= n {
-                    continue;
-                }
-                if let (Some(arr), Some(v)) = (ll_arr.as_mut(), ll) {
-                    arr[idx] = v;
-                    ll_valid.push(idx);
-                }
-                if let (Some(arr), Some(v)) = (hl_arr.as_mut(), hl) {
-                    arr[idx] = v;
-                    hl_valid.push(idx);
-                }
-            }
-        }
-
-        let ll_arr = if ll_valid.is_empty() { None } else { ll_arr };
-        let hl_arr = if hl_valid.is_empty() { None } else { hl_arr };
-        let ll_def = if ll_arr.is_some() { ll_def } else { None };
-        let hl_def = if hl_arr.is_some() { hl_def } else { None };
-        if ll_arr.is_none() && hl_arr.is_none() {
-            self.dynamic_limits.insert(test_id, None);
-        } else {
-            self.dynamic_limits.insert(
-                test_id,
-                Some(DynamicLimitEntry {
-                    llimit: ll_arr,
-                    hlimit: hl_arr,
-                    ll_default: ll_def,
-                    hl_default: hl_def,
-                    ll_valid_idx: ll_valid,
-                    hl_valid_idx: hl_valid,
-                }),
-            );
-        }
-        Ok(())
-    }
-
-    /// `getDynamicLimits()` — for each requested DUT and side, the dynamic
-    /// override where a row exists, otherwise the static default fill. A side
-    /// is empty when none of the requested DUTs carries a dynamic value
-    /// (mirrors the Python `hasDynamicLow/High` contract). The returned arrays
-    /// always have the same length as `duts` (out-of-range requests fall back
-    /// to the static default, exactly like the dict-based reference).
-    pub fn dynamic_limits_for(
-        &mut self,
-        info: &TestInfo,
-        fid: usize,
-        duts: &[u64],
-    ) -> Result<(Vec<f32>, Vec<f32>), StdfHelperError> {
-        let test_id = info.test_id;
-        self.load_dynamic_limits_for(info, fid)?;
-        let Some(Some(entry)) = self.dynamic_limits.get(&test_id) else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-        // requested row positions (may include out-of-range entries, kept so
-        // the output length always matches the request)
-        let req: Vec<usize> = duts
-            .iter()
-            .filter_map(|&d| (d >= 1).then(|| (d as usize) - 1))
-            .collect();
-        // any() + binary_search: req is unsorted, the valid sets are sorted;
-        // intersect_sorted would only add a sort for a yes/no answer.
-        let has = |valid: &[usize]| req.iter().any(|p| valid.binary_search(p).is_ok());
-        // No DUTs are filtered out, so a direct per-DUT read is the simplest
-        // correct fill (ndarray select() would add machinery for nothing here).
-        // Requested DUTs are always within 1..=N on real lots; an out-of-range
-        // request, if ever passed, falls back to the static default exactly
-        // like the dict-based reference.
-        let values = |arr: &Array1<f32>, default: Option<f32>| -> Vec<f32> {
-            duts.iter()
-                .map(|&d| {
-                    if d >= 1 {
-                        let p = d as usize - 1;
-                        if p < arr.len() {
-                            arr[p]
-                        } else {
-                            default.unwrap_or(f32::NAN)
-                        }
-                    } else {
-                        default.unwrap_or(f32::NAN)
-                    }
-                })
-                .collect()
-        };
-        let low = if has(&entry.ll_valid_idx) {
-            match (&entry.llimit, entry.ll_default) {
-                (Some(arr), def) => values(arr, def),
-                (None, _) => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-        let high = if has(&entry.hl_valid_idx) {
-            match (&entry.hlimit, entry.hl_default) {
-                (Some(arr), def) => values(arr, def),
-                (None, _) => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-        Ok((low, high))
-    }
-
-    /// Lazily build (once per file) the raw `Dut_Info` row cache used by the
-    /// partial-DUT-info query. Keeps raw fields only; formatted strings are
-    /// produced per call for the filtered subset.
-    fn ensure_partial_info(&mut self, fid: usize) -> Result<(), StdfHelperError> {
-        if self.partial_info.contains_key(&fid) {
-            return Ok(());
-        }
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PARTIAL_RAW)?;
-        let rows = stmt.query_map([fid as i64], |row| {
-            Ok(PartialDutRow {
-                row_index: row.get::<_, i64>(0)?.saturating_sub(1) as usize,
-                part_id: row.get(1)?,
-                part_text: row.get(2)?,
-                head: row.get(3)?,
-                site: row.get(4)?,
-                superseded: row.get::<_, i64>(5)? != 0,
-                flag: row.get(6)?,
-            })
-        })?;
-        let mut all = Vec::new();
-        for r in rows {
-            all.push(r?);
-        }
-        self.partial_info.insert(fid, all);
-        Ok(())
-    }
-
-    /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
-    /// "Head h - Site s", PartText, "State - 0xFL") served from the raw row
-    /// cache. PartText is a new field added to the DUT-info rows (Python
-    /// consumers were updated to the 5-field tuple).
-    pub fn partial_dut_info_rows(
-        &mut self,
-        heads: &[i64],
-        sites: &[i64],
-        file_id: i64,
-    ) -> Result<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>, StdfHelperError>
-    {
-        if heads.is_empty() || sites.is_empty() {
-            return Ok(Vec::new());
-        }
-        let Ok(fid) = usize::try_from(file_id) else {
-            return Ok(Vec::new());
-        };
-        self.ensure_partial_info(fid)?;
-        let all_sites = sites.contains(&-1);
-        let mut out = Vec::new();
-        let rows = self.partial_info.get(&fid).ok_or_else(|| StdfHelperError {
-            msg: format!("missing partial-info cache for file {}", fid),
-        })?;
-        for row in rows {
-            if !heads.contains(&(row.head as i64)) {
-                continue;
-            }
-            if !all_sites && !sites.contains(&(row.site as i64)) {
-                continue;
-            }
-            out.push((
-                (row.row_index + 1) as i64,
-                row.part_id.clone(),
-                format!("Head {} - Site {}", row.head, row.site),
-                row.part_text.clone(),
-                format_dut_flag(row.superseded, row.flag),
-            ));
-        }
-        Ok(out)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,10 +1484,10 @@ impl DataFetcher {
     /// the TestPin_Map.ROWID order.
     pub fn pin_name_rows(
         &self,
-        test_num: i64,
+        test_num: u32,
         test_name: &str,
         is_rtn: bool,
-        fid: i64,
+        fid: FileId,
     ) -> Result<Vec<(i64, String, String, i64, i64, String)>, StdfHelperError> {
         let pin_type = if is_rtn { "RTN" } else { "PGM" };
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PIN_NAMES)?;
@@ -1640,7 +1537,10 @@ impl DataFetcher {
     }
 
     /// `File_Info` rows used to extend `getWaferInfo()` (SubFid=0 die fields).
-    pub fn wafer_ext_rows(&self, fid: i64) -> Result<Vec<(String, Option<String>)>, StdfHelperError> {
+    pub fn wafer_ext_rows(
+        &self,
+        fid: FileId,
+    ) -> Result<Vec<(String, Option<String>)>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_WAFER_EXT)?;
         let rows = stmt
             .query_map([fid], |row| {
@@ -1654,28 +1554,32 @@ impl DataFetcher {
     /// NULL coordinates, matching the Python reference.
     pub fn wafer_coord_rows(
         &self,
-        wafer_index: i64,
-        sites: &[i64],
-        fid: i64,
+        wafer_index: u64,
+        sites: &[i32],
+        fid: FileId,
     ) -> Result<Vec<(i64, i64, i64)>, StdfHelperError> {
         if sites.is_empty() {
             return Ok(Vec::new());
         }
         let mut site_condition = String::new();
-        let mut params: Vec<i64> = vec![wafer_index, fid];
+        let mut params = vec![wafer_index, fid];
         if sites.contains(&-1) {
             site_condition.push_str(" AND SITE_NUM >= 0");
         } else {
             site_condition.push_str(" AND SITE_NUM IN (");
             site_condition.push_str(&Self::in_clause_placeholders(sites.len()));
             site_condition.push(')');
-            params.extend_from_slice(sites);
+            params.extend(sites.iter().map(|&s| s as u64));
         }
         let sql = FETCH_SELECT_WAFER_COORDS.replace("{site_condition}", &site_condition);
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
@@ -1684,12 +1588,15 @@ impl DataFetcher {
     /// `getStackedWaferData()` rows — (X, Y, Flag, count) grouped by
     /// X/Y/Flag, skipping NULL coordinates/flags (mirrors the reference
     /// isinstance() guards; Flag & 24 == 8 filtering is done by the caller).
-    pub fn stacked_wafer_rows(&self, sites: &[i64]) -> Result<Vec<(i64, i64, i64, i64)>, StdfHelperError> {
+    pub fn stacked_wafer_rows(
+        &self,
+        sites: &[i32],
+    ) -> Result<Vec<(i64, i64, i64, i64)>, StdfHelperError> {
         if sites.is_empty() {
             return Ok(Vec::new());
         }
         let mut site_condition = String::new();
-        let mut params: Vec<i64> = Vec::new();
+        let mut params: Vec<i32> = Vec::new();
         if sites.contains(&-1) {
             site_condition.push_str(" AND SITE_NUM >= 0");
         } else {
@@ -1762,8 +1669,7 @@ fn merge_sorted_unique(a: &mut Vec<usize>, b: &[usize]) {
 
 /// Mirrors the SQL `printf("%s - 0x%02X", CASE …, Flag)`: NULL Flag yields
 /// NULL, exactly like the Python reference query.
-fn format_dut_flag(superseded: bool, flag: Option<i64>) -> Option<String> {
-    let flag = flag?;
+fn format_dut_flag(superseded: bool, flag: u8) -> Option<String> {
     let state = if superseded {
         "Superseded"
     } else {
