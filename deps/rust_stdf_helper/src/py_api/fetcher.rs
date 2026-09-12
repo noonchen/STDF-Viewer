@@ -12,8 +12,7 @@
 // Copyright (c) 2026 noonchen
 //
 
-use crate::database::fetcher::{DataFetcher, FetchedTestData, FileId};
-use crate::stdf::record_tracker::TestSubCode;
+use crate::database::fetcher::{DataFetcher, FetchedTestData, FileId, TestData};
 use numpy::ndarray::Array1;
 use numpy::IntoPyArray;
 use numpy::PyArray1;
@@ -92,15 +91,15 @@ impl PyDataFetcher {
             dict.set_item("RES_SCAL", info.res_scal)?;
             dict.set_item("LLimit", info.llimit.map(f64::from).unwrap_or(f64::NAN))?;
             dict.set_item("HLimit", info.hlimit.map(f64::from).unwrap_or(f64::NAN))?;
-            dict.set_item("Unit", info.unit)?;
+            dict.set_item("Unit", info.unit.clone())?;
             dict.set_item("OPT_FLAG", info.opt_flag)?;
             dict.set_item("FailCount", info.fail_count)?;
             dict.set_item("RTN_ICNT", info.rtn_icnt)?;
             dict.set_item("RSLT_PGM_CNT", info.rslt_pgm_cnt)?;
             dict.set_item("LSpec", info.lspec.map(f64::from).unwrap_or(f64::NAN))?;
             dict.set_item("HSpec", info.hspec.map(f64::from).unwrap_or(f64::NAN))?;
-            dict.set_item("VECT_NAM", info.vect_nam)?;
-            dict.set_item("SEQ_NAME", info.seq_name)?;
+            dict.set_item("VECT_NAM", info.vect_nam.clone())?;
+            dict.set_item("SEQ_NAME", info.seq_name.clone())?;
             Ok(Some(dict))
         } else {
             Ok(None)
@@ -143,13 +142,12 @@ impl PyDataFetcher {
         py: Python<'py>,
         test_num: u32,
         test_name: &str,
-        duts: Vec<i64>,
+        duts: Vec<u64>,
         file_id: FileId,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let duts_u64: Vec<u64> = duts.iter().map(|&d| d as u64).collect();
         let fetched = py.detach(|| {
             self.inner
-                .get_test_data_from_dut_index((test_num, test_name), &duts_u64, file_id)
+                .get_test_data_from_dut_index((test_num, test_name), &duts, file_id)
         })?;
         let dict = PyDict::new(py);
         if let Some(data) = fetched {
@@ -235,8 +233,7 @@ impl PyDataFetcher {
             .dut_count_on_conditions(head, site, waferid, fid)?)
     }
 
-    /// `getDutIndexDictFromHeadSite()` — `{fid: [dut_index, ...]}` built in
-    /// Rust so Python never rebuilds it from row tuples.
+    /// Returns `{fid: [dut_index, ...]}`
     pub fn get_dut_index_dict_by_head_site<'py>(
         &self,
         py: Python<'py>,
@@ -245,9 +242,14 @@ impl PyDataFetcher {
         file_ids: Vec<FileId>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
+        if heads.is_empty() || sites.is_empty() {
+            return Ok(dict);
+        }
         for fid in file_ids {
             let duts_in_fid = self.inner.get_dut_index_by_head_site(&heads, &sites, fid)?;
-
+            if duts_in_fid.is_empty() {
+                continue;
+            }
             dict.set_item(fid, duts_in_fid.into_pyarray(py))?;
         }
         Ok(dict)
@@ -278,22 +280,21 @@ impl PyDataFetcher {
         Ok(self.inner.wafer_bounds(wafer_index, fid)?)
     }
 
-    /// `getDynamicLimits()` — per-side arrays for the requested DUTs of one
-    /// file: dynamic override where a row exists, else the static default.
-    /// A side is empty when no requested DUT has a dynamic value.
+    /// Returns `(lower_limits, upper_limits)` as numpy arrays,
+    /// same order as requested DUTs, use default limits
+    /// where dynamic limits are not found.
     pub fn get_dynamic_limits<'py>(
         &mut self,
         py: Python<'py>,
         file_id: FileId,
         test_num: u32,
         test_name: &str,
-        duts: Vec<i64>,
+        duts: Vec<u64>,
     ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
-        let duts = unsafe { std::slice::from_raw_parts(duts.as_ptr() as *const u64, duts.len()) };
         let limits = py.detach(
             || -> Result<(Array1<f32>, Array1<f32>), crate::generic::error::StdfHelperError> {
                 match self.inner.get_test_info((test_num, test_name), file_id)? {
-                    Some(info) => self.inner.get_dynamic_limits(&info, file_id, duts),
+                    Some(info) => self.inner.get_dynamic_limits(&info, file_id, &duts),
                     None => Ok((Array1::zeros(0), Array1::zeros(0))),
                 }
             },
@@ -301,14 +302,14 @@ impl PyDataFetcher {
         Ok((limits.0.into_pyarray(py), limits.1.into_pyarray(py)))
     }
 
-    /// `getPartialDUTInfoOnCondition()` — (DUTIndex, PartID,
-    /// "Head h - Site s", PartText, "State - 0xFL").
+    /// Returns list of
+    /// (DUTIndex, PartID, PartText, "Head h - Site s", "State - 0xFL").
     pub fn get_partial_dut_info(
         &mut self,
         heads: Vec<i32>,
         sites: Vec<i32>,
         file_id: FileId,
-    ) -> PyResult<Vec<(i64, Option<String>, String, Option<String>, Option<String>)>> {
+    ) -> PyResult<Vec<(i64, Option<String>, Option<String>, String, String)>> {
         Ok(self.inner.get_partial_dut_info(&heads, &sites, file_id)?)
     }
 
@@ -426,58 +427,45 @@ fn push_opt_str<'py>(
     Ok(())
 }
 
-/// Shape the fetched arrays exactly like the Python reference fetcher:
+/// Returns a dict o
 ///
-/// - PTR (`TestSubCode::Ptr`): `dataList` is a flat 1-D f32 array.
-/// - MPR (`TestSubCode::Mpr`): `dataList` / `stateList` are 2-D, transposed to
-///   (rslt_cnt × dut) like `np.array(rows).T`. When there are no result
-///   columns or no selected rows, Python produces plain empty 1-D arrays
-///   (`np.array([])`, float64), so we mirror that instead of `(0, k)` shapes.
-/// - FTR (everything else): only `flagList`.
+/// - PTR: `dataList` is the flat f32 array, one entry per DUT.
+/// - MPR: `dataList` / `stateList` are (RSLT_PGM_CNT, DUTs). When there are no
+///   returned DUTs or no result columns, Python builds plain empty 1-D float64
+///   arrays (`np.array([])`), so we mirror that instead of `(0, k)` shapes.
+/// - FTR: only `flagList`.
 ///
 /// `flagList` is always emitted as int16 (the DUT-index path needs the -1
-/// sentinel; the head/site path's values are never negative and simply use the
-/// same dtype for both paths).
+/// sentinel; the head/site path simply uses the same dtype).
 fn fill_test_data_dict<'py>(
     dict: &Bound<'py, PyDict>,
     fetched: FetchedTestData,
     py: Python<'py>,
 ) -> PyResult<()> {
     let FetchedTestData {
-        sub_code,
         dut_list,
         data,
         flags,
-        states,
     } = fetched;
     dict.set_item("dutList", dut_list.into_pyarray(py))?;
-    match sub_code {
-        TestSubCode::Ptr => {
-            let flat = numpy_1d_from_2d_single_col(&data);
-            dict.set_item("dataList", flat.into_pyarray(py))?;
+    match data {
+        TestData::Ptr(values) => {
+            dict.set_item("dataList", values.into_pyarray(py))?;
         }
-        TestSubCode::Mpr => {
-            if data.nrows() == 0 || data.ncols() == 0 {
-                // Match Python's `np.array([])` for an MPR result with no rows /
-                // no result columns: empty 1-D float64 arrays.
-                let empty = Array1::<f64>::from_elem(0, f64::NAN);
-                dict.set_item("dataList", empty.into_pyarray(py))?;
-                let empty_state = Array1::<f64>::from_elem(0, f64::NAN);
-                dict.set_item("stateList", empty_state.into_pyarray(py))?;
+        TestData::Mpr { values, states } => {
+            if values.nrows() == 0 || values.ncols() == 0 {
+                // Use empty 1d f32 for MPR result
+                // without any DUTs or result columns.
+                dict.set_item("dataList", Array1::<f32>::zeros(0).into_pyarray(py))?;
+                dict.set_item("stateList", Array1::<f32>::zeros(0).into_pyarray(py))?;
             } else {
-                dict.set_item("dataList", data.t().to_owned().into_pyarray(py))?;
-                if let Some(states) = states {
-                    dict.set_item("stateList", states.t().to_owned().into_pyarray(py))?;
-                }
+                dict.set_item("dataList", values.into_pyarray(py))?;
+                dict.set_item("stateList", states.into_pyarray(py))?;
             }
         }
-        // FTR and any unknown/legacy code: no dataList / stateList keys.
-        TestSubCode::Ftr | TestSubCode::Other => {}
+        // FTR: no dataList / stateList
+        TestData::FlagsOnly => {}
     }
     dict.set_item("flagList", flags.into_pyarray(py))?;
     Ok(())
-}
-
-fn numpy_1d_from_2d_single_col(data: &numpy::ndarray::Array2<f32>) -> numpy::ndarray::Array1<f32> {
-    data.column(0).to_owned()
 }
