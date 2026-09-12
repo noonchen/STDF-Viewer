@@ -455,7 +455,7 @@ pub(crate) mod fetcher_queries {
     ORDER BY 
         DUTIndex";
 
-    /****** Metadata / summary queries (mirrors deps/DatabaseFetcher.py) ******/
+    /****** Metadata / summary queries ******/
 
     pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT 
         A.Fid, B.wafercnt 
@@ -552,7 +552,7 @@ pub(crate) mod fetcher_queries {
     ORDER By 
         Fid, Field, SubFid";
 
-    /****** DUT-level queries (mirrors deps/DatabaseFetcher.py) ******/
+    /****** DUT-level queries ******/
 
     /****** Queries moved out of database/fetcher.rs (fixed SQL, no appended conditions) ******/
 
@@ -644,16 +644,20 @@ pub(crate) mod fetcher_queries {
     GROUP by Fid 
     ORDER by Fid";
 
-    // Partial DUT info for the DUT Data Table. The head/site selections arrive
-    // as JSON arrays so the SQL text is constant and `prepare_cached` reuses it.
+    // Partial DUT info for the DUT Data Table: DUTIndex, PartID, PartText,
+    // "Head h - Site s", "State - 0xFL". The head/site selections arrive as
+    // JSON arrays so the SQL text is constant and `prepare_cached` reuses it.
     pub(crate) static FETCH_SELECT_PARTIAL_SITES: &str = "SELECT 
         DUTIndex, 
         PartID, 
         PartText, 
-        HEAD_NUM, 
-        SITE_NUM, 
-        Supersede, 
-        Flag 
+        'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM, 
+        printf(\"%s - 0x%02X\", CASE 
+                WHEN Supersede=1 THEN 'Superseded' 
+                WHEN Flag & 24 = 0 THEN 'Pass' 
+                WHEN Flag & 24 = 8 THEN 'Failed' 
+                ELSE 'Unknown' 
+                END, Flag) 
     FROM 
         Dut_Info 
     WHERE Fid=?1 
@@ -662,16 +666,19 @@ pub(crate) mod fetcher_queries {
     ORDER BY 
         DUTIndex";
 
-    /// Same as above but with `-1` ("all sites") in the selection: the
-    /// reference keeps rows with a non-negative site only.
+    /// Same as above with `-1` ("all sites") in the selection: only rows with
+    /// a non-negative site are kept.
     pub(crate) static FETCH_SELECT_PARTIAL_ALL_SITES: &str = "SELECT 
         DUTIndex, 
         PartID, 
         PartText, 
-        HEAD_NUM, 
-        SITE_NUM, 
-        Supersede, 
-        Flag 
+        'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM, 
+        printf(\"%s - 0x%02X\", CASE 
+                WHEN Supersede=1 THEN 'Superseded' 
+                WHEN Flag & 24 = 0 THEN 'Pass' 
+                WHEN Flag & 24 = 8 THEN 'Failed' 
+                ELSE 'Unknown' 
+                END, Flag) 
     FROM 
         Dut_Info 
     WHERE Fid=?1 

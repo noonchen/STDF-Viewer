@@ -13,7 +13,7 @@
 //
 
 use crate::database::fetcher::{
-    DataFetcher, DutSummaryRow, FetchedTestData, FileId, PinNameRow, TestData, WaferBounds,
+    DataFetcher, FetchedTestData, FileId, PinNameRow, TestData, WaferBounds,
 };
 use crate::generic::error::StdfHelperError;
 use numpy::ndarray::Array1;
@@ -38,7 +38,7 @@ impl PyDataFetcher {
     #[pyo3(signature = (path, cache_budget_mb=None))]
     pub fn new(py: Python<'_>, path: &str, cache_budget_mb: Option<usize>) -> PyResult<Self> {
         // cache_budget_mb: Tier-2 test-data LRU byte budget in MiB
-        // (plan §3.3/§7). Defaults to 128 MiB when not given.
+        // Defaults to 128 MiB when not given.
         // DB open scans Dut_Info/Test_Info per file, so release the GIL while
         // the caches are built.
         let inner = py.detach(|| match cache_budget_mb {
@@ -87,7 +87,8 @@ impl PyDataFetcher {
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         // Quick single-row lookup; still run it GIL-free so the SQLite hit
         // never stalls the UI thread.
-        let info = py.detach(|| self.inner.get_test_info((test_num, test_name), file_id))?;
+        let inner = &mut self.inner;
+        let info = py.detach(move || inner.get_test_info((test_num, test_name), file_id))?;
         let dict = PyDict::new(py);
         if let Some(info) = info {
             dict.set_item("Fid", file_id as i64)?;
@@ -163,7 +164,7 @@ impl PyDataFetcher {
         Ok(Some(dict))
     }
 
-    // ----- Metadata / summary queries (port of remaining DatabaseFetcher methods) -----
+    // ----- Metadata / summary queries -----
     // Every query below runs with the GIL released. The inner methods take
     // `&self`, and `&DataFetcher` is not `Send` (`rusqlite::Connection` is
     // `!Sync`), so each closure moves in a `&mut` borrow (`let inner = &mut
@@ -258,7 +259,7 @@ impl PyDataFetcher {
         Ok(py.detach(move || inner.file_info_rows())?)
     }
 
-    // ----- DUT-level summary queries (port batch A) -----
+    // ----- DUT-level summary queries -----
 
     pub fn get_dut_count_dict<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let inner = &mut self.inner;
@@ -296,7 +297,7 @@ impl PyDataFetcher {
         if heads.is_empty() || sites.is_empty() {
             return Ok(dict);
         }
-        // Ascending fid order, like the reference `ORDER BY Fid, DUTIndex`,
+        // Ascending fid order (SQL orders by Fid, DUTIndex),
         // and no repeated work when a caller passes duplicates.
         file_ids.sort_unstable();
         file_ids.dedup();
@@ -356,14 +357,12 @@ impl PyDataFetcher {
         test_name: &str,
         duts: Vec<u64>,
     ) -> PyResult<LimitArrays<'py>> {
-        let limits = py.detach(
-            || -> Result<(Array1<f32>, Array1<f32>), StdfHelperError> {
-                match self.inner.get_test_info((test_num, test_name), file_id)? {
-                    Some(info) => self.inner.get_dynamic_limits(&info, file_id, &duts),
-                    None => Ok((Array1::zeros(0), Array1::zeros(0))),
-                }
-            },
-        )?;
+        let limits = py.detach(|| -> Result<(Array1<f32>, Array1<f32>), StdfHelperError> {
+            match self.inner.get_test_info((test_num, test_name), file_id)? {
+                Some(info) => self.inner.get_dynamic_limits(&info, file_id, &duts),
+                None => Ok((Array1::zeros(0), Array1::zeros(0))),
+            }
+        })?;
         Ok((limits.0.into_pyarray(py), limits.1.into_pyarray(py)))
     }
 
@@ -391,9 +390,9 @@ impl PyDataFetcher {
         Ok(dict)
     }
 
-    /// `getFullDUTInfoFromDutArray()` — `{dut_index: (File ID, Part ID, ...)}`;
-    /// a requested DUT without a row maps to `()`, like the Python reference.
-    /// The dict is built here so Python never loops over the summary table.
+    /// `getFullDUTInfoFromDutArray()` — `{dut_index: [File ID, Part ID, Part
+    /// Text, head-site, tests executed, test time, HBIN, SBIN, wafer id, XY,
+    /// DUT flag]}`. A requested DUT without a row maps to `()`.
     pub fn get_full_dut_info<'py>(
         &mut self,
         py: Python<'py>,
@@ -408,14 +407,30 @@ impl PyDataFetcher {
             dict.set_item(*dut, PyTuple::empty(py))?;
         }
         for r in rows {
-            if wanted.remove(&(r.dut_index as u64)) {
-                dict.set_item(r.dut_index, dut_summary_list(py, r, fid)?)?;
+            if !wanted.remove(&(r.dut_index as u64)) {
+                continue;
             }
+            let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(11);
+            items.push(fid.into_bound_py_any(py)?);
+            push_opt_str(&mut items, r.part_id, py)?;
+            push_opt_str(&mut items, r.part_text, py)?;
+            items.push(r.head_site.into_bound_py_any(py)?);
+            match r.tests_executed {
+                Some(v) => items.push(v.into_bound_py_any(py)?),
+                None => items.push(py.None().into_bound(py)),
+            }
+            push_opt_str(&mut items, r.test_time, py)?;
+            push_opt_str(&mut items, r.hbin, py)?;
+            push_opt_str(&mut items, r.sbin, py)?;
+            push_opt_str(&mut items, r.wafer_id, py)?;
+            push_opt_str(&mut items, r.xy, py)?;
+            push_opt_str(&mut items, r.dut_flag, py)?;
+            dict.set_item(r.dut_index, PyList::new(py, items)?)?;
         }
         Ok(dict)
     }
 
-    // ----- DUT/pin/wafer queries (port batch B) -----
+    // ----- DUT/pin/wafer queries -----
 
     pub fn get_pin_name_rows(
         &mut self,
@@ -515,33 +530,6 @@ fn push_opt_str<'py>(
         None => items.push(py.None().into_bound(py)),
     }
     Ok(())
-}
-
-/// One `getFullDUTInfoFromDutArray()` value, a list like the reference's
-/// `(*full_tup,)` unpacking:
-/// `[File ID, Part ID, Part Text, head-site, tests executed, test time, HBIN,
-/// SBIN, wafer id, XY, DUT flag]` — the DUTIndex is the dict key, not a cell.
-fn dut_summary_list<'py>(
-    py: Python<'py>,
-    row: DutSummaryRow,
-    fid: FileId,
-) -> PyResult<Bound<'py, PyList>> {
-    let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(11);
-    items.push(fid.into_bound_py_any(py)?);
-    push_opt_str(&mut items, row.part_id, py)?;
-    push_opt_str(&mut items, row.part_text, py)?;
-    items.push(row.head_site.into_bound_py_any(py)?);
-    match row.tests_executed {
-        Some(v) => items.push(v.into_bound_py_any(py)?),
-        None => items.push(py.None().into_bound(py)),
-    }
-    push_opt_str(&mut items, row.test_time, py)?;
-    push_opt_str(&mut items, row.hbin, py)?;
-    push_opt_str(&mut items, row.sbin, py)?;
-    push_opt_str(&mut items, row.wafer_id, py)?;
-    push_opt_str(&mut items, row.xy, py)?;
-    push_opt_str(&mut items, row.dut_flag, py)?;
-    PyList::new(py, items)
 }
 
 /// Test data for different record types:

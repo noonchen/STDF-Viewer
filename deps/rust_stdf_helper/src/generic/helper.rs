@@ -12,6 +12,7 @@
 // Copyright (c) 2022 noonchen
 //
 
+use crate::generic::error::StdfHelperError;
 use chrono::{DateTime, Local};
 use std::io::{Read, Seek, SeekFrom};
 use std::{fs, io};
@@ -69,4 +70,41 @@ pub fn intersect_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
         }
     }
     result
+}
+
+/// Merge a sorted unique `b` into a sorted unique `a`; the result stays sorted
+/// and duplicate-free.
+pub fn merge_sorted_unique(a: &mut Vec<usize>, b: &[usize]) {
+    if b.is_empty() {
+        return;
+    }
+    if a.is_empty() {
+        *a = b.to_vec();
+        return;
+    }
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] {
+            out.push(a[i]);
+            i += 1;
+            j += 1;
+        } else if a[i] < b[j] {
+            out.push(a[i]);
+            i += 1;
+        } else {
+            out.push(b[j]);
+            j += 1;
+        }
+    }
+    out.extend_from_slice(&a[i..]);
+    out.extend_from_slice(&b[j..]);
+    *a = out;
+}
+
+/// Serialize integers as a JSON array, so a variable-length selection can be
+/// bound as one SQL parameter and read back with `json_each(?)`.
+pub fn json_int_array<I: IntoIterator<Item = i64>>(values: I) -> Result<String, StdfHelperError> {
+    serde_json::to_string(&values.into_iter().collect::<Vec<i64>>())
+        .map_err(|e| StdfHelperError { msg: e.to_string() })
 }

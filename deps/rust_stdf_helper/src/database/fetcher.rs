@@ -14,7 +14,7 @@
 use crate::database::operations::TestId;
 use crate::database::schema::fetcher_queries::*;
 use crate::generic::error::StdfHelperError;
-use crate::generic::helper::intersect_sorted;
+use crate::generic::helper::{intersect_sorted, json_int_array, merge_sorted_unique};
 use crate::stdf::record_tracker::TestSubCode;
 use lru::LruCache;
 use ndarray::{Array1, Array2};
@@ -67,8 +67,8 @@ pub struct TestInfo {
 pub enum TestData {
     /// PTR: 1d array, index = DUTIndex - 1.
     Ptr(Array1<f32>),
-    /// MPR: `values` and `states` are 2d array,
-    /// with shape of (XX_CNT, DUT_CNT).
+    /// MPR: `values` is (RSLT_PGM_CNT, DUTs) f32 and `states` is
+    /// (RTN_ICNT, DUTs) u8.
     Mpr {
         values: Array2<f32>,
         states: Array2<u8>,
@@ -78,28 +78,16 @@ pub enum TestData {
 }
 
 impl TestData {
-    /// clear data for an entry with no valid test data.
-    /// MPR row count is preserved, but all columns are cleared.
+    /// Clear data for an entry with no valid test data: MPR row counts are
+    /// preserved, all columns are dropped.
     fn empty_like(&self) -> Self {
         match self {
             TestData::Ptr(_) => TestData::Ptr(Array1::zeros(0)),
-            TestData::Mpr { values, states } => {
-                let rslt_cnt = values.nrows(); // result count
-                let stat_cnt = states.nrows(); // state count
-                TestData::Mpr {
-                    values: Array2::zeros((rslt_cnt, 0)),
-                    states: Array2::zeros((stat_cnt, 0)),
-                }
-            }
+            TestData::Mpr { values, states } => TestData::Mpr {
+                values: Array2::zeros((values.nrows(), 0)),
+                states: Array2::zeros((states.nrows(), 0)),
+            },
             TestData::FlagsOnly => TestData::FlagsOnly,
-        }
-    }
-
-    fn size_bytes(&self) -> usize {
-        match self {
-            TestData::Ptr(values) => values.len() * size_of::<f32>(),
-            TestData::Mpr { values, states } => values.len() * size_of::<f32>() + states.len(),
-            TestData::FlagsOnly => 0,
         }
     }
 }
@@ -118,7 +106,12 @@ impl TestDataCacheEntry {
     fn entry_size(&self) -> usize {
         // fixed bookkeeping cost of the entry itself
         const ENTRY_OVERHEAD: usize = 64;
-        self.data.size_bytes()
+        let payload = match &self.data {
+            TestData::Ptr(values) => values.len() * size_of::<f32>(),
+            TestData::Mpr { values, states } => values.len() * size_of::<f32>() + states.len(),
+            TestData::FlagsOnly => 0,
+        };
+        payload
             + self.flags.len() * size_of::<i16>()
             + self.valid_test_idx.len() * 8
             + ENTRY_OVERHEAD
@@ -134,8 +127,8 @@ pub struct FetchedTestData {
 }
 
 /// Represents a cached entry of dynamic limits for a single PTR test.
-/// Each entry contains dynamic limits of ALL DUTs,
-/// and `??_valid_idx` tracks DUTs that have valid dynamic limits.
+/// Each entry contains dynamic limits of ALL DUTs;
+/// `ll_valid_idx`/`hl_valid_idx` track the DUTs with a per-side limit.
 pub struct DynamicLimitEntry {
     pub llimit: Option<Array1<f32>>,
     pub hlimit: Option<Array1<f32>>,
@@ -222,6 +215,10 @@ pub struct DataFetcher {
     /// LRU cache for test data.
     test_data: TestDataLru,
 }
+
+// ---------------------------------------------------------------------------
+// Connection, per-file caches and test-data access
+// ---------------------------------------------------------------------------
 
 impl DataFetcher {
     /// Open a database, set test data cache with default budget.
@@ -360,6 +357,8 @@ impl DataFetcher {
         Ok(self.head_list.clone())
     }
 
+    // --- Test_Info ---
+
     /// Eagerly cache the whole `Test_Info` table, small but frequently accessed,
     /// when database connection is established.
     fn load_test_info(&mut self) -> Result<(), StdfHelperError> {
@@ -398,7 +397,7 @@ impl DataFetcher {
     }
 
     pub fn get_test_info(
-        &mut self,
+        &self,
         test_tup: (TestNum, &str),
         file_id: FileId,
     ) -> Result<Option<Arc<TestInfo>>, StdfHelperError> {
@@ -409,12 +408,14 @@ impl DataFetcher {
             .cloned())
     }
 
+    // --- Test data cache and fetch paths ---
+
     /// Cache the test data of given test info.
     /// If already cached, update the recent order of the test data entry in LRU.
     ///
     /// Returns:
     /// - `Ok(None)` — cache completed.
-    /// - `Ok(Some(entry))` — super large entry, not cached..
+    /// - `Ok(Some(entry))` — entry exceeds the cache budget, not cached.
     fn ensure_test_data(
         &mut self,
         info: &TestInfo,
@@ -697,6 +698,8 @@ impl DataFetcher {
         }))
     }
 
+    // --- Dynamic limits ---
+
     /// Cache the dynamic limits of given test info.
     /// If given test info has no valid limits,
     /// `None` is stored to avoid re-querying.
@@ -824,6 +827,8 @@ impl DataFetcher {
         Ok((Array1::from_vec(low), Array1::from_vec(high)))
     }
 
+    // --- Partial DUT info ---
+
     /// Returns a vec of (DUTIndex, PartID, PartText,
     /// "Head h - Site s", "State - 0xFL").
     pub fn get_partial_dut_info(
@@ -836,8 +841,7 @@ impl DataFetcher {
             return Ok(Vec::new());
         }
         let heads_json = json_int_array(heads.iter().map(|&h| h as i64))?;
-        // `-1` means "all sites"; the reference then only excludes NULL/NULL-ish
-        // rows with `SITE_NUM >= 0`.
+        // `-1` means "all sites": only rows with `SITE_NUM >= 0` are kept.
         let all_sites = sites.contains(&-1);
         let sql = if all_sites {
             FETCH_SELECT_PARTIAL_ALL_SITES
@@ -847,23 +851,15 @@ impl DataFetcher {
         let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
         let mut stmt = self.conn.prepare_cached(sql)?;
 
+        // Head/site and flag strings are formatted by SQLite; HEAD_NUM/SITE_NUM
+        // come from PIR and Flag is written by the PRR update, all non-NULL.
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<PartialDutInfo> {
-            let dut_index = row.get::<_, i64>(0)?;
-            let part_id = row.get::<_, Option<String>>(1)?;
-            let part_text = row.get::<_, Option<String>>(2)?;
-            let head_site = format!(
-                "Head {} - Site {}",
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?
-            );
-            let superseded = row.get::<_, i64>(5)? != 0;
-            let flag = row.get::<_, i64>(6)? as u8;
             Ok((
-                dut_index,
-                part_id,
-                part_text,
-                head_site,
-                format_dut_flag(superseded, flag),
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
             ))
         };
 
@@ -885,12 +881,7 @@ impl DataFetcher {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata / summary queries.
-//
-// Each method below mirrors one public method of the Python reference fetcher
-// (deps/DatabaseFetcher.py): identical SQL and identical per-row semantics.
-// Final Python container shaping (dict/tuple/set assembly) happens in the
-// PyO3 wrapper / DatabaseFetcherRust, per plan §3.1.
+// Metadata / whole-DB summary queries
 // ---------------------------------------------------------------------------
 
 impl DataFetcher {
@@ -925,7 +916,7 @@ impl DataFetcher {
     }
 
     /// `getTestItemsList()` — `test_num [(#pmr)] test_name` items in the same
-    /// order as the reference join, deduplicated keeping the first occurrence.
+    /// order, deduplicated keeping the first occurrence.
     pub fn test_items(&self) -> Result<Vec<String>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_TEST_ITEMS)?;
         let rows = stmt.query_map([], |row| {
@@ -951,7 +942,7 @@ impl DataFetcher {
     }
 
     /// `getTestRecordTypeDict()` row source — one row per `Test_Info` entry,
-    /// in DB order (the same order the Python reference iterates).
+    /// in DB order.
     pub fn test_record_type_rows(&self) -> Result<Vec<(i64, String, u8)>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_TEST_RECORD_TYPES)?;
         let rows = stmt
@@ -980,8 +971,7 @@ impl DataFetcher {
         let mut list = vec![String::from("-\tStacked Wafer Map")];
         for row in rows {
             let (fid, wafer_index, wafer_id) = row?;
-            // Python formats the raw value with an f-string, so NULL becomes
-            // the literal string "None".
+            // NULL is rendered as the literal string "None".
             let id = match wafer_id {
                 Some(s) => s,
                 None => String::from("None"),
@@ -1052,7 +1042,7 @@ impl DataFetcher {
 
     /// `getBinStats()` rows — `(Fid, BIN_NUM, count)` for non-superseded DUTs
     /// of one head (and optionally one site); rows whose bin is NULL are
-    /// skipped, matching the Python reference.
+    /// skipped.
     pub fn bin_stats_rows(
         &self,
         head: i64,
@@ -1082,7 +1072,7 @@ impl DataFetcher {
 
     /// `isDutInfoColumnEmpty(column)` — True when the given `Dut_Info` column
     /// has no valid value. Only a fixed set of column names is accepted (the
-    /// Python reference is called with a hard-coded column name as well).
+    /// callers use a fixed, hard-coded column name).
     pub fn is_dut_info_column_empty(&self, column: &str) -> Result<bool, StdfHelperError> {
         // The fetcher is the only reader of these DBs; a plain identifier guard
         // is enough. The query template itself lives in schema.rs.
@@ -1119,11 +1109,10 @@ impl DataFetcher {
 }
 
 // ---------------------------------------------------------------------------
-// DUT-level summary queries (port batch A).
+// DUT summary rows
 // ---------------------------------------------------------------------------
 
-/// One `DUT_SUMMARY_QUERY` row. The reference returns the SQLite cells as
-/// plain Python values; column types are static, so each is typed explicitly.
+/// One DUT summary row. Column types are static, so each cell is typed.
 pub struct DutSummaryRow {
     pub dut_index: i64,
     pub part_id: Option<String>,
@@ -1140,7 +1129,7 @@ pub struct DutSummaryRow {
 
 impl DataFetcher {
     /// `getFullDUTInfoFromDutArray()` row source — DUT summary rows for one
-    /// file, mirroring SharedSrc.DUT_SUMMARY_QUERY (typed cells).
+    /// file; the SQL is `FETCH_SELECT_DUT_SUMMARY`.
     pub fn full_dut_summary_rows(
         &self,
         fid: FileId,
@@ -1184,9 +1173,13 @@ pub struct DutCounts {
     pub superseded: Vec<i64>,
 }
 
+// ---------------------------------------------------------------------------
+// DUT counts and DUT index lookups
+// ---------------------------------------------------------------------------
+
 impl DataFetcher {
     /// `getDUTCountDict()` — all five per-file counts from one scan of
-    /// `Dut_Info` using conditional aggregation (plan §4.1).
+    /// `Dut_Info` using conditional aggregation.
     pub fn dut_count_dict(&self) -> Result<DutCounts, StdfHelperError> {
         let n = self.file_paths.len();
         let mut counts = DutCounts {
@@ -1265,8 +1258,7 @@ impl DataFetcher {
     /// `getDutIndexDictFromHeadSite()` rows — (Fid, DUTIndex) for non-empty
     /// head/site selections.
     ///
-    /// Served from `head_site_dutarr_idx_all`: the Python method has *no* Supersede
-    /// filter, so it must use the all-rows index (not the Supersede=0 cache).
+    /// Served from `head_site_dutarr_idx_all` (no Supersede filter).
     pub fn get_dut_index_by_head_site(
         &self,
         heads: &[i32],
@@ -1277,7 +1269,6 @@ impl DataFetcher {
             return Ok(Array1::from(Vec::new()));
         }
         let all_sites = sites.contains(&-1);
-        let mut duts: Vec<u64> = Vec::new();
 
         let mut acc: Vec<usize> = Vec::new();
         for &h in heads {
@@ -1302,13 +1293,14 @@ impl DataFetcher {
                 }
             }
         }
-        duts.extend(acc.into_iter().map(|row| (row + 1) as u64));
-
-        Ok(Array1::from(duts))
+        // one allocation: DUTIndex is 1-based, the cached lists are 0-based
+        Ok(Array1::from_iter(
+            acc.into_iter().map(|row| (row + 1) as u64),
+        ))
     }
 
-    /// `getDUTIndexFromBin()` — unique (Fid, DUTIndex) pairs in the order the
-    /// Python reference appends them (per selection, dedup across selections).
+    /// `getDUTIndexFromBin()` — unique (Fid, DUTIndex) pairs in selection
+    /// order (dedup across selections).
     pub fn dut_index_rows_by_bin(
         &self,
         selections: &[(i64, bool, Vec<i64>)],
@@ -1402,7 +1394,7 @@ impl DataFetcher {
 }
 
 // ---------------------------------------------------------------------------
-// DUT/pin/wafer queries (port batch B).
+// Pin / wafer queries
 // ---------------------------------------------------------------------------
 
 /// One `Wafer_Info` row for `getWaferInfo()`.
@@ -1425,7 +1417,7 @@ pub struct WaferInfoRow {
 
 impl DataFetcher {
     /// One row of `getPinNames()` for a single file: PMR/LOC/PHY names are
-    /// filled with "" for NULL (as the Python reference does) and rows keep
+    /// filled with "" for NULL, and rows keep
     /// the TestPin_Map.ROWID order.
     pub fn pin_name_rows(
         &self,
@@ -1455,7 +1447,7 @@ impl DataFetcher {
         Ok(rows)
     }
 
-    /// All `Wafer_Info` rows ordered by `WaferIndex` (as the reference query).
+    /// All `Wafer_Info` rows ordered by `WaferIndex`.
     pub fn wafer_info_rows(&self) -> Result<Vec<WaferInfoRow>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_WAFER_INFO)?;
         let rows = stmt
@@ -1496,7 +1488,7 @@ impl DataFetcher {
     }
 
     /// `getWaferCoordsDict()` rows — (SBIN, XCOORD, YCOORD) skipping DUTs with
-    /// NULL coordinates, matching the Python reference.
+    /// NULL coordinates.
     pub fn wafer_coord_rows(
         &self,
         wafer_index: u64,
@@ -1533,8 +1525,8 @@ impl DataFetcher {
     }
 
     /// `getStackedWaferData()` rows — (X, Y, Flag, count) grouped by
-    /// X/Y/Flag, skipping NULL coordinates/flags (mirrors the reference
-    /// isinstance() guards; Flag & 24 == 8 filtering is done by the caller).
+    /// X/Y/Flag, skipping NULL coordinates/flags (Flag & 24 == 8 filtering is
+    /// done by the caller).
     pub fn stacked_wafer_rows(
         &self,
         sites: &[i32],
@@ -1554,7 +1546,9 @@ impl DataFetcher {
             let mut stmt = self
                 .conn
                 .prepare_cached(FETCH_SELECT_STACKED_WAFER_ALL_SITES)?;
-            let rows = stmt.query_map([], map_row)?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([], map_row)?
+                .collect::<Result<Vec<_>, _>>()?;
             rows
         } else {
             let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
@@ -1567,8 +1561,8 @@ impl DataFetcher {
         Ok(rows)
     }
 
-    /// `getDTR_GDRs()` rows — (Record Type, Value, Approx. Location) formatted
-    /// like the reference DATALOG_QUERY (the reference iterates three columns).
+    /// `getDTR_GDRs()` rows — (Record Type, Value, Approx. Location) as
+    /// formatted by `FETCH_SELECT_DATALOG`.
     pub fn datalog_rows(&self) -> Result<Vec<(String, String, String)>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DATALOG)?;
         let rows = stmt
@@ -1582,55 +1576,4 @@ impl DataFetcher {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
-}
-
-/// Merge a sorted unique `b` into a sorted unique `a` (result stays sorted,
-/// no duplicates) — used to combine per-head/per-site index lists.
-fn merge_sorted_unique(a: &mut Vec<usize>, b: &[usize]) {
-    if b.is_empty() {
-        return;
-    }
-    if a.is_empty() {
-        *a = b.to_vec();
-        return;
-    }
-    let mut out = Vec::with_capacity(a.len() + b.len());
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
-        if a[i] == b[j] {
-            out.push(a[i]);
-            i += 1;
-            j += 1;
-        } else if a[i] < b[j] {
-            out.push(a[i]);
-            i += 1;
-        } else {
-            out.push(b[j]);
-            j += 1;
-        }
-    }
-    out.extend_from_slice(&a[i..]);
-    out.extend_from_slice(&b[j..]);
-    *a = out;
-}
-
-/// Mirrors the SQL `printf("%s - 0x%02X", CASE …, Flag)`.
-fn format_dut_flag(superseded: bool, flag: u8) -> String {
-    let state = if superseded {
-        "Superseded"
-    } else {
-        match flag & 24 {
-            0 => "Pass",
-            8 => "Failed",
-            _ => "Unknown",
-        }
-    };
-    format!("{} - 0x{:02X}", state, flag)
-}
-
-/// Serialize integers as a JSON array so a variable-length selection can be
-/// bound as one parameter and read back with `json_each(?)`.
-fn json_int_array<I: IntoIterator<Item = i64>>(values: I) -> Result<String, StdfHelperError> {
-    serde_json::to_string(&values.into_iter().collect::<Vec<i64>>())
-        .map_err(|e| StdfHelperError { msg: e.to_string() })
 }
