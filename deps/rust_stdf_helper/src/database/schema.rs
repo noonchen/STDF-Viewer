@@ -644,7 +644,9 @@ pub(crate) mod fetcher_queries {
     GROUP by Fid 
     ORDER by Fid";
 
-    pub(crate) static FETCH_SELECT_PARTIAL_RAW: &str = "SELECT 
+    // Partial DUT info for the DUT Data Table. The head/site selections arrive
+    // as JSON arrays so the SQL text is constant and `prepare_cached` reuses it.
+    pub(crate) static FETCH_SELECT_PARTIAL_SITES: &str = "SELECT 
         DUTIndex, 
         PartID, 
         PartText, 
@@ -654,8 +656,27 @@ pub(crate) mod fetcher_queries {
         Flag 
     FROM 
         Dut_Info 
-    WHERE 
-        Fid=? 
+    WHERE Fid=?1 
+        AND HEAD_NUM IN (SELECT value FROM json_each(?2)) 
+        AND SITE_NUM IN (SELECT value FROM json_each(?3)) 
+    ORDER BY 
+        DUTIndex";
+
+    /// Same as above but with `-1` ("all sites") in the selection: the
+    /// reference keeps rows with a non-negative site only.
+    pub(crate) static FETCH_SELECT_PARTIAL_ALL_SITES: &str = "SELECT 
+        DUTIndex, 
+        PartID, 
+        PartText, 
+        HEAD_NUM, 
+        SITE_NUM, 
+        Supersede, 
+        Flag 
+    FROM 
+        Dut_Info 
+    WHERE Fid=?1 
+        AND HEAD_NUM IN (SELECT value FROM json_each(?2)) 
+        AND SITE_NUM >= 0 
     ORDER BY 
         DUTIndex";
 
@@ -715,22 +736,44 @@ pub(crate) mod fetcher_queries {
         Dut_Info 
     WHERE Fid = ? AND WaferIndex = ?";
 
-    // {site_condition} is either \" AND SITE_NUM >= 0\" or an IN-list built by
-    // the caller; it is always the last clause so base parameters stay first.
-    pub(crate) static FETCH_SELECT_WAFER_COORDS: &str = "SELECT 
+    // Site selections arrive as a JSON array (`json_each`), so the SQL text is
+    // constant and `prepare_cached` reuses one statement per variant.
+    pub(crate) static FETCH_SELECT_WAFER_COORDS_SITES: &str = "SELECT 
         SBIN, XCOORD, YCOORD 
     FROM 
         Dut_Info 
-    WHERE WaferIndex=? AND Fid=? AND Supersede=0 AND XCOORD IS NOT NULL 
-        AND YCOORD IS NOT NULL{site_condition}";
+    WHERE WaferIndex=?1 AND Fid=?2 AND Supersede=0 AND XCOORD IS NOT NULL 
+        AND YCOORD IS NOT NULL AND SITE_NUM IN (SELECT value FROM json_each(?3))";
 
-    pub(crate) static FETCH_SELECT_STACKED_WAFER: &str = "SELECT 
+    pub(crate) static FETCH_SELECT_WAFER_COORDS_ALL_SITES: &str = "SELECT 
+        SBIN, XCOORD, YCOORD 
+    FROM 
+        Dut_Info 
+    WHERE WaferIndex=?1 AND Fid=?2 AND Supersede=0 AND XCOORD IS NOT NULL 
+        AND YCOORD IS NOT NULL AND SITE_NUM >= 0";
+
+    pub(crate) static FETCH_SELECT_STACKED_WAFER_SITES: &str = "SELECT 
         XCOORD, YCOORD, Flag, count(Flag) 
     FROM 
         Dut_Info 
     WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL 
-        AND YCOORD IS NOT NULL AND Flag IS NOT NULL{site_condition} 
+        AND YCOORD IS NOT NULL AND Flag IS NOT NULL 
+        AND SITE_NUM IN (SELECT value FROM json_each(?1)) 
     GROUP By XCOORD, YCOORD, Flag";
+
+    pub(crate) static FETCH_SELECT_STACKED_WAFER_ALL_SITES: &str = "SELECT 
+        XCOORD, YCOORD, Flag, count(Flag) 
+    FROM 
+        Dut_Info 
+    WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL 
+        AND YCOORD IS NOT NULL AND Flag IS NOT NULL AND SITE_NUM >= 0 
+    GROUP By XCOORD, YCOORD, Flag";
+
+    pub(crate) static FETCH_SELECT_DUT_INDEX_BY_HBIN: &str = "SELECT Fid, DUTIndex 
+    FROM Dut_Info WHERE HBIN IN (SELECT value FROM json_each(?1)) AND Fid=?2";
+
+    pub(crate) static FETCH_SELECT_DUT_INDEX_BY_SBIN: &str = "SELECT Fid, DUTIndex 
+    FROM Dut_Info WHERE SBIN IN (SELECT value FROM json_each(?1)) AND Fid=?2";
 
     pub(crate) static FETCH_SELECT_DUT_INDEX_BY_XY: &str = "SELECT Fid, DUTIndex 
     FROM Dut_Info WHERE XCOORD=? AND YCOORD=?";

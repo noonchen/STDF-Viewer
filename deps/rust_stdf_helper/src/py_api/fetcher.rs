@@ -13,8 +13,7 @@
 //
 
 use crate::database::fetcher::{
-    BinInfoRow, DataFetcher, DutSummaryRow, FetchedTestData, FileId, PinNameRow, TestData,
-    TestFailCntRow, WaferBounds,
+    DataFetcher, DutSummaryRow, FetchedTestData, FileId, PinNameRow, TestData, WaferBounds,
 };
 use crate::generic::error::StdfHelperError;
 use numpy::ndarray::Array1;
@@ -128,7 +127,7 @@ impl PyDataFetcher {
             .iter()
             .map(|&s| if s < 0 { None } else { Some(s as u8) })
             .collect();
-        // All heavy lifting (first-time SQLite scan + hex decode, row gather)
+        // All heavy lifting (first-time SQLite scan, blob decode, row gather)
         // runs with the GIL released; Python objects are only touched after.
         let fetched = py.detach(|| {
             self.inner.get_test_data_from_head_site(
@@ -165,18 +164,24 @@ impl PyDataFetcher {
     }
 
     // ----- Metadata / summary queries (port of remaining DatabaseFetcher methods) -----
-    // Every query below runs with the GIL released through `detached()`.
+    // Every query below runs with the GIL released. The inner methods take
+    // `&self`, and `&DataFetcher` is not `Send` (`rusqlite::Connection` is
+    // `!Sync`), so each closure moves in a `&mut` borrow (`let inner = &mut
+    // self.inner`) that `py.detach` accepts.
 
     pub fn get_wafer_count(&mut self, py: Python<'_>) -> PyResult<Vec<i64>> {
-        detached(py, &mut self.inner, |inner| inner.wafer_count())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.wafer_count())?)
     }
 
     pub fn get_byte_order(&mut self, py: Python<'_>) -> PyResult<Vec<bool>> {
-        detached(py, &mut self.inner, |inner| inner.byte_order())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.byte_order())?)
     }
 
     pub fn get_test_items(&mut self, py: Python<'_>) -> PyResult<Vec<String>> {
-        detached(py, &mut self.inner, |inner| inner.test_items())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.test_items())?)
     }
 
     /// Rows of `(TEST_NUM, TEST_NAME, SUB_CODE)` in DB order.
@@ -184,26 +189,48 @@ impl PyDataFetcher {
         &mut self,
         py: Python<'_>,
     ) -> PyResult<Vec<(i64, String, u8)>> {
-        detached(py, &mut self.inner, |inner| inner.test_record_type_rows())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.test_record_type_rows())?)
     }
 
     pub fn get_wafer_list(&mut self, py: Python<'_>) -> PyResult<Vec<String>> {
-        detached(py, &mut self.inner, |inner| inner.wafer_list())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.wafer_list())?)
     }
 
-    /// Rows of `(TEST_NUM, TEST_NAME, per-file FailCount list)`.
-    pub fn get_test_fail_cnt(&mut self, py: Python<'_>) -> PyResult<Vec<TestFailCntRow>> {
-        detached(py, &mut self.inner, |inner| inner.test_fail_cnt_rows())
+    /// `getTestFailCnt()` — `{(TEST_NUM, TEST_NAME): [per-file FailCount]}`,
+    /// built here so Python never loops over the rows.
+    pub fn get_test_fail_cnt<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let inner = &mut self.inner;
+        let rows = py.detach(move || inner.test_fail_cnt_rows())?;
+        let dict = PyDict::new(py);
+        for (test_num, test_name, per_file) in rows {
+            let key: [Bound<'py, PyAny>; 2] = [
+                test_num.into_bound_py_any(py)?,
+                test_name.into_bound_py_any(py)?,
+            ];
+            dict.set_item(PyTuple::new(py, key)?, per_file)?;
+        }
+        Ok(dict)
     }
 
-    pub fn get_bin_info_rows(
+    /// `getBinInfo()` — `{BIN_NUM: {"BIN_NAME": ..., "BIN_PF": ...}}`, built
+    /// here so Python never loops over the rows.
+    pub fn get_bin_info<'py>(
         &mut self,
-        py: Python<'_>,
+        py: Python<'py>,
         is_hbin: bool,
-    ) -> PyResult<Vec<BinInfoRow>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.bin_info_rows(is_hbin)
-        })
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let inner = &mut self.inner;
+        let rows = py.detach(move || inner.bin_info_rows(is_hbin))?;
+        let dict = PyDict::new(py);
+        for (bin_num, bin_name, bin_pf) in rows {
+            let info = PyDict::new(py);
+            info.set_item("BIN_NAME", bin_name)?;
+            info.set_item("BIN_PF", bin_pf)?;
+            dict.set_item(bin_num, info)?;
+        }
+        Ok(dict)
     }
 
     pub fn get_bin_stats_rows(
@@ -213,15 +240,13 @@ impl PyDataFetcher {
         site: i64,
         is_hbin: bool,
     ) -> PyResult<Vec<(i64, i64, i64)>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.bin_stats_rows(head, site, is_hbin)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.bin_stats_rows(head, site, is_hbin))?)
     }
 
     pub fn is_dut_info_column_empty(&mut self, py: Python<'_>, column: &str) -> PyResult<bool> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.is_dut_info_column_empty(column)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.is_dut_info_column_empty(column))?)
     }
 
     /// Rows of `(Fid, Field, Value)` ordered by `Fid, Field, SubFid`.
@@ -229,13 +254,15 @@ impl PyDataFetcher {
         &mut self,
         py: Python<'_>,
     ) -> PyResult<Vec<(i64, String, Option<String>)>> {
-        detached(py, &mut self.inner, |inner| inner.file_info_rows())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.file_info_rows())?)
     }
 
     // ----- DUT-level summary queries (port batch A) -----
 
     pub fn get_dut_count_dict<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let counts = detached(py, &mut self.inner, |inner| inner.dut_count_dict())?;
+        let inner = &mut self.inner;
+        let counts = py.detach(move || inner.dut_count_dict())?;
         let dict = PyDict::new(py);
         dict.set_item("Total", counts.total)?;
         dict.set_item("Pass", counts.pass)?;
@@ -253,9 +280,8 @@ impl PyDataFetcher {
         waferid: i64,
         fid: i64,
     ) -> PyResult<Vec<i64>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.dut_count_on_conditions(head, site, waferid, fid)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.dut_count_on_conditions(head, site, waferid, fid))?)
     }
 
     /// Returns `{fid: [dut_index, ...]}`
@@ -277,9 +303,9 @@ impl PyDataFetcher {
         let heads_ref = &heads;
         let sites_ref = &sites;
         for fid in file_ids {
-            let duts_in_fid = detached(py, &mut self.inner, move |inner| {
-                inner.get_dut_index_by_head_site(heads_ref, sites_ref, fid)
-            })?;
+            let inner = &mut self.inner;
+            let duts_in_fid =
+                py.detach(move || inner.get_dut_index_by_head_site(heads_ref, sites_ref, fid))?;
             if duts_in_fid.is_empty() {
                 continue;
             }
@@ -294,9 +320,8 @@ impl PyDataFetcher {
         py: Python<'_>,
         selections: Vec<(i64, bool, Vec<i64>)>,
     ) -> PyResult<Vec<(i64, i64)>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.dut_index_rows_by_bin(&selections)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.dut_index_rows_by_bin(&selections))?)
     }
 
     /// `selections`: list of (waferIndex, fid, (x, y)); waferIndex == -1
@@ -306,9 +331,8 @@ impl PyDataFetcher {
         py: Python<'_>,
         selections: Vec<(i64, i64, (i64, i64))>,
     ) -> PyResult<Vec<(i64, i64)>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.dut_index_rows_by_xy(&selections)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.dut_index_rows_by_xy(&selections))?)
     }
 
     pub fn get_wafer_bounds(
@@ -317,9 +341,8 @@ impl PyDataFetcher {
         wafer_index: i64,
         fid: i64,
     ) -> PyResult<WaferBounds> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.wafer_bounds(wafer_index, fid)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.wafer_bounds(wafer_index, fid))?)
     }
 
     /// Returns `(lower_limits, upper_limits)` as numpy arrays,
@@ -334,7 +357,7 @@ impl PyDataFetcher {
         duts: Vec<u64>,
     ) -> PyResult<LimitArrays<'py>> {
         let limits = py.detach(
-            || -> Result<(Array1<f32>, Array1<f32>), crate::generic::error::StdfHelperError> {
+            || -> Result<(Array1<f32>, Array1<f32>), StdfHelperError> {
                 match self.inner.get_test_info((test_num, test_name), file_id)? {
                     Some(info) => self.inner.get_dynamic_limits(&info, file_id, &duts),
                     None => Ok((Array1::zeros(0), Array1::zeros(0))),
@@ -344,8 +367,8 @@ impl PyDataFetcher {
         Ok((limits.0.into_pyarray(py), limits.1.into_pyarray(py)))
     }
 
-    /// Returns a dict, dut_index -> `(PartID, PartText,
-    /// "Head h - Site s", "State - 0xFL")}`.
+    /// Returns a dict, `dut_index -> (PartID, PartText, "Head h - Site s",
+    /// "State - 0xFL")`.
     pub fn get_partial_dut_info<'py>(
         &mut self,
         py: Python<'py>,
@@ -353,9 +376,8 @@ impl PyDataFetcher {
         sites: Vec<i32>,
         file_id: FileId,
     ) -> PyResult<Bound<'py, PyDict>> {
-        let rows = detached(py, &mut self.inner, |inner| {
-            inner.get_partial_dut_info(&heads, &sites, file_id)
-        })?;
+        let inner = &mut self.inner;
+        let rows = py.detach(move || inner.get_partial_dut_info(&heads, &sites, file_id))?;
         let dict = PyDict::new(py);
         for (dut_index, part_id, part_text, hs_str, flag) in rows {
             let items: [Bound<'py, PyAny>; 4] = [
@@ -379,9 +401,8 @@ impl PyDataFetcher {
         fid: FileId,
     ) -> PyResult<Bound<'py, PyDict>> {
         let mut wanted: HashSet<u64> = duts.iter().copied().collect();
-        let rows = detached(py, &mut self.inner, move |inner| {
-            inner.full_dut_summary_rows(fid)
-        })?;
+        let inner = &mut self.inner;
+        let rows = py.detach(move || inner.full_dut_summary_rows(fid))?;
         let dict = PyDict::new(py);
         for dut in &duts {
             dict.set_item(*dut, PyTuple::empty(py))?;
@@ -404,9 +425,8 @@ impl PyDataFetcher {
         is_rtn: bool,
         fid: FileId,
     ) -> PyResult<Vec<PinNameRow>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.pin_name_rows(test_num, test_name, is_rtn, fid)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.pin_name_rows(test_num, test_name, is_rtn, fid))?)
     }
 
     /// Wafer_Info rows as tuples in column order (ints / str / None).
@@ -414,7 +434,8 @@ impl PyDataFetcher {
         &mut self,
         py: Python<'py>,
     ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
-        let rows = detached(py, &mut self.inner, |inner| inner.wafer_info_rows())?;
+        let inner = &mut self.inner;
+        let rows = py.detach(move || inner.wafer_info_rows())?;
         rows.into_iter()
             .map(|r| {
                 let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(14);
@@ -442,7 +463,8 @@ impl PyDataFetcher {
         py: Python<'_>,
         fid: FileId,
     ) -> PyResult<Vec<(String, Option<String>)>> {
-        detached(py, &mut self.inner, move |inner| inner.wafer_ext_rows(fid))
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.wafer_ext_rows(fid))?)
     }
 
     pub fn get_wafer_coord_rows(
@@ -452,9 +474,8 @@ impl PyDataFetcher {
         sites: Vec<i32>,
         fid: FileId,
     ) -> PyResult<Vec<(i64, i64, i64)>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.wafer_coord_rows(wafer_index, &sites, fid)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.wafer_coord_rows(wafer_index, &sites, fid))?)
     }
 
     pub fn get_stacked_wafer_rows(
@@ -462,27 +483,14 @@ impl PyDataFetcher {
         py: Python<'_>,
         sites: Vec<i32>,
     ) -> PyResult<Vec<(i64, i64, i64, i64)>> {
-        detached(py, &mut self.inner, move |inner| {
-            inner.stacked_wafer_rows(&sites)
-        })
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.stacked_wafer_rows(&sites))?)
     }
 
     pub fn get_datalog_rows(&mut self, py: Python<'_>) -> PyResult<Vec<(String, String, String)>> {
-        detached(py, &mut self.inner, |inner| inner.datalog_rows())
+        let inner = &mut self.inner;
+        Ok(py.detach(move || inner.datalog_rows())?)
     }
-}
-
-/// Run `f` against the inner fetcher with the GIL released.
-///
-/// The inner methods take `&self`, but `&DataFetcher` is not `Send`
-/// (`rusqlite::Connection` is `!Sync`), so this takes a `&mut DataFetcher` and
-/// moves that reference into the detached closure.
-fn detached<T, F>(py: Python<'_>, inner: &mut DataFetcher, f: F) -> PyResult<T>
-where
-    F: FnOnce(&mut DataFetcher) -> Result<T, StdfHelperError> + Send,
-    T: Send,
-{
-    Ok(py.detach(move || f(inner))?)
 }
 
 fn push_opt_i64<'py>(

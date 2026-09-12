@@ -145,18 +145,6 @@ pub struct DynamicLimitEntry {
     pub hl_valid_idx: Vec<usize>,
 }
 
-/// Subset of DUT Summary row, used in DUT Data Table.
-/// Raw fields only; formatted strings are built per call.
-pub struct PartialDutInfoRow {
-    pub dut_index: u64,
-    pub part_id: Option<String>,
-    pub part_text: Option<String>,
-    pub head: HeadNum,
-    pub site: SiteNum,
-    pub superseded: bool,
-    pub flag: u8,
-}
-
 /// Default cache upper limit for test data LRU.
 const DEFAULT_TEST_CACHE_LIMIT: usize = 128 * 1024 * 1024; // 128 MiB
 
@@ -229,8 +217,6 @@ pub struct DataFetcher {
     /// test_id -> dynamic limit cache.
     /// `None` cache means already queried but no dynamic limit found.
     dynamic_limits: HashMap<TestId, Option<DynamicLimitEntry>>,
-    /// fid -> partial DUT info.
-    partial_dut_info: HashMap<FileId, Vec<PartialDutInfoRow>>,
     site_list: Vec<SiteNum>,
     head_list: Vec<HeadNum>,
     /// LRU cache for test data.
@@ -254,7 +240,6 @@ impl DataFetcher {
             head_site_dutarr_idx_all: HashMap::new(),
             test_info: HashMap::new(),
             dynamic_limits: HashMap::new(),
-            partial_dut_info: HashMap::new(),
             site_list: Vec::new(),
             head_list: Vec::new(),
             test_data: TestDataLru::new(budget_bytes),
@@ -272,7 +257,6 @@ impl DataFetcher {
         self.head_site_dutarr_idx_all.clear();
         self.test_info.clear();
         self.dynamic_limits.clear();
-        self.partial_dut_info.clear();
         self.site_list.clear();
         self.head_list.clear();
         self.test_data.clear();
@@ -840,35 +824,10 @@ impl DataFetcher {
         Ok((Array1::from_vec(low), Array1::from_vec(high)))
     }
 
-    /// Cache partial DUT info of a given file.
-    fn ensure_partial_dut_info(&mut self, fid: FileId) -> Result<(), StdfHelperError> {
-        if self.partial_dut_info.contains_key(&fid) {
-            return Ok(());
-        }
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PARTIAL_RAW)?;
-        let rows = stmt.query_map([fid as i64], |row| {
-            Ok(PartialDutInfoRow {
-                dut_index: row.get::<_, i64>(0)? as u64,
-                part_id: row.get(1)?,
-                part_text: row.get(2)?,
-                head: row.get::<_, i64>(3)? as u8,
-                site: row.get::<_, i64>(4)? as u8,
-                superseded: row.get::<_, i64>(5)? != 0,
-                flag: row.get::<_, i64>(6)? as u8,
-            })
-        })?;
-        let mut all_info = Vec::new();
-        for r in rows {
-            all_info.push(r?);
-        }
-        self.partial_dut_info.insert(fid, all_info);
-        Ok(())
-    }
-
     /// Returns a vec of (DUTIndex, PartID, PartText,
     /// "Head h - Site s", "State - 0xFL").
     pub fn get_partial_dut_info(
-        &mut self,
+        &self,
         heads: &[i32],
         sites: &[i32],
         file_id: FileId,
@@ -876,35 +835,50 @@ impl DataFetcher {
         if heads.is_empty() || sites.is_empty() {
             return Ok(Vec::new());
         }
-        self.ensure_partial_dut_info(file_id)?;
+        let heads_json = json_int_array(heads.iter().map(|&h| h as i64))?;
+        // `-1` means "all sites"; the reference then only excludes NULL/NULL-ish
+        // rows with `SITE_NUM >= 0`.
+        let all_sites = sites.contains(&-1);
+        let sql = if all_sites {
+            FETCH_SELECT_PARTIAL_ALL_SITES
+        } else {
+            FETCH_SELECT_PARTIAL_SITES
+        };
+        let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
+        let mut stmt = self.conn.prepare_cached(sql)?;
 
-        let rows = self
-            .partial_dut_info
-            .get(&file_id)
-            .ok_or_else(|| StdfHelperError {
-                msg: format!(
-                    "Cache missing for DUT info in file [{}] after ensuring test data, not should happen", 
-                    file_id)
-            })?;
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<PartialDutInfo> {
+            let dut_index = row.get::<_, i64>(0)?;
+            let part_id = row.get::<_, Option<String>>(1)?;
+            let part_text = row.get::<_, Option<String>>(2)?;
+            let head_site = format!(
+                "Head {} - Site {}",
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?
+            );
+            let superseded = row.get::<_, i64>(5)? != 0;
+            let flag = row.get::<_, i64>(6)? as u8;
+            Ok((
+                dut_index,
+                part_id,
+                part_text,
+                head_site,
+                format_dut_flag(superseded, flag),
+            ))
+        };
 
-        let duts = self.get_dut_index_by_head_site(heads, sites, file_id)?;
-        let mut info_out = Vec::with_capacity(duts.len());
-        // Cached dut info contains all DUTs in a file
-        // and is sorted by DutIndex.
-        //
-        // `duts` is sorted subset array of complete DutIndex in a file.
-        //
-        // So it is safe to index cache info directly using `duts`.
-        for dut in duts {
-            let pos = dut.saturating_sub(1) as usize;
-            let row = &rows[pos];
-            info_out.push((
-                row.dut_index as i64,
-                row.part_id.clone(),
-                row.part_text.clone(),
-                format!("Head {} - Site {}", row.head, row.site),
-                format_dut_flag(row.superseded, row.flag),
-            ));
+        let mut info_out = Vec::new();
+        if all_sites {
+            let rows = stmt.query_map(rusqlite::params![file_id, heads_json], map_row)?;
+            for row in rows {
+                info_out.push(row?);
+            }
+        } else {
+            let rows =
+                stmt.query_map(rusqlite::params![file_id, heads_json, sites_json], map_row)?;
+            for row in rows {
+                info_out.push(row?);
+            }
         }
         Ok(info_out)
     }
@@ -1176,6 +1150,9 @@ impl DataFetcher {
             FETCH_SELECT_DUT_SUMMARY
         );
         let mut stmt = self.conn.prepare_cached(&sql)?;
+        // The cells below are read by position; keep this in sync with
+        // FETCH_SELECT_DUT_SUMMARY if its column list ever changes.
+        debug_assert_eq!(stmt.column_count(), 12);
         let rows = stmt.query_map([fid], |row| {
             Ok(DutSummaryRow {
                 dut_index: row.get(0)?,
@@ -1285,21 +1262,6 @@ impl DataFetcher {
         Ok(vec![pass, failed, unknown, superseded])
     }
 
-    fn in_clause_placeholders(count: usize) -> String {
-        if count == 0 {
-            String::new()
-        } else {
-            let mut s = String::with_capacity(count * 2);
-            for i in 0..count {
-                if i > 0 {
-                    s.push(',');
-                }
-                s.push('?');
-            }
-            s
-        }
-    }
-
     /// `getDutIndexDictFromHeadSite()` rows — (Fid, DUTIndex) for non-empty
     /// head/site selections.
     ///
@@ -1357,16 +1319,14 @@ impl DataFetcher {
             if bins.is_empty() {
                 continue;
             }
-            let bin_col = if *is_hbin { "HBIN" } else { "SBIN" };
-            let sql = format!(
-                "SELECT Fid, DUTIndex FROM Dut_Info WHERE {} IN ({}) AND Fid=?",
-                bin_col,
-                Self::in_clause_placeholders(bins.len())
-            );
-            let mut params: Vec<i64> = bins.clone();
-            params.push(*fid);
-            let mut stmt = self.conn.prepare_cached(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let sql = if *is_hbin {
+                FETCH_SELECT_DUT_INDEX_BY_HBIN
+            } else {
+                FETCH_SELECT_DUT_INDEX_BY_SBIN
+            };
+            let bins_json = json_int_array(bins.iter().copied())?;
+            let mut stmt = self.conn.prepare_cached(sql)?;
+            let rows = stmt.query_map(rusqlite::params![bins_json, fid], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
             })?;
             for row in rows {
@@ -1546,27 +1506,29 @@ impl DataFetcher {
         if sites.is_empty() {
             return Ok(Vec::new());
         }
-        let mut site_condition = String::new();
-        let mut params = vec![wafer_index, fid];
-        if sites.contains(&-1) {
-            site_condition.push_str(" AND SITE_NUM >= 0");
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, i64, i64)> {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        };
+        let rows = if sites.contains(&-1) {
+            let mut stmt = self
+                .conn
+                .prepare_cached(FETCH_SELECT_WAFER_COORDS_ALL_SITES)?;
+            let rows = stmt
+                .query_map(rusqlite::params![wafer_index, fid], map_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
         } else {
-            site_condition.push_str(" AND SITE_NUM IN (");
-            site_condition.push_str(&Self::in_clause_placeholders(sites.len()));
-            site_condition.push(')');
-            params.extend(sites.iter().map(|&s| s as u64));
-        }
-        let sql = FETCH_SELECT_WAFER_COORDS.replace("{site_condition}", &site_condition);
-        let mut stmt = self.conn.prepare_cached(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
+            let mut stmt = self.conn.prepare_cached(FETCH_SELECT_WAFER_COORDS_SITES)?;
+            let rows = stmt
+                .query_map(rusqlite::params![wafer_index, fid, sites_json], map_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
         Ok(rows)
     }
 
@@ -1580,28 +1542,28 @@ impl DataFetcher {
         if sites.is_empty() {
             return Ok(Vec::new());
         }
-        let mut site_condition = String::new();
-        let mut params: Vec<i32> = Vec::new();
-        if sites.contains(&-1) {
-            site_condition.push_str(" AND SITE_NUM >= 0");
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, i64, i64, i64)> {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        };
+        let rows = if sites.contains(&-1) {
+            let mut stmt = self
+                .conn
+                .prepare_cached(FETCH_SELECT_STACKED_WAFER_ALL_SITES)?;
+            let rows = stmt.query_map([], map_row)?.collect::<Result<Vec<_>, _>>()?;
+            rows
         } else {
-            site_condition.push_str(" AND SITE_NUM IN (");
-            site_condition.push_str(&Self::in_clause_placeholders(sites.len()));
-            site_condition.push(')');
-            params.extend_from_slice(sites);
-        }
-        let sql = FETCH_SELECT_STACKED_WAFER.replace("{site_condition}", &site_condition);
-        let mut stmt = self.conn.prepare_cached(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
+            let mut stmt = self.conn.prepare_cached(FETCH_SELECT_STACKED_WAFER_SITES)?;
+            let rows = stmt
+                .query_map(rusqlite::params![sites_json], map_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
         Ok(rows)
     }
 
@@ -1664,4 +1626,11 @@ fn format_dut_flag(superseded: bool, flag: u8) -> String {
         }
     };
     format!("{} - 0x{:02X}", state, flag)
+}
+
+/// Serialize integers as a JSON array so a variable-length selection can be
+/// bound as one parameter and read back with `json_each(?)`.
+fn json_int_array<I: IntoIterator<Item = i64>>(values: I) -> Result<String, StdfHelperError> {
+    serde_json::to_string(&values.into_iter().collect::<Vec<i64>>())
+        .map_err(|e| StdfHelperError { msg: e.to_string() })
 }
