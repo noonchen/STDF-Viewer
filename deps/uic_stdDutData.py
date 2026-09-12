@@ -92,9 +92,13 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.setDutIndexMap(content["dut2ind"])
         self.tmodel.setDutInfoMap(content["dutInfo"])
         self.tmodel.setTestLists(content["TestLists"])
-        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Test Head - Site"), 
-                                    self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), 
-                                    self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
+        # keep in sync with `getFullDUTInfoFromDutArray`:
+        # (File ID, Part ID, Part Text, Test Head - Site, Tests Executed, Test Time,
+        #  Hardware Bin, Software Bin, Wafer ID, (X, Y), DUT Flag)
+        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Part Text"), 
+                                    self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
+                                    self.tr("Hardware Bin"), self.tr("Software Bin"), 
+                                    self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
         self.tmodel.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel.setVHeaderExt(content["VHeader"])
         self.tmodel.setFont(self.textFont)

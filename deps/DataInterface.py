@@ -438,7 +438,7 @@ class DataInterface:
                 dut2ind[fid] = dict(zip(dutIndexDict[fid], 
                                         range(len(dutIndexDict[fid]))
                                         ))
-                # add dict of dut index -> (part id, head site, dut flag)
+                # add dict of dut index -> (part id, part text, head site, dut flag)
                 dutInfo[fid] = self.DatabaseFetcher.getPartialDUTInfoOnCondition(selectHeads, 
                                                                                  selectSites, 
                                                                                  fid)

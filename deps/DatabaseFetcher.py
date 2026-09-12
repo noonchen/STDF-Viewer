@@ -571,7 +571,7 @@ class DatabaseFetcher:
                     "flagList": np.array(flagList, dtype=np.uint8)}
         
         elif recHeader == REC.MPR:
-            for dutIndex, rslts_hex, stats_hex, flag in self.cursor.execute(f'''
+            for dutIndex, rslts_raw, stats_raw, flag in self.cursor.execute(f'''
                                                             SELECT
                                                                 DUTIndex, RTN_RSLT, RTN_STAT, TEST_FLAG
                                                             FROM
@@ -580,13 +580,17 @@ class DatabaseFetcher:
                                                             ORDER By DUTIndex
                                                             '''):
                 dutList.append(dutIndex)
-                dataList.append(np.frombuffer(bytearray.fromhex(rslts_hex), dtype=np.float32))
-                stateList.append(np.frombuffer(bytearray.fromhex(stats_hex), dtype=np.uint8))
+                dataList.append(np.frombuffer(rslts_raw, dtype=np.float32))
+                stateList.append(np.frombuffer(stats_raw, dtype=np.uint8))
                 flagList.append(flag)
+            # MPR data is always f32; an empty result must not fall back to
+            # np.array([])'s default f64.
+            dataArr = np.array(dataList).T if dataList else np.array([], dtype=np.float32)
+            stateArr = np.array(stateList).T if stateList else np.array([], dtype=np.float32)
             return {"dutList": np.array(dutList, dtype=np.uint64), 
                     # after transpose, row: pmr, col: dutIndex
-                    "dataList": np.array(dataList).T, 
-                    "stateList": np.array(stateList).T,
+                    "dataList": dataArr, 
+                    "stateList": stateArr,
                     "flagList": np.array(flagList, dtype=np.uint8)}
         
         else:
@@ -679,10 +683,11 @@ class DatabaseFetcher:
                 dataList = np.full( (dutsCount, mprRsltCnt), fill_value=np.nan, dtype=np.float32)
                 stateList = np.full( (dutsCount, mprRsltCnt), fill_value=0xF, dtype=np.uint8)
             else:
-                dataList = np.array([])
-                stateList = np.array([])
+                # no result columns: MPR data is still f32, not f64
+                dataList = np.array([], dtype=np.float32)
+                stateList = np.array([], dtype=np.float32)
                 
-            for dutIndex, rslts_hex, stats_hex, flag in self.cursor.execute(f'''
+            for dutIndex, rslts_raw, stats_raw, flag in self.cursor.execute(f'''
                                                             SELECT
                                                                 DUTIndex, RTN_RSLT, RTN_STAT, TEST_FLAG
                                                             FROM
@@ -695,8 +700,8 @@ class DatabaseFetcher:
                 arrayInd = dutMap[dutIndex]
                 flagList[arrayInd] = flag
                 if mprRsltCnt > 0:
-                    dataList[arrayInd] = np.frombuffer(bytearray.fromhex(rslts_hex), dtype=np.float32)
-                    stateList[arrayInd] = np.frombuffer(bytearray.fromhex(stats_hex), dtype=np.uint8)
+                    dataList[arrayInd] = np.frombuffer(rslts_raw, dtype=np.float32)
+                    stateList[arrayInd] = np.frombuffer(stats_raw, dtype=np.uint8)
             return {"dutList": dutList, 
                     # after transpose, row: pmr, col: dutIndex
                     "dataList": dataList.T, 
@@ -990,7 +995,7 @@ class DatabaseFetcher:
     
     def getPartialDUTInfoOnCondition(self, heads: list[int], sites: list[int], fileId: int) -> dict:
         '''
-        return a dict of dutIndex -> (part id, head-site, part text, dut flag)
+        return a dict of dutIndex -> (part id, part text, head-site, dut flag)
         '''
         if self.cursor is None: raise RuntimeError("No database is connected")
         
@@ -1003,8 +1008,8 @@ class DatabaseFetcher:
         sql = f'''SELECT
                     DUTIndex,
                     PartID AS "Part ID",
-                    'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
                     PartText AS "Part Text",
+                    'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
                     printf("%s - 0x%02X", CASE 
                             WHEN Supersede=1 THEN 'Superseded' 
                             WHEN Flag & 24 = 0 THEN 'Pass' 
@@ -1015,8 +1020,8 @@ class DatabaseFetcher:
                 ORDER By DUTIndex'''
         
         info = {}
-        for dutIndex, partId, hsStr, partText, flagStr in self.cursor.execute(sql):
-            info[dutIndex] = (partId, hsStr, partText, flagStr)
+        for dutIndex, partId, partText, hsStr, flagStr in self.cursor.execute(sql):
+            info[dutIndex] = (partId, partText, hsStr, flagStr)
             
         return info
 
