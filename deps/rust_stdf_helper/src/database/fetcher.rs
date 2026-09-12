@@ -29,6 +29,19 @@ pub type SiteNum = u8;
 pub type FileId = u64;
 pub type TestNum = u32;
 
+/// One `getTestFailCnt()` row: `(TEST_NUM, TEST_NAME, per-file FailCount)`.
+pub type TestFailCntRow = (i64, String, Vec<Option<i64>>);
+/// One `getBinInfo()` row: `(BIN_NUM, BIN_NAME, BIN_PF)`.
+pub type BinInfoRow = (i64, Option<String>, Option<String>);
+/// `(max X, min X, max Y, min Y)`; a value is None when no DUT matches.
+pub type WaferBounds = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+/// One `getPinNames()` row:
+/// `(PMR_INDX, LOG_NAM, PHY_NAM, HEAD_NUM, SITE_NUM, CHAN_NAM)`.
+pub type PinNameRow = (i64, String, String, i64, i64, String);
+/// One `getPartialDUTInfoOnCondition()` row:
+/// `(DUTIndex, PartID, PartText, "Head h - Site s", "State - 0xFL")`.
+pub type PartialDutInfo = (i64, Option<String>, Option<String>, String, String);
+
 /// Represents the cached information for a single test.
 #[derive(Debug, Clone)]
 pub struct TestInfo {
@@ -656,11 +669,11 @@ impl DataFetcher {
         let mut flags = Array1::from_elem(dut_count, -1i16);
         let mut data = match &entry.data {
             TestData::Ptr(_) => TestData::Ptr(Array1::from_elem(dut_count, f32::NAN)),
-            TestData::Mpr { values, .. } => {
-                let rslt_cnt = values.nrows();
+            TestData::Mpr { values, states } => {
+                // result and state counts are independent.
                 TestData::Mpr {
-                    values: Array2::from_elem((rslt_cnt, dut_count), f32::NAN),
-                    states: Array2::from_elem((rslt_cnt, dut_count), 0xFu8),
+                    values: Array2::from_elem((values.nrows(), dut_count), f32::NAN),
+                    states: Array2::from_elem((states.nrows(), dut_count), 0xFu8),
                 }
             }
             TestData::FlagsOnly => TestData::FlagsOnly,
@@ -859,7 +872,7 @@ impl DataFetcher {
         heads: &[i32],
         sites: &[i32],
         file_id: FileId,
-    ) -> Result<Vec<(i64, Option<String>, Option<String>, String, String)>, StdfHelperError> {
+    ) -> Result<Vec<PartialDutInfo>, StdfHelperError> {
         if heads.is_empty() || sites.is_empty() {
             return Ok(Vec::new());
         }
@@ -1007,9 +1020,7 @@ impl DataFetcher {
     /// `getTestFailCnt()` rows — keyed by (test_num, test_name), per-file
     /// `FailCount` (None when the column is NULL), files without an entry
     /// stay 0.
-    pub fn test_fail_cnt_rows(
-        &self,
-    ) -> Result<Vec<(i64, String, Vec<Option<i64>>)>, StdfHelperError> {
+    pub fn test_fail_cnt_rows(&self) -> Result<Vec<TestFailCntRow>, StdfHelperError> {
         let n = self.file_paths.len();
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_TEST_FAIL_CNT)?;
         let rows = stmt.query_map([], |row| {
@@ -1051,10 +1062,7 @@ impl DataFetcher {
 
     /// `getBinInfo()` rows — `(BIN_NUM, BIN_NAME, BIN_PF)` ordered by
     /// `BIN_NUM` for the requested bin type ('H' or 'S').
-    pub fn bin_info_rows(
-        &self,
-        is_hbin: bool,
-    ) -> Result<Vec<(i64, Option<String>, Option<String>)>, StdfHelperError> {
+    pub fn bin_info_rows(&self, is_hbin: bool) -> Result<Vec<BinInfoRow>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_BIN_INFO)?;
         let rows = stmt
             .query_map([if is_hbin { "H" } else { "S" }], |row| {
@@ -1263,20 +1271,18 @@ impl DataFetcher {
             extra.push_str(" AND Fid=?");
             params.push(fid);
         }
-        let run = |sql: &str| -> Result<i64, StdfHelperError> {
-            let sql = sql.replace("{extra}", &extra);
-            Ok(self
-                .conn
+        let sql = FETCH_COUNT_ON_COND.replace("{extra}", &extra);
+        let (pass, failed, unknown, superseded) =
+            self.conn
                 .query_row(&sql, rusqlite::params_from_iter(params.iter()), |r| {
-                    r.get::<_, i64>(0)
-                })?)
-        };
-        Ok(vec![
-            run(FETCH_COUNT_ON_COND_PASS)?,
-            run(FETCH_COUNT_ON_COND_FAIL)?,
-            run(FETCH_COUNT_ON_COND_UNKNOWN)?,
-            run(FETCH_COUNT_ON_COND_SUPERSEDED)?,
-        ])
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, i64>(3)?,
+                    ))
+                })?;
+        Ok(vec![pass, failed, unknown, superseded])
     }
 
     fn in_clause_placeholders(count: usize) -> String {
@@ -1406,11 +1412,7 @@ impl DataFetcher {
 
     /// `getWaferBounds()` — (max X, min X, max Y, min Y); wafer_index == -1
     /// covers the stacked map. Each value may be NULL when no DUT matches.
-    pub fn wafer_bounds(
-        &self,
-        wafer_index: i64,
-        fid: i64,
-    ) -> Result<(Option<i64>, Option<i64>, Option<i64>, Option<i64>), StdfHelperError> {
+    pub fn wafer_bounds(&self, wafer_index: i64, fid: i64) -> Result<WaferBounds, StdfHelperError> {
         if wafer_index == -1 {
             Ok(self
                 .conn
@@ -1471,7 +1473,7 @@ impl DataFetcher {
         test_name: &str,
         is_rtn: bool,
         fid: FileId,
-    ) -> Result<Vec<(i64, String, String, i64, i64, String)>, StdfHelperError> {
+    ) -> Result<Vec<PinNameRow>, StdfHelperError> {
         let pin_type = if is_rtn { "RTN" } else { "PGM" };
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_PIN_NAMES)?;
         let rows = stmt

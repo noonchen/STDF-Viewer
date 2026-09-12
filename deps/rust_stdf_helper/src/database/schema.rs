@@ -693,29 +693,15 @@ pub(crate) mod fetcher_queries {
 
     // Single-count templates for getDUTCountOnConditions(); {extra} carries the
     // optional " AND COL=?" pieces appended by the caller.
-    pub(crate) static FETCH_COUNT_ON_COND_PASS: &str = "SELECT 
-        count(*) 
+    // One row of [Pass, Failed, Unknown, Superseded] counts.
+    pub(crate) static FETCH_COUNT_ON_COND: &str = "SELECT 
+        COALESCE(SUM(Supersede=0 AND Flag & 24=0), 0), 
+        COALESCE(SUM(Supersede=0 AND Flag & 24=8), 0), 
+        COALESCE(SUM(Flag is NULL OR (Supersede=0 AND Flag & 16 = 16)), 0), 
+        COALESCE(SUM(Supersede=1), 0) 
     FROM 
         Dut_Info 
-    WHERE Supersede=0 AND Flag & 24=0{extra}";
-
-    pub(crate) static FETCH_COUNT_ON_COND_FAIL: &str = "SELECT 
-        count(*) 
-    FROM 
-        Dut_Info 
-    WHERE Supersede=0 AND Flag & 24 = 8{extra}";
-
-    pub(crate) static FETCH_COUNT_ON_COND_UNKNOWN: &str = "SELECT 
-        count(*) 
-    FROM 
-        Dut_Info 
-    WHERE Flag is NULL OR (Supersede=0 AND Flag & 16 = 16){extra}";
-
-    pub(crate) static FETCH_COUNT_ON_COND_SUPERSEDED: &str = "SELECT 
-        count(*) 
-    FROM 
-        Dut_Info 
-    WHERE Supersede=1{extra}";
+    WHERE 1=1{extra}";
 
     pub(crate) static FETCH_SELECT_WAFER_BOUNDS_STACKED: &str = "SELECT 
         max(XCOORD), min(XCOORD), max(YCOORD), min(YCOORD) 
