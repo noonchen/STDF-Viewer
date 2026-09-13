@@ -17,6 +17,7 @@ pub mod fetcher;
 pub mod generate_database;
 pub mod get_icon_src;
 pub mod read_mir;
+pub mod session;
 pub mod statistics;
 pub mod stdf_to_xlsx;
 
@@ -56,6 +57,8 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(statistics::empirical_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_ppf, module)?)?;
     module.add_function(wrap_pyfunction!(dut_summary_query, module)?)?;
+    module.add_function(wrap_pyfunction!(session::validate_session, module)?)?;
+    module.add_function(wrap_pyfunction!(session::save_session, module)?)?;
     module.add_class::<fetcher::PyDataFetcher>()?;
 
     Ok(())

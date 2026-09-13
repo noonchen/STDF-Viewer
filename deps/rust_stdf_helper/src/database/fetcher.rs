@@ -13,6 +13,7 @@
 
 use crate::database::operations::TestId;
 use crate::database::schema::fetcher_queries::*;
+use crate::database::schema::{CREATE_INDEX_STATEMENTS, FETCH_INDEX_EXISTS, INDEX_NAMES};
 use crate::generic::error::StdfHelperError;
 use crate::generic::helper::{intersect_sorted, json_int_array, merge_sorted_unique};
 use crate::stdf::record_tracker::TestSubCode;
@@ -21,7 +22,11 @@ use ndarray::{Array1, Array2};
 use rusqlite::Connection;
 use std::{
     collections::{BTreeSet, HashMap},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 
 pub type HeadNum = u8;
@@ -214,11 +219,20 @@ pub struct DataFetcher {
     head_list: Vec<HeadNum>,
     /// LRU cache for test data.
     test_data: TestDataLru,
+    /// Background query-index build; joined by `close()` / drop.
+    index_thread: Option<std::thread::JoinHandle<()>>,
+    index_stop: Arc<AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
 // Connection, per-file caches and test-data access
 // ---------------------------------------------------------------------------
+
+impl Drop for DataFetcher {
+    fn drop(&mut self) {
+        self.stop_index_build();
+    }
+}
 
 impl DataFetcher {
     /// Open a database, set test data cache with default budget.
@@ -228,7 +242,15 @@ impl DataFetcher {
 
     /// Open a database, set test data cache with the specified budget.
     pub fn open_with_budget(path: &str, budget_bytes: usize) -> Result<Self, StdfHelperError> {
+        // WAL is required for the background index build: another SQLite build
+        // in this process (QtSql, sqlite3) cannot see rusqlite's locks, and in
+        // rollback mode its read would roll back the live build's journal.
+        let wal = ensure_wal_mode(path);
         let conn = Connection::open(path)?;
+        // Index building commits in the background; wait out that window
+        // instead of failing a query with SQLITE_BUSY.
+        conn.busy_timeout(Duration::from_secs(5))?;
+        let index_stop = Arc::new(AtomicBool::new(false));
         let mut fetcher = Self {
             conn,
             file_paths: Vec::new(),
@@ -240,14 +262,24 @@ impl DataFetcher {
             site_list: Vec::new(),
             head_list: Vec::new(),
             test_data: TestDataLru::new(budget_bytes),
+            index_thread: None,
+            index_stop: Arc::clone(&index_stop),
         };
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
         fetcher.load_test_info()?;
+        // Build missing query indexes in the background; the caches above are
+        // already loaded, so this never delays the first fetch.
+        if wal {
+            fetcher.index_thread = spawn_index_build(path.to_owned(), index_stop);
+        } else {
+            eprintln!("index build: {path} is not in WAL mode, skipping index build");
+        }
         Ok(fetcher)
     }
 
     pub fn close(&mut self) {
+        self.stop_index_build();
         self.file_paths.clear();
         self.full_dut.clear();
         self.head_site_dutarr_idx.clear();
@@ -257,6 +289,15 @@ impl DataFetcher {
         self.site_list.clear();
         self.head_list.clear();
         self.test_data.clear();
+    }
+
+    /// Ask the background index build to stop after its current statement and
+    /// wait for the thread; leaving partial indexes behind is fine.
+    fn stop_index_build(&mut self) {
+        self.index_stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.index_thread.take() {
+            let _ = handle.join();
+        }
     }
 
     pub fn num_files(&self) -> usize {
@@ -1575,5 +1616,81 @@ impl DataFetcher {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background index build
+// ---------------------------------------------------------------------------
+
+/// Spawn the index build; `None` when the OS refuses a new thread (then the
+/// database simply stays unindexed).
+fn spawn_index_build(path: String, stop: Arc<AtomicBool>) -> Option<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("stdf-db-index".to_owned())
+        .spawn(move || build_indexes(&path, &stop))
+        .ok()
+}
+
+/// Put the database into WAL mode before any other connection opens it, so
+/// query readers can run while indexes are built. Returns whether the file is
+/// in WAL mode afterwards; a read-only file reports `false` and keeps its
+/// unindexed (but fully correct) state.
+fn ensure_wal_mode(path: &str) -> bool {
+    let Ok(conn) = Connection::open(path) else {
+        return false;
+    };
+    let _ = conn.busy_timeout(Duration::from_secs(5));
+    match conn.query_row("PRAGMA journal_mode = WAL", [], |row| {
+        row.get::<_, String>(0)
+    }) {
+        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {
+            let _ = conn.execute_batch("PRAGMA synchronous = NORMAL;");
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Create the missing query indexes with a private connection.
+///
+/// Each statement commits on its own, so the build can stop between indexes and
+/// resumes from the remaining ones on the next open.
+fn build_indexes(path: &str, stop: &AtomicBool) {
+    let conn = match Connection::open(path) {
+        Ok(conn) => conn,
+        Err(e) => {
+            eprintln!("index build: cannot open {path}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = conn.busy_timeout(Duration::from_secs(30)) {
+        eprintln!("index build: busy_timeout failed: {e}");
+    }
+    let mut built_any = false;
+    for (name, ddl) in INDEX_NAMES.iter().zip(CREATE_INDEX_STATEMENTS) {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        match conn.query_row(FETCH_INDEX_EXISTS, [*name], |row| row.get::<_, i64>(0)) {
+            Ok(0) => {}
+            Ok(_) => continue,
+            Err(e) => {
+                eprintln!("index build: cannot read sqlite_master: {e}");
+                return;
+            }
+        }
+        if let Err(e) = conn.execute(ddl, []) {
+            eprintln!("index build: {name} failed: {e}");
+            return;
+        }
+        built_any = true;
+    }
+    if built_any && !stop.load(Ordering::Relaxed) {
+        if let Err(e) = conn.execute_batch("ANALYZE;") {
+            eprintln!("index build: ANALYZE failed: {e}");
+        }
+        // fold the WAL back into the database; best effort, readers may hold it
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     }
 }

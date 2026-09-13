@@ -64,7 +64,6 @@ pub fn generate_database(
     dbpath: String,
     stdf_paths: Vec<Vec<String>>,
     test_id_type: TestIDType,
-    build_db_index: bool,
     progress_signal: Bound<'_, PyAny>,
     stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
@@ -330,7 +329,7 @@ pub fn generate_database(
         }
 
         // finalize database (flushes the writer-side multi-row batches)
-        db_ctx.finalize(build_db_index)?;
+        db_ctx.finalize()?;
         if let Err((_, err)) = conn.close() {
             return Err(StdfHelperError::from(err));
         };
