@@ -330,7 +330,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                            directory=getSetting().gen.recent_dir, 
                                            filter=self.tr("Database (*.db)"))
         if p:
-            isvalid, msg = validateSession(p)
+            isvalid, msg = rust_stdf_helper.validate_session(p)
             if isvalid:
                 self.loadDatabase(p)
             else:
@@ -341,7 +341,12 @@ class MyWindow(QtWidgets.QMainWindow):
     def onSaveSession(self):
         if self.data_interface is not None:
             dbPath = self.data_interface.dbPath
-            dbSize = os.stat(dbPath).st_size / 2**20
+            # the WAL is part of the session while it is open, count it too
+            dbSize = os.stat(dbPath).st_size
+            walPath = dbPath + "-wal"
+            if os.path.exists(walPath):
+                dbSize += os.stat(walPath).st_size
+            dbSize /= 2**20
             # show confirm message if size is > 50M
             if dbSize >= 50:
                 msg = QMessageBox.information(None, self.tr("Notice"), 
@@ -354,7 +359,9 @@ class MyWindow(QtWidgets.QMainWindow):
                                                      filter=self.tr("Database (*.db)"))
             if outPath:
                 def saveSessionTask(pIn: str, pOut: str):
-                    shutil.copy(pIn, pOut)
+                    # SQLite online backup: consistent even while the database
+                    # is open and background indexing is still running
+                    rust_stdf_helper.save_session(pIn, pOut)
                 # tmp is only used for preventing thread being deleted before finished
                 self.tmp = runInQThread(saveSessionTask, 
                                         (dbPath, outPath), 
@@ -465,9 +472,13 @@ class MyWindow(QtWidgets.QMainWindow):
         dumpConfigFile()
         # clean generated database
         dbFolder = os.path.join(sys.rootFolder, "logs")
+        currentName = os.path.basename(currentDB)
         for f in os.listdir(dbFolder):
-            # save current database
-            if f.endswith(".db") and not currentDB.endswith(f):
+            # keep the current database and any sidecar of it
+            if f == currentName or f.startswith(currentName + "-"):
+                continue
+            # an interrupted run can leave -journal/-wal/-shm behind, collect them too
+            if f.endswith((".db", ".db-journal", ".db-wal", ".db-shm")):
                 try:
                     os.remove(os.path.join(dbFolder, f))
                 except OSError:
@@ -1285,6 +1296,9 @@ class MyWindow(QtWidgets.QMainWindow):
             self.data_interface.loadDatabase()
             # open new dut summary database
             self.db_dut.setDatabaseName(self.data_interface.dbPath)
+            # the fetcher may build query indexes in the background, so let the
+            # Qt connection wait out a commit instead of failing
+            self.db_dut.setConnectOptions("QSQLITE_BUSY_TIMEOUT=5000")
             if not self.db_dut.open():
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
