@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Sep 13 2026
+# Last Modified: Sun Sep 20 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -17,6 +17,7 @@ import numpy as np
 import tomlkit, tomllib
 from enum import IntEnum
 from random import choice
+from functools import lru_cache
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
@@ -553,11 +554,15 @@ def wafer_direction_name(symbol: str) -> str:
     return direction_symbol.get(symbol, symbol)
 
 
+@lru_cache(maxsize=None)
 def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
     '''
     Parse string from 
         `TestSelection` UI into (test num, pmr index, test name)
         `WaferSelection` UI into (wafer index, file id, wafer name)
+    
+    Pure string parsing, so the result is memoized: the same items are parsed
+    again on every selection change and once per row during a fail-marker run.
     '''
     if isWaferName:
         # split up to 2 elements
