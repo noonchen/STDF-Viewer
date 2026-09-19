@@ -37,10 +37,8 @@ impl PyDataFetcher {
     #[new]
     #[pyo3(signature = (path, cache_budget_mb=None))]
     pub fn new(py: Python<'_>, path: &str, cache_budget_mb: Option<usize>) -> PyResult<Self> {
-        // cache_budget_mb: Tier-2 test-data LRU byte budget in MiB
-        // Defaults to 128 MiB when not given.
-        // DB open scans Dut_Info/Test_Info per file, so release the GIL while
-        // the caches are built.
+        // cache_budget_mb: LRU byte budget for test data cache in MB,
+        // defaults to 128 MB when not given.
         let inner = py.detach(|| match cache_budget_mb {
             Some(mb) => DataFetcher::open_with_budget(path, mb.saturating_mul(1024 * 1024)),
             None => DataFetcher::open(path),
@@ -114,6 +112,8 @@ impl PyDataFetcher {
         }
     }
 
+    /// Test data of one file/test constrained by head and site.
+    /// Empty dict when the file has no such test.
     pub fn get_test_data_from_head_site<'py>(
         &mut self,
         py: Python<'py>,
@@ -122,7 +122,7 @@ impl PyDataFetcher {
         heads: Vec<i64>,
         sites: Vec<i64>,
         file_id: FileId,
-    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+    ) -> PyResult<Bound<'py, PyDict>> {
         let heads_u8: Vec<u8> = heads.iter().map(|&h| h as u8).collect();
         let sites_opt: Vec<Option<u8>> = sites
             .iter()
@@ -142,9 +142,11 @@ impl PyDataFetcher {
         if let Some(data) = fetched {
             fill_test_data_dict(&dict, data, py)?;
         }
-        Ok(Some(dict))
+        Ok(dict)
     }
 
+    /// Test data of requested DUT indices.
+    /// Empty dict when the file has no such test.
     pub fn get_test_data_from_dut_index<'py>(
         &mut self,
         py: Python<'py>,
@@ -152,7 +154,7 @@ impl PyDataFetcher {
         test_name: &str,
         duts: Vec<u64>,
         file_id: FileId,
-    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+    ) -> PyResult<Bound<'py, PyDict>> {
         let fetched = py.detach(|| {
             self.inner
                 .get_test_data_from_dut_index((test_num, test_name), &duts, file_id)
@@ -161,7 +163,7 @@ impl PyDataFetcher {
         if let Some(data) = fetched {
             fill_test_data_dict(&dict, data, py)?;
         }
-        Ok(Some(dict))
+        Ok(dict)
     }
 
     // ----- Metadata / summary queries -----

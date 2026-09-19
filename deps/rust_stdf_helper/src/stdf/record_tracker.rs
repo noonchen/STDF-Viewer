@@ -18,7 +18,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyInt;
 use rust_stdf::*;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::convert::Infallible;
 
 #[repr(u32)]
@@ -155,23 +155,12 @@ impl RecordTracker {
         let site_num = pir.site_num();
         // indicating any DTR or GDR is before PRR
         self.datalog_pos_tracker.insert(file_id, true);
-        let dut_index;
-
-        if let Some(dut_total) = self.dut_total.get_mut(&file_id) {
-            // increment dut_index by 1
-            *dut_total += 1;
-            // update dut index tracker
-            self.dut_index_tracker
-                .insert((file_id, head_num, site_num), *dut_total);
-            dut_index = *dut_total;
-        } else {
-            // no dut_index was saved for file id, set dut_index to default 1
-            dut_index = 1;
-            // insert dut_index=1 to hashmap
-            self.dut_total.insert(file_id, dut_index);
-            self.dut_index_tracker
-                .insert((file_id, head_num, site_num), dut_index);
-        };
+        // update total dut cnt and get 1-based dut index
+        let total = self.dut_total.entry(file_id).or_insert(0);
+        *total += 1;
+        let dut_index = *total;
+        self.dut_index_tracker
+            .insert((file_id, head_num, site_num), dut_index);
         dut_index
     }
 
@@ -379,27 +368,27 @@ impl RecordTracker {
 
     /// return `true` if test_id is already in both limit hashmaps
     #[inline(always)]
-    pub fn default_limits_contains_id(&mut self, test_id: TestId) -> bool {
-        let llimit_exist = self.default_llimit.contains_key(&test_id);
-        let hlimit_exist = self.default_hlimit.contains_key(&test_id);
-
-        llimit_exist && hlimit_exist
+    pub fn default_limits_contains_id(&self, test_id: TestId) -> bool {
+        self.default_llimit.contains_key(&test_id) && self.default_hlimit.contains_key(&test_id)
     }
 
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
     pub fn update_default_limits(&mut self, test_id: TestId, llimit: f32, hlimit: f32) -> bool {
-        let llimit_exist = self.default_llimit.contains_key(&test_id);
-        let hlimit_exist = self.default_hlimit.contains_key(&test_id);
-
-        if !llimit_exist {
-            // update llimit
-            self.default_llimit.insert(test_id, llimit);
-        }
-        if !hlimit_exist {
-            // update hlimit
-            self.default_hlimit.insert(test_id, hlimit);
-        }
+        let llimit_exist = match self.default_llimit.entry(test_id) {
+            Entry::Occupied(_) => true,
+            Entry::Vacant(slot) => {
+                slot.insert(llimit);
+                false
+            }
+        };
+        let hlimit_exist = match self.default_hlimit.entry(test_id) {
+            Entry::Occupied(_) => true,
+            Entry::Vacant(slot) => {
+                slot.insert(hlimit);
+                false
+            }
+        };
         llimit_exist && hlimit_exist
     }
 
@@ -509,12 +498,7 @@ impl RecordTracker {
         }?;
         // update fail cnt hashmap, only when fail cnt is valid
         if fail_cnt != u32::MAX {
-            if let Some(cnt) = self.test_fail_count.get_mut(&test_id) {
-                *cnt += fail_cnt;
-            } else {
-                // if test id is not exist, insert
-                self.test_fail_count.insert(test_id, fail_cnt);
-            }
+            *self.test_fail_count.entry(test_id).or_insert(0) += fail_cnt;
         }
         Ok(())
     }
@@ -554,8 +538,7 @@ impl RecordTracker {
         Ok(())
     }
 
-    /// Append group-EOF summary ops in the same order as the legacy writer:
-    /// HBR, SBR, then TSR fail counts.
+    /// Append summary of HBR, SBR, and TSR fail counts
     pub fn append_summary_ops(&self, ops: &mut Vec<DbOp>) {
         for (&(file_id, bin_num), (bin_nam, bin_pf)) in self.hbin_tracker.iter() {
             ops.push(DbOp::Cold(Box::new(ColdOp::Hbin {

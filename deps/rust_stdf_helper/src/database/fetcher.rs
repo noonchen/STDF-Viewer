@@ -243,10 +243,11 @@ impl DataFetcher {
     /// Open a database, set test data cache with the specified budget.
     pub fn open_with_budget(path: &str, budget_bytes: usize) -> Result<Self, StdfHelperError> {
         // WAL is required for the background index build: another SQLite build
-        // in this process (QtSql, sqlite3) cannot see rusqlite's locks, and in
+        // in this process (QtSql) cannot see rusqlite's locks, and in
         // rollback mode its read would roll back the live build's journal.
         let wal = ensure_wal_mode(path);
-        let conn = Connection::open(path)?;
+        // The fetcher only ever selects.
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         // Index building commits in the background; wait out that window
         // instead of failing a query with SQLITE_BUSY.
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -343,8 +344,23 @@ impl DataFetcher {
                     row.get::<_, Option<u64>>(0)
                 })?
                 .unwrap_or(0);
-            // DUT array starts from 1, and consecutive up to max_dut.
-            self.full_dut.insert(fid, Array1::from_iter(1..=max_dut));
+            // DUT array starts from 1, and consecutive up to max_dut. A corrupt
+            // or hand-edited database can hold a DUTIndex far outside anything a
+            // real file produces, so allocate fallibly: an absurd count becomes an
+            // error here instead of a capacity-overflow panic (or an allocation
+            // abort) later on.
+            let dut_count = usize::try_from(max_dut).unwrap_or(usize::MAX);
+            let mut dut_array: Vec<u64> = Vec::new();
+            dut_array
+                .try_reserve_exact(dut_count)
+                .map_err(|e| StdfHelperError {
+                    msg: format!(
+                        "Cannot allocate the DUT array of file {} ({} DUTs): {}",
+                        fid, max_dut, e
+                    ),
+                })?;
+            dut_array.extend(1..=max_dut);
+            self.full_dut.insert(fid, Array1::from_vec(dut_array));
 
             // Both queries ORDER BY DUTIndex, so the per-key subsequences are
             // already sorted and no explicit sort is needed.
@@ -1283,16 +1299,16 @@ impl DataFetcher {
             params.push(fid);
         }
         let sql = FETCH_COUNT_ON_COND.replace("{extra}", &extra);
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let (pass, failed, unknown, superseded) =
-            self.conn
-                .query_row(&sql, rusqlite::params_from_iter(params.iter()), |r| {
-                    Ok((
-                        r.get::<_, i64>(0)?,
-                        r.get::<_, i64>(1)?,
-                        r.get::<_, i64>(2)?,
-                        r.get::<_, i64>(3)?,
-                    ))
-                })?;
+            stmt.query_row(rusqlite::params_from_iter(params.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?;
         Ok(vec![pass, failed, unknown, superseded])
     }
 

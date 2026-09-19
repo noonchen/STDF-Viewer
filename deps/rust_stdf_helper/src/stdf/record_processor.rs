@@ -963,9 +963,9 @@ fn on_plr_view(
             ops,
             ColdOp::PinInfo {
                 fid: file_id,
-                grp_indx: grp_indx[i],
-                grp_mode: grp_mode[i],
-                grp_radx: grp_radx[i],
+                grp_indx: grp_indx.get(i).copied().unwrap_or(0),
+                grp_mode: grp_mode.get(i).copied().unwrap_or(0),
+                grp_radx: grp_radx.get(i).copied().unwrap_or(0),
                 pgm_char: if pgm_char.get_bytes(i).is_some_and(|v| !v.is_empty()) {
                     Some(pgm_char.get_str(i).unwrap().into_owned())
                 } else {
