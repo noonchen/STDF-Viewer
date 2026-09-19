@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Sun Sep 20 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1244,7 +1244,6 @@ class MyWindow(QtWidgets.QMainWindow):
             wl.append(layout.itemAt(i).widget())
         deleteWidget(wl)
         del wl
-        gc.collect()
     
     
     def clearAllContents(self):

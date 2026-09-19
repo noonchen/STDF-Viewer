@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Tue Sep 08 2026
+# Last Modified: Sun Sep 20 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -14,7 +14,7 @@
 
 import os, itertools
 import numpy as np
-from deps.DatabaseFetcher import DatabaseFetcher
+from deps.DatabaseFetcherRust import DatabaseFetcherRust
 from deps.SharedSrc import *
 
 
@@ -27,7 +27,8 @@ class DataInterface:
     '''
     
     def __init__(self):
-        self.DatabaseFetcher = DatabaseFetcher()
+        # Rust-backed fetcher
+        self.DatabaseFetcher = DatabaseFetcherRust()
         self.file_paths = []
         self.file_names = []
         self.file_sizes = []
@@ -221,8 +222,8 @@ class DataInterface:
         Merge data and calculate statistic, or index PMR result from complete MPR
         
         `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
-        `testInfo`: info of `testTuple`, from DatabaseFetcher `getTestInfo`
-        `testData`: data of `testTuple`, from DatabaseFetcher `getTestDataFromHeadSite` or `getTestDataFromDutIndex`
+        `testInfo`: info of `testTuple`, from the fetcher's `getTestInfo`
+        `testData`: data of `testTuple`, from the fetcher's `getTestDataFromHeadSite` or `getTestDataFromDutIndex`
         `FileID`: index of loaded files
         
         return a dictionary contains:
