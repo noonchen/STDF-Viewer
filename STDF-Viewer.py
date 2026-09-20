@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Sep 20 2026
+# Last Modified: Mon Sep 21 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -462,15 +462,17 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         Clean up before closing app
         '''
-        self.db_dut.close()
+        # Close the Rust fetcher before QtSql.
         if self.data_interface:
             currentDB = self.data_interface.dbPath
             self.data_interface.close()
         else:
             currentDB = "???"
+        self.db_dut.close()
         # save settings to file
         dumpConfigFile()
-        # clean generated database
+        # clean generated databases and keep WAL sidecars,
+        # because deleting WAL might cause SIGBUS
         dbFolder = os.path.join(sys.rootFolder, "logs")
         currentName = os.path.basename(currentDB)
         for f in os.listdir(dbFolder):
@@ -1283,12 +1285,12 @@ class MyWindow(QtWidgets.QMainWindow):
         if newDI is not None:
             # clear old images & tables
             self.clearAllContents()
+            # close old data interface first
+            if self.data_interface is not None:
+                self.data_interface.close()
             # close dut summary database if opened
             if self.db_dut.isOpen():
                 self.db_dut.close()
-            # close old data interface
-            if self.data_interface is not None:
-                self.data_interface.close()
             
             # working on the new object
             self.data_interface = newDI
@@ -1297,7 +1299,8 @@ class MyWindow(QtWidgets.QMainWindow):
             self.db_dut.setDatabaseName(self.data_interface.dbPath)
             # the fetcher may build query indexes in the background, so let the
             # Qt connection wait out a commit instead of failing
-            self.db_dut.setConnectOptions("QSQLITE_BUSY_TIMEOUT=5000")
+            # access db using read-only mode
+            self.db_dut.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000")
             if not self.db_dut.open():
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
