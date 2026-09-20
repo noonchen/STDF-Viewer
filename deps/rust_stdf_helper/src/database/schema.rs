@@ -578,20 +578,20 @@ pub(crate) mod fetcher_queries {
     pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT 
         DUTIndex, 
         Dut_Info.Fid AS \"File ID\", 
-        PartID, 
-        PartText, 
-        'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM, 
-        TestCount, 
-        TestTime || ' ms', 
-        'Bin ' || HBIN, 
-        'Bin ' || SBIN, 
-        wf.WAFER_ID, 
-        '(' || XCOORD || ', ' || YCOORD || ')', 
+        PartID AS \"Part ID\", 
+        PartText AS \"Part Text\", 
+        'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS \"Test Head - Site\", 
+        TestCount AS \"Tests Executed\", 
+        TestTime || ' ms' AS \"Test Time\", 
+        'Bin ' || HBIN AS \"Hardware Bin\", 
+        'Bin ' || SBIN AS \"Software Bin\", 
+        wf.WAFER_ID AS \"Wafer ID\", 
+        '(' || XCOORD || ', ' || YCOORD || ')' AS \"(X, Y)\", 
         printf(\"%s - 0x%02X\", CASE 
                 WHEN Supersede=1 THEN 'Superseded' 
                 WHEN Flag & 24 = 0 THEN 'Pass' 
                 WHEN Flag & 24 = 8 THEN 'Failed' 
-                ELSE 'Unknown' END, Flag) 
+                ELSE 'Unknown' END, Flag) AS \"DUT Flag\" 
     FROM 
         (Dut_Info 
             LEFT JOIN (SELECT Fid, WaferIndex, WAFER_ID FROM Wafer_Info) AS wf 
