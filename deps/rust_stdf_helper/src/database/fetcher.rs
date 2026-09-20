@@ -510,7 +510,9 @@ impl DataFetcher {
                 let rows = stmt.query_map([test_id], |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
-                        row.get::<_, f32>(1)?,
+                        // SQLite use NULL for NaN,
+                        // restore NaN instead of throwing error.
+                        row.get::<_, Option<f32>>(1)?.unwrap_or(f32::NAN),
                         row.get::<_, i64>(2)? as u8,
                     ))
                 })?;
