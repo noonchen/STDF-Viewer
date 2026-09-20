@@ -24,7 +24,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -222,6 +222,8 @@ pub struct DataFetcher {
     /// Background query-index build; joined by `close()` / drop.
     index_thread: Option<std::thread::JoinHandle<()>>,
     index_stop: Arc<AtomicBool>,
+    /// Interrupt handle for aborting the long-time running index build.
+    index_interrupt: Arc<Mutex<Option<rusqlite::InterruptHandle>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +254,8 @@ impl DataFetcher {
         // instead of failing a query with SQLITE_BUSY.
         conn.busy_timeout(Duration::from_secs(5))?;
         let index_stop = Arc::new(AtomicBool::new(false));
+        let index_interrupt: Arc<Mutex<Option<rusqlite::InterruptHandle>>> =
+            Arc::new(Mutex::new(None));
         let mut fetcher = Self {
             conn,
             file_paths: Vec::new(),
@@ -265,6 +269,7 @@ impl DataFetcher {
             test_data: TestDataLru::new(budget_bytes),
             index_thread: None,
             index_stop: Arc::clone(&index_stop),
+            index_interrupt: Arc::clone(&index_interrupt),
         };
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
@@ -272,7 +277,7 @@ impl DataFetcher {
         // Build missing query indexes in the background; the caches above are
         // already loaded, so this never delays the first fetch.
         if wal {
-            fetcher.index_thread = spawn_index_build(path.to_owned(), index_stop);
+            fetcher.index_thread = spawn_index_build(path.to_owned(), index_stop, index_interrupt);
         } else {
             eprintln!("index build: {path} is not in WAL mode, skipping index build");
         }
@@ -296,6 +301,16 @@ impl DataFetcher {
     /// wait for the thread; leaving partial indexes behind is fine.
     fn stop_index_build(&mut self) {
         self.index_stop.store(true, Ordering::Relaxed);
+        // Abort the statement the thread is in the middle of, otherwise the join
+        // below waits for a whole `CREATE INDEX` on a large table (seconds).
+        if let Some(interrupt) = self
+            .index_interrupt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            interrupt.interrupt();
+        }
         if let Some(handle) = self.index_thread.take() {
             let _ = handle.join();
         }
@@ -1641,10 +1656,14 @@ impl DataFetcher {
 
 /// Spawn the index build; `None` when the OS refuses a new thread (then the
 /// database simply stays unindexed).
-fn spawn_index_build(path: String, stop: Arc<AtomicBool>) -> Option<std::thread::JoinHandle<()>> {
+fn spawn_index_build(
+    path: String,
+    stop: Arc<AtomicBool>,
+    interrupt: Arc<Mutex<Option<rusqlite::InterruptHandle>>>,
+) -> Option<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("stdf-db-index".to_owned())
-        .spawn(move || build_indexes(&path, &stop))
+        .spawn(move || build_indexes(&path, &stop, &interrupt))
         .ok()
 }
 
@@ -1672,7 +1691,11 @@ fn ensure_wal_mode(path: &str) -> bool {
 ///
 /// Each statement commits on its own, so the build can stop between indexes and
 /// resumes from the remaining ones on the next open.
-fn build_indexes(path: &str, stop: &AtomicBool) {
+fn build_indexes(
+    path: &str,
+    stop: &AtomicBool,
+    interrupt: &Mutex<Option<rusqlite::InterruptHandle>>,
+) {
     let conn = match Connection::open(path) {
         Ok(conn) => conn,
         Err(e) => {
@@ -1682,6 +1705,10 @@ fn build_indexes(path: &str, stop: &AtomicBool) {
     };
     if let Err(e) = conn.busy_timeout(Duration::from_secs(30)) {
         eprintln!("index build: busy_timeout failed: {e}");
+    }
+    *interrupt.lock().unwrap_or_else(|e| e.into_inner()) = Some(conn.get_interrupt_handle());
+    if stop.load(Ordering::Relaxed) {
+        return;
     }
     let mut built_any = false;
     for (name, ddl) in INDEX_NAMES.iter().zip(CREATE_INDEX_STATEMENTS) {
@@ -1697,16 +1724,24 @@ fn build_indexes(path: &str, stop: &AtomicBool) {
             }
         }
         if let Err(e) = conn.execute(ddl, []) {
-            eprintln!("index build: {name} failed: {e}");
+            if !stop.load(Ordering::Relaxed) {
+                eprintln!("index build: {name} failed: {e}");
+            }
             return;
         }
         built_any = true;
     }
     if built_any && !stop.load(Ordering::Relaxed) {
         if let Err(e) = conn.execute_batch("ANALYZE;") {
-            eprintln!("index build: ANALYZE failed: {e}");
+            // an interrupt from `close()` is an expected stop, not a failure
+            if !stop.load(Ordering::Relaxed) {
+                eprintln!("index build: ANALYZE failed: {e}");
+            }
+            return;
         }
-        // fold the WAL back into the database; best effort, readers may hold it
-        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        // Fold the WAL back into the database.
+        // Set TRUNCATE may cause a SIGBUS, due to another SQLite build (QtSql)
+        // can map the WAL index.
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
     }
 }

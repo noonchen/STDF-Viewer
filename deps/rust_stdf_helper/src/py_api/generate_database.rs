@@ -207,8 +207,8 @@ pub fn generate_database(
                         / num_files as f32;
                     let progress_x100 = progress_x100 as u16;
                     worker_progress.store(progress_x100, Ordering::Relaxed);
-                    // wake the progress thread every 1% instead of every record
-                    if progress_x100 >= last_progress_x100 + 100 {
+                    // wake the progress thread every 5% instead of every record
+                    if progress_x100 >= last_progress_x100 + 500 {
                         last_progress_x100 = progress_x100;
                         let _ = worker_pg_wake.try_send(());
                     }
