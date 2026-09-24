@@ -50,6 +50,8 @@ def prepareHistoData(dutList: np.ndarray,
     normalize = settings.histo.norm_histobars
     horizontalBar = not settings.gen.vert_bar
     
+    # cast to float64 so bin width stays > float32 ULP, avoid ValueError from np.histogram()
+    dataList = np.asarray(dataList, dtype=np.float64)
     hist, edges = np.histogram(dataList, bins=binCount)
     bin_width = edges[1]-edges[0]
     # get left edges
