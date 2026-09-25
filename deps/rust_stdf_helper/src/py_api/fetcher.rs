@@ -54,6 +54,12 @@ impl PyDataFetcher {
         Ok(self.inner.num_files())
     }
 
+    /// `(state, build duration ms)` of the background index build.
+    /// states are `INDEX_INIT`/`INDEX_DONE`/`INDEX_NONE`.
+    pub fn index_build_state(&self) -> PyResult<(u8, u64)> {
+        Ok(self.inner.index_build_state())
+    }
+
     pub fn get_file_paths(&self) -> PyResult<Vec<Vec<String>>> {
         Ok(self.inner.file_paths())
     }
