@@ -80,6 +80,28 @@ impl TestSubCode {
     }
 }
 
+/// L1 cache entry for the hot `(file_id, test_num, test_name) -> TestId` lookup.
+struct TestCacheEntry {
+    file_id: usize,
+    test_num: u32,
+    name_hash: u64,
+    name: String,
+    test_id: TestId,
+}
+
+/// Slots in the direct-mapped test cache; must be a power of two.
+const TEST_CACHE_SIZE: usize = 1024;
+
+#[inline(always)]
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 pub struct RecordTracker {
     // determines how the unique test id is constructed
     id_type: TestIDType,
@@ -90,22 +112,26 @@ pub struct RecordTracker {
     // string and only allocate on the vacant-entry path.
     id_map: HashMap<(usize, u32), HashMap<String, TestId>>,
 
+    // hot-path L1 cache for `id_map`: index = test_num & (TEST_CACHE_SIZE - 1)
+    test_cache: Vec<Option<TestCacheEntry>>,
+
     // number of unique tests seen by this tracker; local component of TestId
     test_id_counter: usize,
 
-    // unique test id -> result scale
-    scale_map: HashMap<TestId, i32>,
+    // local test id -> result scale (None = not seen yet)
+    scale_vals: Vec<Option<i32>>,
 
-    // unique test id -> low limit in 1st PTR
-    default_llimit: HashMap<TestId, f32>,
-    // unique test id -> high limit in 1st PTR
-    default_hlimit: HashMap<TestId, f32>,
+    // local test id -> low/high limit in 1st PTR (None = not seen yet)
+    default_llimit: Vec<Option<f32>>,
+    default_hlimit: Vec<Option<f32>>,
 
     // unique test id -> fail count
     test_fail_count: HashMap<TestId, u32>,
 
     // file id, head, site -> dut index
     dut_index_tracker: HashMap<(usize, u8, u8), u64>,
+    // one-entry cache for `dut_index_tracker` (records of a site are contiguous)
+    dut_last: Option<(usize, u8, u8, u64)>,
 
     // file id, head -> wafer index
     wafer_index_tracker: HashMap<(usize, u8), u64>,
@@ -133,12 +159,14 @@ impl RecordTracker {
         RecordTracker {
             id_type,
             id_map: HashMap::with_capacity(1024),
+            test_cache: std::iter::repeat_with(|| None).take(TEST_CACHE_SIZE).collect(),
             test_id_counter: 0,
-            scale_map: HashMap::with_capacity(1024),
-            default_llimit: HashMap::with_capacity(1024),
-            default_hlimit: HashMap::with_capacity(1024),
+            scale_vals: Vec::with_capacity(1024),
+            default_llimit: Vec::with_capacity(1024),
+            default_hlimit: Vec::with_capacity(1024),
             test_fail_count: HashMap::with_capacity(1024),
             dut_index_tracker: HashMap::with_capacity(128),
+            dut_last: None,
             wafer_index_tracker: HashMap::with_capacity(128),
             hbin_tracker: HashMap::with_capacity(128),
             sbin_tracker: HashMap::with_capacity(1024),
@@ -159,8 +187,8 @@ impl RecordTracker {
         let total = self.dut_total.entry(file_id).or_insert(0);
         *total += 1;
         let dut_index = *total;
-        self.dut_index_tracker
-            .insert((file_id, head_num, site_num), dut_index);
+        self.dut_index_tracker.insert((file_id, head_num, site_num), dut_index);
+        self.dut_last = Some((file_id, head_num, site_num, dut_index));
         dut_index
     }
 
@@ -210,11 +238,7 @@ impl RecordTracker {
                 (String::new(), sbin_type)
             });
         // get dut_index
-        let dut_index = match self.dut_index_tracker.get(&(file_id, head_num, site_num)) {
-            Some(stored_ind) => Ok(*stored_ind),
-            // if dut_index is None, returns Err
-            None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: PRR Head[{}] Site[{}] showed up before PIR", file_id, head_num, site_num) }),
-        }?;
+        let dut_index = self.get_dut_index(file_id, head_num, site_num, 0)?;
         // get wafer_index if WIR is detected
         let wafer_index = self.wafer_index_tracker.get(&(file_id, head_num)).copied();
         Ok((dut_index, wafer_index))
@@ -293,14 +317,18 @@ impl RecordTracker {
     /// return (exist, scale) for [PTR], [MPR]
     #[inline(always)]
     pub fn update_scale(&mut self, test_id: TestId, scale: &Option<i8>) -> (bool, i32) {
-        match self.scale_map.get(&test_id) {
-            Some(s) => (true, *s),
+        let local = (test_id & 0xFFFF_FFFF) as usize;
+        if local >= self.scale_vals.len() {
+            self.scale_vals.resize(local + 1, None);
+        }
+        match self.scale_vals[local] {
+            Some(s) => (true, s),
             None => {
-                // new test_id, insert into map
+                // new test_id, insert into vec
                 // if scale is None, use 0 instead, for
                 // it have no effect on the result
                 let s = scale.unwrap_or(0) as i32;
-                self.scale_map.insert(test_id, s);
+                self.scale_vals[local] = Some(s);
                 (false, s)
             }
         }
@@ -320,13 +348,8 @@ impl RecordTracker {
         test_txt: Option<&str>,
     ) -> Result<(u64, TestId), StdfHelperError> {
         // get dut_index
-        let dut_index = match self.dut_index_tracker.get( &(file_id, head_num, site_num) ) {
-            Some(stored_ind) => Ok(*stored_ind),
-            // if dut_index is None, returns Err
-            None => Err(StdfHelperError { msg: format!("STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR", file_id, test_num, head_num, site_num) }),
-        }?;
+        let dut_index = self.get_dut_index(file_id, head_num, site_num, test_num)?;
 
-        let names = self.id_map.entry((file_id, test_num)).or_default();
         let test_id = match self.id_type {
             TestIDType::TestNumberAndName => {
                 let test_txt = test_txt.ok_or_else(|| StdfHelperError {
@@ -335,30 +358,80 @@ impl RecordTracker {
                         test_num, file_id
                     ),
                 })?;
-                match names.get(test_txt) {
-                    Some(id) => *id,
-                    None => {
-                        let local_id = self.test_id_counter;
-                        self.test_id_counter += 1;
-                        let unique_id = make_test_id(file_id, local_id)?;
-                        names.insert(test_txt.to_owned(), unique_id);
-                        unique_id
-                    }
-                }
+                self.get_test_id(file_id, test_num, test_txt)?
             }
             // Test Name is not used, use empty string for placeholder
-            TestIDType::TestNumberOnly => match names.get("") {
-                Some(id) => *id,
-                None => {
-                    let local_id = self.test_id_counter;
-                    self.test_id_counter += 1;
-                    let unique_id = make_test_id(file_id, local_id)?;
-                    names.insert(String::new(), unique_id);
-                    unique_id
-                }
-            },
+            TestIDType::TestNumberOnly => self.get_test_id(file_id, test_num, "")?,
         };
         Ok((dut_index, test_id))
+    }
+
+    #[inline(always)]
+    fn get_dut_index(
+        &mut self,
+        file_id: usize,
+        head_num: u8,
+        site_num: u8,
+        test_num: u32,
+    ) -> Result<u64, StdfHelperError> {
+        if let Some((f, h, s, idx)) = self.dut_last {
+            if f == file_id && h == head_num && s == site_num {
+                return Ok(idx);
+            }
+        }
+        match self.dut_index_tracker.get(&(file_id, head_num, site_num)) {
+            Some(stored_ind) => {
+                let idx = *stored_ind;
+                self.dut_last = Some((file_id, head_num, site_num, idx));
+                Ok(idx)
+            }
+            None => Err(StdfHelperError {
+                msg: format!(
+                    "STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR",
+                    file_id, test_num, head_num, site_num
+                ),
+            }),
+        }
+    }
+
+    #[inline(always)]
+    fn get_test_id(
+        &mut self,
+        file_id: usize,
+        test_num: u32,
+        test_txt: &str,
+    ) -> Result<TestId, StdfHelperError> {
+        let name_hash = fnv1a(test_txt.as_bytes());
+        let slot = (test_num as usize) & (TEST_CACHE_SIZE - 1);
+        if let Some(e) = &self.test_cache[slot] {
+            if e.file_id == file_id
+                && e.test_num == test_num
+                && e.name_hash == name_hash
+                && e.name == test_txt
+            {
+                return Ok(e.test_id);
+            }
+        }
+
+        let names = self.id_map.entry((file_id, test_num)).or_default();
+        let test_id = match names.get(test_txt) {
+            Some(id) => *id,
+            None => {
+                let local_id = self.test_id_counter;
+                self.test_id_counter += 1;
+                let unique_id = make_test_id(file_id, local_id)?;
+                names.insert(test_txt.to_owned(), unique_id);
+                unique_id
+            }
+        };
+        self.test_cache[slot] = Some(TestCacheEntry {
+            file_id,
+            test_num,
+            name_hash,
+            name: test_txt.to_owned(),
+            test_id,
+        });
+        Ok(test_id)
     }
 
     #[inline(always)]
@@ -368,27 +441,29 @@ impl RecordTracker {
 
     /// return `true` if test_id is already in both limit hashmaps
     #[inline(always)]
-    pub fn default_limits_contains_id(&self, test_id: TestId) -> bool {
-        self.default_llimit.contains_key(&test_id) && self.default_hlimit.contains_key(&test_id)
+    pub fn default_limits_contains_id(&mut self, test_id: TestId) -> bool {
+        let local = (test_id & 0xFFFF_FFFF) as usize;
+        matches!(self.default_llimit.get(local), Some(Some(_)))
+            && matches!(self.default_hlimit.get(local), Some(Some(_)))
     }
 
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
     pub fn update_default_limits(&mut self, test_id: TestId, llimit: f32, hlimit: f32) -> bool {
-        let llimit_exist = match self.default_llimit.entry(test_id) {
-            Entry::Occupied(_) => true,
-            Entry::Vacant(slot) => {
-                slot.insert(llimit);
-                false
-            }
-        };
-        let hlimit_exist = match self.default_hlimit.entry(test_id) {
-            Entry::Occupied(_) => true,
-            Entry::Vacant(slot) => {
-                slot.insert(hlimit);
-                false
-            }
-        };
+        let local = (test_id & 0xFFFF_FFFF) as usize;
+        if local >= self.default_llimit.len() {
+            self.default_llimit.resize(local + 1, None);
+            self.default_hlimit.resize(local + 1, None);
+        }
+        let llimit_exist = self.default_llimit[local].is_some();
+        let hlimit_exist = self.default_hlimit[local].is_some();
+
+        if !llimit_exist {
+            self.default_llimit[local] = Some(llimit);
+        }
+        if !hlimit_exist {
+            self.default_hlimit[local] = Some(hlimit);
+        }
         llimit_exist && hlimit_exist
     }
 
@@ -403,30 +478,35 @@ impl RecordTracker {
         llimit: f32,
         hlimit: f32,
     ) -> Result<(bool, bool), StdfHelperError> {
+        let local = (test_id & 0xFFFF_FFFF) as usize;
         // llimit
-        let llimit_changed = match self.default_llimit.get(&test_id) {
+        let llimit_changed = match self.default_llimit.get(local).copied().flatten() {
             Some(dft_ll) => {
                 // NAN - NAN > EPSILON is `false`
                 // meaning if limit is NAN, it will return false
-                Ok((llimit - *dft_ll).abs() > f32::EPSILON)
+                (llimit - dft_ll).abs() > f32::EPSILON
             }
-            None => Err(StdfHelperError {
-                msg: format!(
-                    "Default low limit of Test ID [{}] cannot be read...this should never happen",
-                    test_id
-                ),
-            }),
-        }?;
+            None => {
+                return Err(StdfHelperError {
+                    msg: format!(
+                        "Default low limit of Test ID [{}] cannot be read...this should never happen",
+                        test_id
+                    ),
+                })
+            }
+        };
         // hlimit
-        let hlimit_changed = match self.default_hlimit.get(&test_id) {
-            Some(dft_hl) => Ok((hlimit - *dft_hl).abs() > f32::EPSILON),
-            None => Err(StdfHelperError {
-                msg: format!(
-                    "Default high limit of Test ID [{}] cannot be read...this should never happen",
-                    test_id
-                ),
-            }),
-        }?;
+        let hlimit_changed = match self.default_hlimit.get(local).copied().flatten() {
+            Some(dft_hl) => (hlimit - dft_hl).abs() > f32::EPSILON,
+            None => {
+                return Err(StdfHelperError {
+                    msg: format!(
+                        "Default high limit of Test ID [{}] cannot be read...this should never happen",
+                        test_id
+                    ),
+                })
+            }
+        };
         Ok((llimit_changed, hlimit_changed))
     }
 
