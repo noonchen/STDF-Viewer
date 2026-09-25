@@ -574,3 +574,14 @@ fn fill_test_data_dict<'py>(
     dict.set_item("flagList", flags.into_pyarray(py))?;
     Ok(())
 }
+
+/// Fold the WAL back into the database.
+///
+/// Ensure no connection to the database before calling,
+/// otherwise it may cause SIGBUS.
+#[pyfunction]
+pub fn checkpoint_truncate(py: Python<'_>, path: &str) -> PyResult<bool> {
+    // let path = path.to_owned();
+    let folded = py.detach(move || crate::database::fetcher::checkpoint_truncate(path))?;
+    Ok(folded)
+}

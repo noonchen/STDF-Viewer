@@ -59,6 +59,7 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(dut_summary_query, module)?)?;
     module.add_function(wrap_pyfunction!(session::validate_session, module)?)?;
     module.add_function(wrap_pyfunction!(session::save_session, module)?)?;
+    module.add_function(wrap_pyfunction!(fetcher::checkpoint_truncate, module)?)?;
     module.add_class::<fetcher::PyDataFetcher>()?;
 
     Ok(())
