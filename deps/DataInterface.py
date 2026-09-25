@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Sep 20 2026
+# Last Modified: Sat Sep 26 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -386,14 +386,13 @@ class DataInterface:
         # it will be used for indexing channel name dict
         # 
         # but channel name is only displayed in statistic table
-        # this function is used only in `getDutSummaryWithTestDataCore`
+        # this function is used only in `dutSummaryWithTestDataGenerator`
         # we can simply skip this logic
         if testInfo["SUB_CODE"] == REC.MPR:
             testInfo["HeadSite"] = set()
         testData = self.DatabaseFetcher.getTestDataFromDutIndex(testID, 
                                                                 selectedDutIndex,
                                                                 FileID)
-        
         return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
@@ -456,9 +455,12 @@ class DataInterface:
                 "dutInfo": dutInfo}
     
     
-    def getDutSummaryWithTestDataCore(self, testTuples: list[tuple], dutIndexDict: dict) -> dict:
+    def dutSummaryWithTestDataGenerator(self, testTuples: list[tuple], dutIndexDict: dict):
         '''
-        Get all required test data for Dut Data Table or Report generator. Differ
+        Generator that yields [0, 1] progress after each test and
+        returns the content dict via StopIteration.
+        
+        It gets all required test data for Dut Data Table or Report generator. Differ
         from `getTestDataTableContent`, `dutInfo` returned by this function is "full version",
         file id and dut of interest are determined by user's selection on the GUI. 
         This function will always return dut info even if `testsTuples` is empty. 
@@ -476,6 +478,8 @@ class DataInterface:
         '''
         data = {}
         testInfo = {}
+        total = max(len(testTuples) * len(dutIndexDict), 1)
+        done = 0
         for testTup, fid in itertools.product(testTuples, sorted(dutIndexDict.keys())):
             dutIndexList = dutIndexDict[fid]
             test_fid = self.getTestDataFromDutIndex(testTup, dutIndexList, fid)
@@ -489,7 +493,9 @@ class DataInterface:
                 test_fid.pop("dutList")
             nest = data.setdefault(testTup, {})
             nest[fid] = test_fid
-        
+            done += 1
+            # yield progress after each test
+            yield done / total
         vheader = []
         dutInfo = {}
         dut2ind = {}
@@ -499,39 +505,42 @@ class DataInterface:
             dut2ind[fid] = dict(zip(dutIndexList, range(len(dutIndexList))))
             # add dict of dut index -> (part id, head site, ..., dut flag)
             dutInfo[fid] = self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexList, fid)
-                
+
+        # return the final content dictionary
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
                 "Data": data, 
                 "TestInfo": testInfo, 
                 "dut2ind": dut2ind,
                 "dutInfo": dutInfo}
-        
-        
-    def getDutDataDisplayerContent(self, selectedDutIndex: list) -> dict:
+
+
+    def dutDataDisplayerContentGenerator(self, selectedDutIndex: list):
         '''
-        Wrapper of `getDutSummaryWithTestDataCore`, converts selectedDutIndex
-        to dutMaskDict
-        
-        return a dict, see `getDutSummaryWithTestDataCore`
+        For Dut Data Table display.
+        return a dict, see `dutSummaryWithTestDataGenerator`
         '''
         testTuples = [parseTestString(t, False) for t in self.completeTestList]
         dutIndexDict = {}
         for fid, dutIndex in selectedDutIndex:
             dutIndexDict.setdefault(fid, []).append(dutIndex)
-        
-        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
+        return self.dutSummaryWithTestDataGenerator(testTuples, dutIndexDict)
     
     
     def getDutSummaryReportContent(self,  testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]) -> dict:
         '''
-        For Report generation
-        Wrapper of `getDutSummaryWithTestDataCore`, converts heads and sites to {fid -> [dutIndex]}
-        
-        return a dict, see `getDutSummaryWithTestDataCore`
+        For Report generation.
+        Converts heads and sites to {fid -> [dutIndex]},
+        return a dict, see `dutSummaryWithTestDataGenerator`
         '''
-        dutIndexDict = self.DatabaseFetcher.getDutIndexDictFromHeadSite(selectHeads, selectSites, selectFiles)        
-        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
+        dutIndexDict = self.DatabaseFetcher.getDutIndexDictFromHeadSite(selectHeads, selectSites, selectFiles)
+        gen = self.dutSummaryWithTestDataGenerator(testTuples, dutIndexDict)
+        try:
+            while True:
+                next(gen)
+        except StopIteration as stop:
+            # drain the generator to get the final content
+            return stop.value
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):

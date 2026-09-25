@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Sep 21 2026
+# Last Modified: Sat Sep 26 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -503,8 +503,10 @@ class MyWindow(QtWidgets.QMainWindow):
         settings = getSetting()
         self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
         self.dutDataDisplayer.setFloatFormat(settings.getFloatFormat())
-        self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
-        self.dutDataDisplayer.showUI()
+        # the dialog opens at once and loads in slices, showing a progress bar
+        self.dutDataDisplayer.showWithLoader(
+            self.data_interface.dutDataDisplayerContentGenerator(selectedDutIndexes)
+        )
         
     
     def onReadDutData_DS(self):
