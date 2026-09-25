@@ -469,10 +469,17 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             currentDB = "???"
         self.db_dut.close()
+        # No connection holds the database now,
+        # fold the WAL back into the db file.
+        if currentDB != "???" and os.path.isfile(currentDB):
+            try:
+                rust_stdf_helper.checkpoint_truncate(currentDB)
+            except Exception:
+                logger.warning("Could not checkpoint the WAL of %s", currentDB, exc_info=True)
         # save settings to file
         dumpConfigFile()
-        # clean generated databases and keep WAL sidecars,
-        # because deleting WAL might cause SIGBUS
+        # clean generated databases; keep the current one and any sidecar left
+        # behind when the checkpoint above failed
         dbFolder = os.path.join(sys.rootFolder, "logs")
         currentName = os.path.basename(currentDB)
         for f in os.listdir(dbFolder):
