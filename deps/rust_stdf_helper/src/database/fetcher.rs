@@ -146,6 +146,34 @@ pub struct DynamicLimitEntry {
 /// Default cache upper limit for test data LRU.
 const DEFAULT_TEST_CACHE_LIMIT: usize = 128 * 1024 * 1024; // 128 MiB
 
+/// Fixed number of DUTs in `FETCH_SELECT_???_DATA_OF_DUTS` queries.
+/// Cached statement for batched DUT lookups, and unused slots
+/// are padded with 0 (safe because dut index is 1-based).
+const DUT_BATCH_SIZE: usize = 128;
+
+/// Batched-lookup SQL per record type, expanded once per process.
+static PTR_DUT_SQL: OnceLock<String> = OnceLock::new();
+static FTR_DUT_SQL: OnceLock<String> = OnceLock::new();
+static MPR_DUT_SQL: OnceLock<String> = OnceLock::new();
+
+/// Expand placeholder `{}` in `FETCH_SELECT_???_DATA_OF_DUTS`.
+fn batched_dut_sql(cell: &'static OnceLock<String>, template: &str) -> &'static str {
+    cell.get_or_init(|| {
+        let placeholders = std::iter::repeat_n("?", DUT_BATCH_SIZE)
+            .collect::<Vec<_>>()
+            .join(",");
+        template.replace("{}", &placeholders)
+    })
+}
+
+/// Positions of `dut_index` in the ascending `req_duts` slice, return
+/// the range of positions where `dut_index` appears.
+fn dut_positions(req_duts: &[u64], dut_index: u64) -> std::ops::Range<usize> {
+    let start = req_duts.partition_point(|&dut| dut < dut_index);
+    let end = req_duts.partition_point(|&dut| dut <= dut_index);
+    start..end
+}
+
 /// LRU Test data cache with byte-budgeted eviction.
 struct TestDataLru {
     cache: LruCache<(TestId, FileId), TestDataCacheEntry>,
@@ -700,69 +728,80 @@ impl DataFetcher {
             Some(info) => info,
             None => return Ok(None),
         };
-        let max_dut_index = self
-            .full_dut
-            .get(&file_id)
-            .map(|a| a.len() as u64)
-            .unwrap_or(0);
-
-        // retrieve cache via test ID and file ID
-        let oversized_entry = self.ensure_test_data(&info, file_id)?;
-        let entry = match &oversized_entry {
-            Some(big_entry) => big_entry,
-            None => {
-                let key = (info.test_id, file_id);
-                self.test_data.get(&key).ok_or_else(|| StdfHelperError {
-                    msg: format!("test-data cache miss for {:?}", key),
-                })?
-            }
-        };
 
         let mut req_duts = duts.to_vec();
         req_duts.sort_unstable();
         let dut_count = req_duts.len();
 
-        // Cannot use ndarray.select() here, because requested DUTs may be out
-        // of range or carry no test data, and the result must keep the same
-        // length as the request.
+        // fill default values for DUTs out of range or without data.
         let mut flags = Array1::from_elem(dut_count, -1i16);
-        let mut data = match &entry.data {
-            TestData::Ptr(_) => TestData::Ptr(Array1::from_elem(dut_count, f32::NAN)),
-            TestData::Mpr { values, states } => {
-                // result and state counts are independent.
-                TestData::Mpr {
-                    values: Array2::from_elem((values.nrows(), dut_count), f32::NAN),
-                    states: Array2::from_elem((states.nrows(), dut_count), 0xFu8),
-                }
-            }
-            TestData::FlagsOnly => TestData::FlagsOnly,
+        let mut data = match info.sub_code {
+            TestSubCode::Ptr => TestData::Ptr(Array1::from_elem(dut_count, f32::NAN)),
+            TestSubCode::Mpr => TestData::Mpr {
+                values: Array2::from_elem(
+                    (info.rslt_pgm_cnt.unwrap_or(0) as usize, dut_count),
+                    f32::NAN,
+                ),
+                states: Array2::from_elem((info.rtn_icnt.unwrap_or(0) as usize, dut_count), 0xFu8),
+            },
+            _ => TestData::FlagsOnly,
         };
 
-        if !entry.valid_test_idx.is_empty() {
-            for (i, &req_dut) in req_duts.iter().enumerate() {
-                if req_dut == 0 || req_dut > max_dut_index {
-                    continue;
-                }
-                let pos = req_dut as usize - 1;
-                match (&mut data, &entry.data) {
-                    (TestData::Ptr(dst), TestData::Ptr(src)) => dst[i] = src[pos],
-                    (
-                        TestData::Mpr {
-                            values: dst_values,
-                            states: dst_states,
-                        },
-                        TestData::Mpr {
-                            values: src_values,
-                            states: src_states,
-                        },
-                    ) => {
-                        dst_values.column_mut(i).assign(&src_values.column(pos));
-                        dst_states.column_mut(i).assign(&src_states.column(pos));
+        // One buffer reused by every batch: [test_id, B x dut index].
+        let mut params = vec![0i64; DUT_BATCH_SIZE + 1];
+        params[0] = info.test_id;
+
+        match (&mut data, info.sub_code) {
+            (TestData::Ptr(values), TestSubCode::Ptr) => {
+                let sql = batched_dut_sql(&PTR_DUT_SQL, FETCH_SELECT_PTR_DATA_OF_DUTS);
+                self.for_each_dut_batch(sql, &req_duts, &mut params, |row| {
+                    let dut_index = row.get::<_, i64>(0)? as u64;
+                    // SQLite uses NULL for NaN, restore it instead of failing.
+                    let result = row.get::<_, Option<f32>>(1)?.unwrap_or(f32::NAN);
+                    let flag = row.get::<_, i64>(2)? as u8;
+                    for i in dut_positions(&req_duts, dut_index) {
+                        values[i] = result;
+                        flags[i] = flag as i16;
                     }
-                    _ => {}
-                }
-                flags[i] = entry.flags[pos];
+                    Ok(())
+                })?;
             }
+            (TestData::FlagsOnly, TestSubCode::Ftr) => {
+                let sql = batched_dut_sql(&FTR_DUT_SQL, FETCH_SELECT_FTR_DATA_OF_DUTS);
+                self.for_each_dut_batch(sql, &req_duts, &mut params, |row| {
+                    let dut_index = row.get::<_, i64>(0)? as u64;
+                    let flag = row.get::<_, i64>(1)? as u8;
+                    for i in dut_positions(&req_duts, dut_index) {
+                        flags[i] = flag as i16;
+                    }
+                    Ok(())
+                })?;
+            }
+            (TestData::Mpr { values, states }, TestSubCode::Mpr) => {
+                let rslt_cnt = values.nrows();
+                let stat_cnt = states.nrows();
+                let sql = batched_dut_sql(&MPR_DUT_SQL, FETCH_SELECT_MPR_DATA_OF_DUTS);
+                self.for_each_dut_batch(sql, &req_duts, &mut params, |row| {
+                    let dut_index = row.get::<_, i64>(0)? as u64;
+                    let rslt = row.get::<_, Vec<u8>>(1)?;
+                    let stat = row.get::<_, Vec<u8>>(2)?;
+                    let flag = row.get::<_, i64>(3)? as u8;
+                    for i in dut_positions(&req_duts, dut_index) {
+                        flags[i] = flag as i16;
+                        // BLOBs carry no alignment, decode little-endian bytes to f32
+                        // via `f32::to_le_bytes` to avoid alignment issue.
+                        for (j, chunk) in rslt.chunks_exact(4).take(rslt_cnt).enumerate() {
+                            values[[j, i]] =
+                                f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        }
+                        for (j, &state) in stat.iter().take(stat_cnt).enumerate() {
+                            states[[j, i]] = state;
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+            _ => {}
         }
 
         Ok(Some(FetchedTestData {
@@ -770,6 +809,36 @@ impl DataFetcher {
             data,
             flags,
         }))
+    }
+
+    /// Run prepared `FETCH_SELECT_???_DATA_OF_DUTS` statement,
+    /// split `req_duts` into batches and call `on_row` per row.
+    fn for_each_dut_batch<F>(
+        &self,
+        sql: &str,
+        req_duts: &[u64],
+        params: &mut [i64],
+        mut on_row: F,
+    ) -> Result<(), StdfHelperError>
+    where
+        F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<()>,
+    {
+        debug_assert_eq!(params.len(), DUT_BATCH_SIZE + 1);
+        let mut stmt = self.conn.prepare_cached(sql)?;
+        for start in (0..req_duts.len()).step_by(DUT_BATCH_SIZE) {
+            let batch = &req_duts[start..req_duts.len().min(start + DUT_BATCH_SIZE)];
+            for (slot, &dut) in params[1..=batch.len()].iter_mut().zip(batch) {
+                *slot = dut as i64;
+            }
+            for slot in params[1 + batch.len()..].iter_mut() {
+                *slot = 0; // padding, never matches (DUT indices are 1-based)
+            }
+            let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+            while let Some(row) = rows.next()? {
+                on_row(row)?;
+            }
+        }
+        Ok(())
     }
 
     // --- Dynamic limits ---

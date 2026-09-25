@@ -474,6 +474,42 @@ pub(crate) mod fetcher_queries {
     ORDER BY 
         DUTIndex";
 
+    /****** Queries used in `get_test_data_from_dut_index`, `{}` is fixed number of DUTs
+     * determined by `DUT_BATCH_SIZE`. ******/
+
+    pub(crate) static FETCH_SELECT_PTR_DATA_OF_DUTS: &str = "SELECT 
+        DUTIndex, 
+        RESULT, 
+        TEST_FLAG 
+    FROM 
+        PTR_Data 
+    WHERE 
+        TEST_ID=? AND DUTIndex IN ({}) 
+    ORDER BY 
+        DUTIndex";
+
+    pub(crate) static FETCH_SELECT_FTR_DATA_OF_DUTS: &str = "SELECT 
+        DUTIndex, 
+        TEST_FLAG 
+    FROM 
+        FTR_Data 
+    WHERE 
+        TEST_ID=? AND DUTIndex IN ({}) 
+    ORDER BY 
+        DUTIndex";
+
+    pub(crate) static FETCH_SELECT_MPR_DATA_OF_DUTS: &str = "SELECT 
+        DUTIndex, 
+        RTN_RSLT, 
+        RTN_STAT, 
+        TEST_FLAG 
+    FROM 
+        MPR_Data 
+    WHERE 
+        TEST_ID=? AND DUTIndex IN ({}) 
+    ORDER BY 
+        DUTIndex";
+
     /****** Metadata / summary queries ******/
 
     pub(crate) static FETCH_SELECT_WAFER_COUNT: &str = "SELECT 
