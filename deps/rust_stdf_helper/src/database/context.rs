@@ -17,8 +17,8 @@ use crate::database::schema::*;
 use crate::StdfHelperError;
 use rusqlite::{Connection, Statement, ToSql};
 
-// number of data rows per multi-row INSERT
-const ROWS_PER_BATCH: usize = 128;
+// 512 rows = 2560 bound params, within 32766 limit
+const ROWS_PER_BATCH: usize = 512;
 
 struct PtrRow {
     dut: u64,
@@ -86,6 +86,12 @@ pub struct DatabaseCtx<'con> {
 
 impl<'con> DatabaseCtx<'con> {
     pub fn new(conn: &'con Connection) -> Result<Self, StdfHelperError> {
+        // Fine tuning pragma for faster db generation
+        conn.execute_batch(
+            "PRAGMA page_size = 16384;
+             PRAGMA cache_size = -65536;
+             PRAGMA temp_store = MEMORY;",
+        )?;
         conn.execute_batch(CREATE_TABLE_SQL)?;
         let insert_file_name_stmt = conn.prepare(INSERT_FILE_NAME)?;
         let update_file_list_stmt = conn.prepare(UPDATE_FILE_LIST)?;
