@@ -60,6 +60,14 @@ class DatabaseFetcherRust:
         self.checkConnection()
         return self._fetcher.num_files()
 
+    def indexBuildState(self) -> tuple:
+        """Background index build state as ``(state, elapsed_ms)``.
+
+        state: 1 init, 2 done, 3 none.
+        """
+        self.checkConnection()
+        return self._fetcher.index_build_state()
+
     def isDutInfoColumnEmpty(self, columnName: str) -> bool:
         """Return True when no Dut_Info row carries a value for ``columnName``.
 

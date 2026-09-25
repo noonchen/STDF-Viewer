@@ -1304,6 +1304,9 @@ class MyWindow(QtWidgets.QMainWindow):
             if not self.db_dut.open():
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
             
+            # report the background index build in the status bar
+            self.startIndexStatusPolling()
+            
             # disable/enable wafer tab
             self.ui.tabControl.setTabEnabled(tab.Wafer, self.data_interface.containsWafer)
     
@@ -1408,6 +1411,31 @@ class MyWindow(QtWidgets.QMainWindow):
             QMessageBox.critical(self, self.tr("Error"), new_msg)
             # sys.exit()
         QApplication.processEvents()
+        
+    
+    def startIndexStatusPolling(self):
+        '''Report the background index build (started when a session opens).'''
+        if not hasattr(self, "indexStatusTimer"):
+            self.indexStatusTimer = QtCore.QTimer(self)
+            self.indexStatusTimer.setInterval(400)
+            self.indexStatusTimer.timeout.connect(self.pollIndexStatus)
+        self.indexStatusTimer.start()
+        
+    
+    def pollIndexStatus(self):
+        if self.data_interface is None or not self.data_interface.dbConnected:
+            self.indexStatusTimer.stop()
+            return
+        state, elapsed_ms = self.data_interface.DatabaseFetcher.indexBuildState()
+        INDEX_DONE = 2
+        INDEX_NONE = 3
+        # report the duration once it is done
+        if state in (INDEX_DONE, INDEX_NONE):
+            self.indexStatusTimer.stop()
+            if state == INDEX_DONE:
+                self.statusBar().showMessage(
+                    self.tr("Database index ready, building for {0} sec").format(
+                        round(elapsed_ms / 1000, 1)), 4000)
         
     
     def eventFilter(self, widget, event: QtCore.QEvent):
