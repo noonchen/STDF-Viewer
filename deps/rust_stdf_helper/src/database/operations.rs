@@ -14,6 +14,7 @@
 //
 
 use crate::database::context::DatabaseCtx;
+use crate::stdf::record_tracker::TestSubCode;
 use crate::StdfHelperError;
 
 /// Test ID represents a unique identifier for a test item in a database.
@@ -45,8 +46,10 @@ pub enum DbOp {
     Mpr {
         dut_index: u64,
         test_id: TestId,
-        rslt_hex: String,
-        stat_hex: String,
+        /// Raw little-endian f32 result bytes (stored as BLOB).
+        rslt: Vec<u8>,
+        /// Raw RTN_STAT bytes (stored as BLOB).
+        stat: Vec<u8>,
         flag: u8,
     },
     Datalog {
@@ -115,7 +118,7 @@ pub enum ColdOp {
         fid: usize,
         test_id: TestId,
         test_num: u32,
-        rec_header: u8,
+        sub_code: TestSubCode,
         test_name: String,
         res_scal: Option<i8>,
         llimit: f32,
@@ -233,10 +236,10 @@ impl DbOp {
             DbOp::Mpr {
                 dut_index,
                 test_id,
-                rslt_hex,
-                stat_hex,
+                rslt,
+                stat,
                 flag,
-            } => db_ctx.insert_mpr_data_batched(dut_index, test_id, rslt_hex, stat_hex, flag),
+            } => db_ctx.insert_mpr_data_batched(dut_index, test_id, rslt, stat, flag),
             DbOp::Datalog {
                 fid,
                 rec_type,
@@ -327,7 +330,7 @@ impl ColdOp {
                 fid,
                 test_id,
                 test_num,
-                rec_header,
+                sub_code,
                 test_name,
                 res_scal,
                 llimit,
@@ -345,7 +348,7 @@ impl ColdOp {
                 fid,
                 test_id,
                 test_num,
-                rec_header,
+                sub_code.code(),
                 test_name,
                 res_scal,
                 llimit,

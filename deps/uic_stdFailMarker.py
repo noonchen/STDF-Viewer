@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Fri Nov 25 2022
+# Last Modified: Sun Sep 20 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -27,7 +27,6 @@
 import time
 # pyqt5
 from PyQt5 import QtCore, QtWidgets, QtGui
-from PyQt5.QtWidgets import QApplication
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets, QtGui
@@ -40,12 +39,25 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 
 
 class FailMarker(QtWidgets.QWidget):
+    # Upper bound of scanning time per event-loop tick,
+    # slicing the scan work keeps the window responsive.
+    BATCH_TIMEOUT_SEC = 0.02
+
     def __init__(self, parent):
         super().__init__()
         self.UI = Ui_loadingUI()
         self.UI.setupUi(self)
         self._parent = parent
         self.translator = QtCore.QTranslator(self)
+
+        self.scanTimer = QtCore.QTimer(self)
+        self.scanTimer.setInterval(0)
+        self.scanTimer.timeout.connect(self.processBatch)
+        self.currentRow = 0
+        self.total = 0
+        self.start_time = 0.0
+        self.failCount = 0
+        self.cpkFailCount = 0
                 
         self.setWindowTitle(self.tr("Searching Failed Items"))
     
@@ -53,51 +65,74 @@ class FailMarker(QtWidgets.QWidget):
         self.UI.progressBar.setFormat("%p%")
         self.UI.progressBar.setValue(0)
         self.stopFlag = False   # init at start
+        self.setWindowModality(QtCore.Qt.ApplicationModal)
         self.show()
-        start_time = time.time()
+        self.start_time = time.time()
         
         self.sim = self._parent.sim_list
         self.total = self.sim.rowCount()
-        failCount = 0
-        cpkFailCount = 0
+        self.failCount = 0
+        self.cpkFailCount = 0
+        self.currentRow = 0
+        self.updateProgressBar(0)
+        self.scanTimer.start()
+    
+    def processBatch(self):
+        '''
+        Colour one time-budgeted slice of the test list, then give the event
+        loop back. Driven by `scanTimer` until the whole list is done.
+        '''
+        if self.stopFlag:
+            self.scanTimer.stop()
+            self.reportResult(aborted=True)
+            return
         
-        for i in range(self.total):
-            if self.stopFlag: 
-                end_time = time.time()
-                self._parent.signals.statusSignal.emit(self.tr("Fail Marker aborted, time elapsed %.2f sec.") % (end_time - start_time), False, False, False)
-                return
-            
-            self.updateProgressBar(int(100 * (i+1) / self.total))
-            QApplication.processEvents()    # force refresh UI to update progress bar
-            
-            qitem = self.sim.item(i)
+        deadline = time.time() + self.BATCH_TIMEOUT_SEC
+        row = self.currentRow
+        while row < self.total and time.time() < deadline:
+            qitem = self.sim.item(row)
             status = self._parent.isTestFail(qitem.text())
             if status == "Fail":
-                failCount += 1
+                self.failCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#CC0000"), QtCore.Qt.BackgroundRole)
             elif status == "cpkFail":
-                cpkFailCount += 1
+                self.cpkFailCount += 1
                 qitem.setData(QtGui.QColor("#FFFFFF"), QtCore.Qt.ForegroundRole)
                 qitem.setData(QtGui.QColor("#FE7B00"), QtCore.Qt.BackgroundRole)
-            
-        end_time = time.time()
+            row += 1
+        self.currentRow = row
+        
+        self.updateProgressBar(int(100 * self.currentRow / self.total) if self.total else 100)
+        if self.currentRow >= self.total:
+            self.scanTimer.stop()
+            self.reportResult()
+    
+    def reportResult(self, aborted: bool = False):
+        '''emit the final status message, and close when the scan completed'''
+        elapsed = time.time() - self.start_time
+        if aborted:
+            self._parent.signals.statusSignal.emit(self.tr("Fail Marker aborted, time elapsed %.2f sec.") % elapsed, False, False, False)
+            return
         msg = ""
-        if failCount == 0 and cpkFailCount == 0:
+        if self.failCount == 0 and self.cpkFailCount == 0:
             msg = self.tr("No failed test item found, ")
         else:
-            if failCount != 0:
-                msg += self.tr("%d failed test items found, ") % failCount
-            if cpkFailCount != 0:
-                msg += self.tr("%d passed test items found with low Cpk, ") % cpkFailCount
-        self._parent.signals.statusSignal.emit(self.tr("%stime elapsed %.2f sec.") % (msg, end_time - start_time), False, False, False)
+            if self.failCount != 0:
+                msg += self.tr("%d failed test items found, ") % self.failCount
+            if self.cpkFailCount != 0:
+                msg += self.tr("%d passed test items found with low Cpk, ") % self.cpkFailCount
+        self._parent.signals.statusSignal.emit(self.tr("%stime elapsed %.2f sec.") % (msg, elapsed), False, False, False)
         self.close()
         
     def closeEvent(self, event):
-        # close by clicking X
-        self.stopFlag = True
+        # close by clicking X: stop the running scan and report the abort
+        if self.scanTimer.isActive():
+            self.stopFlag = True
+            self.scanTimer.stop()
+            self.reportResult(aborted=True)
         event.accept()
-             
+              
     def updateProgressBar(self, num):
         self.UI.progressBar.setValue(num)
       

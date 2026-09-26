@@ -159,7 +159,7 @@ pub fn analyze_stdf(
                         // println!("{}", result_log);
                         // send via qt signal..
                         if is_valid_data_signal || is_valid_stop {
-                            Python::attach(|py| -> PyResult<()> {
+                            match Python::try_attach(|py| -> PyResult<()> {
                                 if is_valid_data_signal {
                                     data_signal
                                         .bind(py)
@@ -177,7 +177,13 @@ pub fn analyze_stdf(
                                         .extract::<bool>()?;
                                 }
                                 Ok(())
-                            })?;
+                            }) {
+                                Some(result) => result?,
+                                None => {
+                                    stop_flag_rust = true;
+                                    break;
+                                }
+                            }
                         }
                         // reset to default
                         result_log.clear();
@@ -452,7 +458,7 @@ pub fn analyze_stdf(
         }
         // println!("{}", result_log);
         // send via qt signal..
-        Python::attach(|py| -> PyResult<()> {
+        if let Some(result) = Python::try_attach(|py| -> PyResult<()> {
             if is_valid_data_signal {
                 data_signal
                     .bind(py)
@@ -464,7 +470,9 @@ pub fn analyze_stdf(
                     .call_method1(intern!(py, "emit"), (100u64,))?;
             }
             Ok(())
-        })?;
+        }) {
+            result?;
+        }
         Ok(())
     })
 }

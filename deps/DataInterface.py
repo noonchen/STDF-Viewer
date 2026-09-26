@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Sat Sep 26 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -14,7 +14,7 @@
 
 import os, itertools
 import numpy as np
-from deps.DatabaseFetcher import DatabaseFetcher
+from deps.DatabaseFetcherRust import DatabaseFetcherRust
 from deps.SharedSrc import *
 
 
@@ -27,7 +27,8 @@ class DataInterface:
     '''
     
     def __init__(self):
-        self.DatabaseFetcher = DatabaseFetcher()
+        # Rust-backed fetcher
+        self.DatabaseFetcher = DatabaseFetcherRust()
         self.file_paths = []
         self.file_names = []
         self.file_sizes = []
@@ -221,8 +222,8 @@ class DataInterface:
         Merge data and calculate statistic, or index PMR result from complete MPR
         
         `testTuple`: contains test number, pin index (valid for MPR) and name, e.g. (1000, 1, "name")
-        `testInfo`: info of `testTuple`, from DatabaseFetcher `getTestInfo`
-        `testData`: data of `testTuple`, from DatabaseFetcher `getTestDataFromHeadSite` or `getTestDataFromDutIndex`
+        `testInfo`: info of `testTuple`, from the fetcher's `getTestInfo`
+        `testData`: data of `testTuple`, from the fetcher's `getTestDataFromHeadSite` or `getTestDataFromDutIndex`
         `FileID`: index of loaded files
         
         return a dictionary contains:
@@ -239,7 +240,7 @@ class DataInterface:
         
         test_num, pmr, test_name = testTuple
         outData.update(testInfo)
-        recHeader = testInfo["recHeader"]
+        recHeader = testInfo["SUB_CODE"]
         # store original for testID lookup
         outData["TEST_NAME_ORIG"] = test_name
         outData["dutList"] = testData["dutList"]
@@ -355,7 +356,7 @@ class DataInterface:
             return {}
         # add (head, site) list to testInfo for MPR
         # it will be used for indexing channel name dict
-        if testInfo["recHeader"] == REC.MPR:
+        if testInfo["SUB_CODE"] == REC.MPR:
             testInfo["HeadSite"] = set(itertools.product(selectHeads, 
                                                          [-1] if -1 in selectSites else selectSites))
         testData = self.DatabaseFetcher.getTestDataFromHeadSite(testID, 
@@ -385,14 +386,13 @@ class DataInterface:
         # it will be used for indexing channel name dict
         # 
         # but channel name is only displayed in statistic table
-        # this function is used only in `getDutSummaryWithTestDataCore`
+        # this function is used only in `dutSummaryWithTestDataGenerator`
         # we can simply skip this logic
-        if testInfo["recHeader"] == REC.MPR:
+        if testInfo["SUB_CODE"] == REC.MPR:
             testInfo["HeadSite"] = set()
         testData = self.DatabaseFetcher.getTestDataFromDutIndex(testID, 
                                                                 selectedDutIndex,
                                                                 FileID)
-        
         return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
@@ -438,7 +438,7 @@ class DataInterface:
                 dut2ind[fid] = dict(zip(dutIndexDict[fid], 
                                         range(len(dutIndexDict[fid]))
                                         ))
-                # add dict of dut index -> (part id, head site, dut flag)
+                # add dict of dut index -> (part id, part text, head site, dut flag)
                 dutInfo[fid] = self.DatabaseFetcher.getPartialDUTInfoOnCondition(selectHeads, 
                                                                                  selectSites, 
                                                                                  fid)
@@ -455,9 +455,12 @@ class DataInterface:
                 "dutInfo": dutInfo}
     
     
-    def getDutSummaryWithTestDataCore(self, testTuples: list[tuple], dutIndexDict: dict) -> dict:
+    def dutSummaryWithTestDataGenerator(self, testTuples: list[tuple], dutIndexDict: dict):
         '''
-        Get all required test data for Dut Data Table or Report generator. Differ
+        Generator that yields [0, 1] progress after each test and
+        returns the content dict via StopIteration.
+        
+        It gets all required test data for Dut Data Table or Report generator. Differ
         from `getTestDataTableContent`, `dutInfo` returned by this function is "full version",
         file id and dut of interest are determined by user's selection on the GUI. 
         This function will always return dut info even if `testsTuples` is empty. 
@@ -475,6 +478,8 @@ class DataInterface:
         '''
         data = {}
         testInfo = {}
+        total = max(len(testTuples) * len(dutIndexDict), 1)
+        done = 0
         for testTup, fid in itertools.product(testTuples, sorted(dutIndexDict.keys())):
             dutIndexList = dutIndexDict[fid]
             test_fid = self.getTestDataFromDutIndex(testTup, dutIndexList, fid)
@@ -488,7 +493,9 @@ class DataInterface:
                 test_fid.pop("dutList")
             nest = data.setdefault(testTup, {})
             nest[fid] = test_fid
-        
+            done += 1
+            # yield progress after each test
+            yield done / total
         vheader = []
         dutInfo = {}
         dut2ind = {}
@@ -498,39 +505,42 @@ class DataInterface:
             dut2ind[fid] = dict(zip(dutIndexList, range(len(dutIndexList))))
             # add dict of dut index -> (part id, head site, ..., dut flag)
             dutInfo[fid] = self.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexList, fid)
-                
+
+        # return the final content dictionary
         return {"VHeader": vheader, 
                 "TestLists": testTuples, 
                 "Data": data, 
                 "TestInfo": testInfo, 
                 "dut2ind": dut2ind,
                 "dutInfo": dutInfo}
-        
-        
-    def getDutDataDisplayerContent(self, selectedDutIndex: list) -> dict:
+
+
+    def dutDataDisplayerContentGenerator(self, selectedDutIndex: list):
         '''
-        Wrapper of `getDutSummaryWithTestDataCore`, converts selectedDutIndex
-        to dutMaskDict
-        
-        return a dict, see `getDutSummaryWithTestDataCore`
+        For Dut Data Table display.
+        return a dict, see `dutSummaryWithTestDataGenerator`
         '''
         testTuples = [parseTestString(t, False) for t in self.completeTestList]
         dutIndexDict = {}
         for fid, dutIndex in selectedDutIndex:
             dutIndexDict.setdefault(fid, []).append(dutIndex)
-        
-        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
+        return self.dutSummaryWithTestDataGenerator(testTuples, dutIndexDict)
     
     
     def getDutSummaryReportContent(self,  testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]) -> dict:
         '''
-        For Report generation
-        Wrapper of `getDutSummaryWithTestDataCore`, converts heads and sites to {fid -> [dutIndex]}
-        
-        return a dict, see `getDutSummaryWithTestDataCore`
+        For Report generation.
+        Converts heads and sites to {fid -> [dutIndex]},
+        return a dict, see `dutSummaryWithTestDataGenerator`
         '''
-        dutIndexDict = self.DatabaseFetcher.getDutIndexDictFromHeadSite(selectHeads, selectSites, selectFiles)        
-        return self.getDutSummaryWithTestDataCore(testTuples, dutIndexDict)
+        dutIndexDict = self.DatabaseFetcher.getDutIndexDictFromHeadSite(selectHeads, selectSites, selectFiles)
+        gen = self.dutSummaryWithTestDataGenerator(testTuples, dutIndexDict)
+        try:
+            while True:
+                next(gen)
+        except StopIteration as stop:
+            # drain the generator to get the final content
+            return stop.value
     
     
     def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):
@@ -591,12 +601,12 @@ class DataInterface:
                         floatFormat % testDataDict["Max"]]
                 # match the elements of hHeader
                 if containsFTR:
-                    row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["recHeader"] == REC.FTR else [""]
+                    row[1:1] = [testDataDict["VECT_NAM"]] if testDataDict["SUB_CODE"] == REC.FTR else [""]
                 if containsMPR:
                     row[1:1] = [str(pmr), 
                                 testDataDict["LOG_NAM"], 
                                 testDataDict["PHY_NAM"], 
-                                testDataDict["CHAN_NAM"]] if testDataDict["recHeader"] == REC.MPR else ["", "", "", ""]
+                                testDataDict["CHAN_NAM"]] if testDataDict["SUB_CODE"] == REC.MPR else ["", "", "", ""]
                     
                 rowList.append(row)
             else:
@@ -770,15 +780,14 @@ class DataInterface:
             nestSiteData["dataList"] = dataOrig[validMask]
             nestSiteData["dutList"] = test_site_fid.pop("dutList")[validMask]
             nestSiteData["flagList"] = test_site_fid.pop("flagList")[validMask]
-            if test_site_fid["recHeader"] == REC.MPR:
+            if test_site_fid["SUB_CODE"] == REC.MPR:
                 nestSiteData["stateList"] = test_site_fid.pop("stateList")[validMask]
-            elif test_site_fid["recHeader"] == REC.PTR:
-                # dynamic limit
+            elif test_site_fid["SUB_CODE"] == REC.PTR:
+                # dynamic limit (defaults are filled by the fetcher itself)
                 dyL, dyH = self.DatabaseFetcher.getDynamicLimits(test_site_fid["TEST_NUM"],
                                                                  test_site_fid["TEST_NAME"],
                                                                  nestSiteData["dutList"],
-                                                                 test_site_fid["LLimit"],
-                                                                 test_site_fid["HLimit"])
+                                                                 fid)
                 nestSiteData["dyLLimit"] = dyL
                 nestSiteData["dyHLimit"] = dyH
             # info that are same for all sites 

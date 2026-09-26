@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Sat Sep 26 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -330,7 +330,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                            directory=getSetting().gen.recent_dir, 
                                            filter=self.tr("Database (*.db)"))
         if p:
-            isvalid, msg = validateSession(p)
+            isvalid, msg = rust_stdf_helper.validate_session(p)
             if isvalid:
                 self.loadDatabase(p)
             else:
@@ -341,7 +341,12 @@ class MyWindow(QtWidgets.QMainWindow):
     def onSaveSession(self):
         if self.data_interface is not None:
             dbPath = self.data_interface.dbPath
-            dbSize = os.stat(dbPath).st_size / 2**20
+            # the WAL is part of the session while it is open, count it too
+            dbSize = os.stat(dbPath).st_size
+            walPath = dbPath + "-wal"
+            if os.path.exists(walPath):
+                dbSize += os.stat(walPath).st_size
+            dbSize /= 2**20
             # show confirm message if size is > 50M
             if dbSize >= 50:
                 msg = QMessageBox.information(None, self.tr("Notice"), 
@@ -354,7 +359,9 @@ class MyWindow(QtWidgets.QMainWindow):
                                                      filter=self.tr("Database (*.db)"))
             if outPath:
                 def saveSessionTask(pIn: str, pOut: str):
-                    shutil.copy(pIn, pOut)
+                    # SQLite online backup: consistent even while the database
+                    # is open and background indexing is still running
+                    rust_stdf_helper.save_session(pIn, pOut)
                 # tmp is only used for preventing thread being deleted before finished
                 self.tmp = runInQThread(saveSessionTask, 
                                         (dbPath, outPath), 
@@ -455,19 +462,32 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         Clean up before closing app
         '''
-        self.db_dut.close()
+        # Close the Rust fetcher before QtSql.
         if self.data_interface:
             currentDB = self.data_interface.dbPath
             self.data_interface.close()
         else:
             currentDB = "???"
+        self.db_dut.close()
+        # No connection holds the database now,
+        # fold the WAL back into the db file.
+        if currentDB != "???" and os.path.isfile(currentDB):
+            try:
+                rust_stdf_helper.checkpoint_truncate(currentDB)
+            except Exception:
+                logger.warning("Could not checkpoint the WAL of %s", currentDB, exc_info=True)
         # save settings to file
         dumpConfigFile()
-        # clean generated database
+        # clean generated databases; keep the current one and any sidecar left
+        # behind when the checkpoint above failed
         dbFolder = os.path.join(sys.rootFolder, "logs")
+        currentName = os.path.basename(currentDB)
         for f in os.listdir(dbFolder):
-            # save current database
-            if f.endswith(".db") and not currentDB.endswith(f):
+            # keep the current database and any sidecar of it
+            if f == currentName or f.startswith(currentName + "-"):
+                continue
+            # an interrupted run can leave -journal/-wal/-shm behind, collect them too
+            if f.endswith((".db", ".db-journal", ".db-wal", ".db-shm")):
                 try:
                     os.remove(os.path.join(dbFolder, f))
                 except OSError:
@@ -483,8 +503,10 @@ class MyWindow(QtWidgets.QMainWindow):
         settings = getSetting()
         self.dutDataDisplayer.setTextFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
         self.dutDataDisplayer.setFloatFormat(settings.getFloatFormat())
-        self.dutDataDisplayer.setContent(self.data_interface.getDutDataDisplayerContent(selectedDutIndexes))
-        self.dutDataDisplayer.showUI()
+        # the dialog opens at once and loads in slices, showing a progress bar
+        self.dutDataDisplayer.showWithLoader(
+            self.data_interface.dutDataDisplayerContentGenerator(selectedDutIndexes)
+        )
         
     
     def onReadDutData_DS(self):
@@ -961,7 +983,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.tmodel_data.setDutIndexMap(d["dut2ind"])
         self.tmodel_data.setDutInfoMap(d["dutInfo"])
         self.tmodel_data.setTestLists(d["TestLists"])
-        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Test Head - Site")])
+        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Part Text"), self.tr("Test Head - Site")])
         self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel_data.setVHeaderExt(d["VHeader"])
         self.tmodel_data.setFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
@@ -1233,7 +1255,6 @@ class MyWindow(QtWidgets.QMainWindow):
             wl.append(layout.itemAt(i).widget())
         deleteWidget(wl)
         del wl
-        gc.collect()
     
     
     def clearAllContents(self):
@@ -1273,20 +1294,27 @@ class MyWindow(QtWidgets.QMainWindow):
         if newDI is not None:
             # clear old images & tables
             self.clearAllContents()
+            # close old data interface first
+            if self.data_interface is not None:
+                self.data_interface.close()
             # close dut summary database if opened
             if self.db_dut.isOpen():
                 self.db_dut.close()
-            # close old data interface
-            if self.data_interface is not None:
-                self.data_interface.close()
             
             # working on the new object
             self.data_interface = newDI
             self.data_interface.loadDatabase()
             # open new dut summary database
             self.db_dut.setDatabaseName(self.data_interface.dbPath)
+            # the fetcher may build query indexes in the background, so let the
+            # Qt connection wait out a commit instead of failing
+            # access db using read-only mode
+            self.db_dut.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000")
             if not self.db_dut.open():
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
+            
+            # report the background index build in the status bar
+            self.startIndexStatusPolling()
             
             # disable/enable wafer tab
             self.ui.tabControl.setTabEnabled(tab.Wafer, self.data_interface.containsWafer)
@@ -1392,6 +1420,31 @@ class MyWindow(QtWidgets.QMainWindow):
             QMessageBox.critical(self, self.tr("Error"), new_msg)
             # sys.exit()
         QApplication.processEvents()
+        
+    
+    def startIndexStatusPolling(self):
+        '''Report the background index build (started when a session opens).'''
+        if not hasattr(self, "indexStatusTimer"):
+            self.indexStatusTimer = QtCore.QTimer(self)
+            self.indexStatusTimer.setInterval(400)
+            self.indexStatusTimer.timeout.connect(self.pollIndexStatus)
+        self.indexStatusTimer.start()
+        
+    
+    def pollIndexStatus(self):
+        if self.data_interface is None or not self.data_interface.dbConnected:
+            self.indexStatusTimer.stop()
+            return
+        state, elapsed_ms = self.data_interface.DatabaseFetcher.indexBuildState()
+        INDEX_DONE = 2
+        INDEX_NONE = 3
+        # report the duration once it is done
+        if state in (INDEX_DONE, INDEX_NONE):
+            self.indexStatusTimer.stop()
+            if state == INDEX_DONE:
+                self.statusBar().showMessage(
+                    self.tr("Database index ready, building for {0} sec").format(
+                        round(elapsed_ms / 1000, 1)), 4000)
         
     
     def eventFilter(self, widget, event: QtCore.QEvent):

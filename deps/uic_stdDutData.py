@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 20th 2020
 # -----
-# Last Modified: Mon Dec 05 2022
+# Last Modified: Sat Sep 26 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -71,6 +71,11 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.UI.save.clicked.connect(self.onSave_csv)
         self.UI.save_xlsx.clicked.connect(self.onSave_xlsx)
         self.UI.close.clicked.connect(self.close)
+        # show progress bar when loading data
+        self.progressBar = QtWidgets.QProgressBar(self)
+        self.progressBar.setVisible(False)
+        self.UI.verticalLayout.insertWidget(0, self.progressBar)
+        self._loader = None
         self.init_Table()
         
         
@@ -84,7 +89,7 @@ class DutDataDisplayer(QtWidgets.QDialog):
         
     def setContent(self, content: dict):
         '''
-        see StdfFile.py -> DataInterface -> getDutSummaryWithTestDataCore
+        see DataInterface.py -> dutSummaryWithTestDataGenerator
         for details of `content`
         '''
         self.tmodel.setTestData(content["Data"])
@@ -92,9 +97,13 @@ class DutDataDisplayer(QtWidgets.QDialog):
         self.tmodel.setDutIndexMap(content["dut2ind"])
         self.tmodel.setDutInfoMap(content["dutInfo"])
         self.tmodel.setTestLists(content["TestLists"])
-        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Test Head - Site"), 
-                                    self.tr("Tests Executed"), self.tr("Test Time"), self.tr("Hardware Bin"), 
-                                    self.tr("Software Bin"), self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
+        # keep in sync with `getFullDUTInfoFromDutArray`:
+        # (File ID, Part ID, Part Text, Test Head - Site, Tests Executed, Test Time,
+        #  Hardware Bin, Software Bin, Wafer ID, (X, Y), DUT Flag)
+        self.tmodel.setHHeaderBase([self.tr("File ID"), self.tr("Part ID"), self.tr("Part Text"), 
+                                    self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
+                                    self.tr("Hardware Bin"), self.tr("Software Bin"), 
+                                    self.tr("Wafer ID"), self.tr("(X, Y)"), self.tr("DUT Flag")])
         self.tmodel.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
         self.tmodel.setVHeaderExt(content["VHeader"])
         self.tmodel.setFont(self.textFont)
@@ -105,6 +114,75 @@ class DutDataDisplayer(QtWidgets.QDialog):
     
     def showUI(self):
         self.exec_()
+
+
+    def showWithLoader(self, loader):
+        '''
+        Show the dialog immediately, read progress from `loader` generator,
+        complete content is returned by the loader when it finishes.
+        '''
+        self._loader = loader
+        self.resetContent()
+        self._setBusy(True)
+        self.progressBar.setFormat(self.tr("Reading DUT data") + " %p%")
+        self.progressBar.setValue(0)
+        self.progressBar.setVisible(True)
+        QtCore.QTimer.singleShot(0, self._loadStep)
+        self.exec_()
+
+
+    def _setBusy(self, busy: bool):
+        for widget in (self.UI.save, self.UI.save_xlsx, self.transposeBtn):
+            widget.setDisabled(busy)
+
+
+    def done(self, result):
+        # stop loading if the dialog is closed early
+        self._loader = None
+        self._setBusy(False)
+        super().done(result)
+
+
+    def _loadStep(self):
+        if self._loader is None:
+            return
+        import time as _time
+        deadline = _time.perf_counter() + 0.04
+        while True:
+            try:
+                # loader yields progress between [0, 1]
+                progress = next(self._loader)
+            except StopIteration as stop:
+                self._loader = None
+                self.progressBar.setValue(100)
+                self.progressBar.setVisible(False)
+                # loader returns the complete content as stop.value
+                self.setContent(stop.value)
+                self._setBusy(False)
+                return
+            except Exception:
+                # route to the app's exception hook instead of dying in a timer slot
+                import sys
+                self._loader = None
+                self.progressBar.setVisible(False)
+                self._setBusy(False)
+                sys.excepthook(*sys.exc_info())
+                return
+            if _time.perf_counter() >= deadline:
+                self.progressBar.setValue(int(progress * 100))
+                QtCore.QTimer.singleShot(0, self._loadStep)
+                return
+
+
+    def resetContent(self):
+        '''Clear the table so stale rows are not shown while loading.'''
+        self.tmodel.setTestData({})
+        self.tmodel.setTestInfo({})
+        self.tmodel.setDutIndexMap({})
+        self.tmodel.setDutInfoMap({})
+        self.tmodel.setTestLists([])
+        self.tmodel.setVHeaderExt([])
+        self.tmodel.layoutChanged.emit()
         
         
     def init_Table(self):

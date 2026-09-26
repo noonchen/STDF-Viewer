@@ -36,8 +36,8 @@ struct FtrRow {
 struct MprRow {
     dut: u64,
     tid: TestId,
-    rslt: String,
-    stat: String,
+    rslt: Vec<u8>,
+    stat: Vec<u8>,
     flag: u8,
 }
 
@@ -314,8 +314,8 @@ impl<'con> DatabaseCtx<'con> {
         &mut self,
         dut: u64,
         tid: TestId,
-        rslt: String,
-        stat: String,
+        rslt: Vec<u8>,
+        stat: Vec<u8>,
         flag: u8,
     ) -> Result<(), StdfHelperError> {
         self.mpr_batch.push(MprRow {
@@ -493,15 +493,12 @@ impl<'con> DatabaseCtx<'con> {
     }
 
     #[inline(always)]
-    pub fn finalize(mut self, build_index: bool) -> Result<(), StdfHelperError> {
+    pub fn finalize(mut self) -> Result<(), StdfHelperError> {
         // write out any data rows still buffered before committing
         self.flush_ptr_batch()?;
         self.flush_ftr_batch()?;
         self.flush_mpr_batch()?;
         self.flush_datalog_batch()?;
-        if build_index {
-            self.db.execute_batch(CREATE_INDEX_FOR_QUERY)?;
-        }
         self.db.execute_batch(COMMIT_AND_SET_LOCKING)?;
         self.insert_file_name_stmt.finalize()?;
         self.update_file_list_stmt.finalize()?;

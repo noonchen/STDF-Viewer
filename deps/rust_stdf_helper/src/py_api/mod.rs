@@ -13,21 +13,38 @@
 //
 
 pub mod analyze_stdf;
+pub mod fetcher;
 pub mod generate_database;
 pub mod get_icon_src;
 pub mod read_mir;
+pub mod session;
 pub mod statistics;
 pub mod stdf_to_xlsx;
 
-use crate::stdf::record_tracker::TestIDType;
+use crate::stdf::record_tracker::{TestIDType, TestSubCode};
 use pyo3::prelude::*;
+
+/// Single source of truth for the DUT summary / datalog SQL, exported so the
+/// Python reference fetcher (SharedSrc) uses the exact same query text.
+#[pyfunction]
+fn dut_summary_query() -> &'static str {
+    crate::database::schema::fetcher_queries::FETCH_SELECT_DUT_SUMMARY
+}
 
 pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     let test_id_type = PyModule::new(py, "TestIDType")?;
     test_id_type.add("TestNumberAndName", TestIDType::TestNumberAndName)?;
     test_id_type.add("TestNumberOnly", TestIDType::TestNumberOnly)?;
 
+    // Single source of truth for the Test_Info SUB_CODE values; the Python
+    // side builds its `REC` IntEnum from these (see SharedSrc.py).
+    let sub_code = PyModule::new(py, "TestSubCode")?;
+    sub_code.add("PTR", TestSubCode::Ptr.code())?;
+    sub_code.add("MPR", TestSubCode::Mpr.code())?;
+    sub_code.add("FTR", TestSubCode::Ftr.code())?;
+
     module.add_submodule(&test_id_type)?;
+    module.add_submodule(&sub_code)?;
     module.add_function(wrap_pyfunction!(analyze_stdf::analyze_stdf, module)?)?;
     module.add_function(wrap_pyfunction!(
         generate_database::generate_database,
@@ -39,6 +56,11 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(statistics::norm_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::empirical_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_ppf, module)?)?;
+    module.add_function(wrap_pyfunction!(dut_summary_query, module)?)?;
+    module.add_function(wrap_pyfunction!(session::validate_session, module)?)?;
+    module.add_function(wrap_pyfunction!(session::save_session, module)?)?;
+    module.add_function(wrap_pyfunction!(fetcher::checkpoint_truncate, module)?)?;
+    module.add_class::<fetcher::PyDataFetcher>()?;
 
     Ok(())
 }

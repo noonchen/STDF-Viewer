@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Sun Sep 20 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -12,18 +12,19 @@
 #
 
 import io, os, sys, logging, datetime
-import subprocess, platform, sqlite3
+import subprocess, platform
 import numpy as np
 import tomlkit, tomllib
 from enum import IntEnum
 from random import choice
+from functools import lru_cache
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pydantic import BaseModel, Field, field_validator, field_serializer
-from rust_stdf_helper import get_icon_src
+from rust_stdf_helper import TestSubCode, dut_summary_query, get_icon_src
 
 
 class TrendPlotConfig(BaseModel):
@@ -108,7 +109,6 @@ class GeneralConfig(BaseModel):
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
     hide_inf: bool = Field(True, alias="Hide Infinite Value")
     vert_bar: bool = Field(False, alias="Vertical BarGraph")
-    gen_db_idx: bool = Field(False, alias="Create DB Index")
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"
@@ -286,46 +286,7 @@ FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
                 All Files (*.*)'''
 
 
-DUT_SUMMARY_QUERY = '''SELECT
-                            DUTIndex,
-                            Dut_Info.Fid AS "File ID",
-                            PartID AS "Part ID",
-                            PartText AS "Part Text",
-                            'Head ' || HEAD_NUM || ' - ' || 'Site ' || SITE_NUM AS "Test Head - Site",
-                            TestCount AS "Tests Executed",
-                            TestTime || ' ms' AS "Test Time",
-                            'Bin ' || HBIN AS "Hardware Bin",
-                            'Bin ' || SBIN AS "Software Bin",
-                            wf.WAFER_ID AS "Wafer ID",
-                            '(' || XCOORD || ', ' || YCOORD || ')' AS "(X, Y)",
-                            printf("%s - 0x%02X", CASE 
-                                    WHEN Supersede=1 THEN 'Superseded' 
-                                    WHEN Flag & 24 = 0 THEN 'Pass' 
-                                    WHEN Flag & 24 = 8 THEN 'Failed' 
-                                    ELSE 'Unknown' 
-                                    END, Flag) AS "DUT Flag"
-                        FROM (Dut_Info 
-                            LEFT JOIN (SELECT 
-                                            Fid, WaferIndex, WAFER_ID 
-                                        FROM 
-                                            Wafer_Info) AS "wf" 
-                            ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)'''
-
-
-# ********** python equivalent ******** #
-# # generate approx location
-# if AfterDUTIndex == 0:
-#     leftStr = "|"
-#     midStr = RecordType
-#     rightStr = "PIR #1"
-# elif isBeforePRR:
-#     leftStr = f"PIR #{AfterDUTIndex}"
-#     midStr = RecordType
-#     rightStr = f"PRR #{AfterDUTIndex}"
-# else:
-#     leftStr = f"PIR #{AfterDUTIndex}"
-#     midStr = f"PRR #{AfterDUTIndex}"
-#     rightStr = RecordType
+DUT_SUMMARY_QUERY = dut_summary_query()
 DATALOG_QUERY = '''SELECT
                         Fid as "File ID",
                         RecordType AS "Record Type",
@@ -363,10 +324,11 @@ class tab(IntEnum):
     
 
 class REC(IntEnum):
-    '''Constants of STDF Test Records: sub'''
-    PTR = 10
-    FTR = 20
-    MPR = 15
+    '''Constants of STDF Test Records, single-sourced from Rust
+    (rust_stdf_helper.TestSubCode, i.e. the Test_Info SUB_CODE column).'''
+    PTR = int(TestSubCode.PTR)
+    FTR = int(TestSubCode.FTR)
+    MPR = int(TestSubCode.MPR)
     
 
 record_name_dict = {
@@ -592,11 +554,15 @@ def wafer_direction_name(symbol: str) -> str:
     return direction_symbol.get(symbol, symbol)
 
 
+@lru_cache(maxsize=None)
 def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
     '''
     Parse string from 
         `TestSelection` UI into (test num, pmr index, test name)
         `WaferSelection` UI into (wafer index, file id, wafer name)
+    
+    Pure string parsing, so the result is memoized: the same items are parsed
+    again on every selection change and once per row during a fail-marker run.
     '''
     if isWaferName:
         # split up to 2 elements
@@ -763,30 +729,6 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
         openOrRevealFileInOS(outPath, False)
     elif msgbox.clickedButton() == openBtn:
         openOrRevealFileInOS(outPath, True)
-    
-
-def validateSession(dbPath: str):
-    tableSet = set(["File_List", "File_Info", "Wafer_Info", "Dut_Info", "Dut_Counts", 
-                    "Test_Info", "PTR_Data", "MPR_Data", "FTR_Data", "Bin_Info", 
-                    "Pin_Map", "Pin_Info", "TestPin_Map", "Dynamic_Limits", "Datalog"])
-    try:
-        con = sqlite3.connect(dbPath)
-        cur = con.cursor()
-        currentTable = set([name 
-                            for name,
-                            in cur.execute('''SELECT 
-                                                    name 
-                                                FROM 
-                                                    sqlite_master 
-                                                WHERE 
-                                                    type="table"''')])
-        diff = currentTable.difference(tableSet)
-        if diff:
-            return False, f"Mismatched tables {','.join(diff)}"
-        else:
-            return True, ""
-    except Exception as e:
-        return False, repr(e)
 
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
@@ -800,7 +742,7 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 
            "calc_cpk", "deleteWidget", "isPass", "isValidSymbol", "pyqtGraphPlot2Bytes", 
-           "showCompleteMessage", "rHEX", "get_file_size", "validateSession", 
+           "showCompleteMessage", "rHEX", "get_file_size", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name",

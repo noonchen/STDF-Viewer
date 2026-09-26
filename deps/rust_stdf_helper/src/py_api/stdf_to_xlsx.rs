@@ -169,7 +169,7 @@ pub fn stdf_to_xlsx(
             write_json_to_sheet(json, field_names, sheet, row)?;
 
             if check_signal && (is_valid_progress_signal || is_valid_stop) {
-                if let Err(e) = Python::attach(|py| -> PyResult<()> {
+                match Python::try_attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
                         progress_signal
                             .bind(py)
@@ -183,7 +183,9 @@ pub fn stdf_to_xlsx(
                     }
                     Ok(())
                 }) {
-                    return Err(StdfHelperError { msg: e.to_string() });
+                    Some(Ok(())) => {}
+                    Some(Err(e)) => return Err(StdfHelperError { msg: e.to_string() }),
+                    None => break,
                 }
             }
         }

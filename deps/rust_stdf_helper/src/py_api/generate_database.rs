@@ -42,17 +42,21 @@ impl<T> Drop for ThreadJoiner<T> {
     }
 }
 
-// RAII to fill up progress bar and generate done signal
+// RAII to fill up progress bar and signal completion.
 struct ProgressBarFiller {
     progress: Arc<AtomicU16>,
-    done: Arc<AtomicBool>,
+    // `wake` sends signal to progress thread when:
+    // 1. process every 1%.
+    // 2. on drop.
+    wake: crossbeam_channel::Sender<()>,
 }
 
 impl Drop for ProgressBarFiller {
     fn drop(&mut self) {
         // mark progress completes
         self.progress.store(10000u16, Ordering::Relaxed);
-        self.done.store(true, Ordering::Relaxed);
+        // wake the progress thread so it exits without waiting for its poll
+        let _ = self.wake.try_send(());
     }
 }
 
@@ -64,7 +68,6 @@ pub fn generate_database(
     dbpath: String,
     stdf_paths: Vec<Vec<String>>,
     test_id_type: TestIDType,
-    build_db_index: bool,
     progress_signal: Bound<'_, PyAny>,
     stop_flag: Bound<'_, PyAny>,
 ) -> PyResult<()> {
@@ -113,15 +116,18 @@ pub fn generate_database(
     const CHANNEL_CAP: usize = 64;
     let (tx, rx) = crossbeam_channel::bounded::<DbMessage>(CHANNEL_CAP);
 
+    // `ProgressBarFiller` holds one sender, notify progress thread to re-read the atomics,
+    // and dropping it disconnects the channel, means generation is over.
+    let (progress_wake_tx, progress_wake_rx) = crossbeam_channel::bounded::<()>(1);
+
     // Shared control/state between workers, writer, and the GIL progress thread.
     let global_stop = Arc::new(AtomicBool::new(false));
-    let fgroup_done = Arc::new(AtomicBool::new(false));
     let total_progress = Arc::new(AtomicU16::new(0));
     let progress_values: Vec<Arc<AtomicU16>> = (0..num_groups)
         .map(|_| Arc::new(AtomicU16::new(0)))
         .collect();
 
-    let mut thread_handles = vec![];
+    let mut thread_handles = Vec::with_capacity(num_groups + 1);
     let mut thread_txes = Vec::with_capacity(num_groups);
     // clone {num_groups-1} sender, and push the `tx` to last
     (0..num_groups - 1)
@@ -129,14 +135,23 @@ pub fn generate_database(
         .count();
     thread_txes.push(tx);
 
+    // Share the path list with every worker instead of deep-cloning it; each
+    // worker only reads its own group.
+    let stdf_paths = Arc::new(stdf_paths);
+
     // Each thread handles one parsing/tracking task of one file group.
-    for (fid, (fgroups, thread_tx)) in stdf_paths.clone().into_iter().zip(thread_txes).enumerate() {
+    for (fid, thread_tx) in thread_txes.into_iter().enumerate() {
         let worker_stop = global_stop.clone();
         let worker_progress = progress_values[fid].clone();
-        let handle = thread::spawn(move || -> Result<(), StdfHelperError> {
+        let worker_paths = Arc::clone(&stdf_paths);
+        let worker_pg_wake = progress_wake_tx.clone();
+        let worker_job = move || -> Result<(), StdfHelperError> {
+            let fgroups = &worker_paths[fid];
             let num_files = fgroups.len();
             let mut record_tracker = RecordTracker::new(test_id_type);
             let mut ops: Vec<DbOp> = Vec::with_capacity(OPS_PER_BATCH);
+            // last progress value reported to the progress thread
+            let mut last_progress_x100: u16 = 0;
 
             // loop fpath in a group in vector order,
             // this step CANNOT be parallel, since
@@ -190,7 +205,13 @@ pub fn generate_database(
                     let progress_x100 = 10000.0
                         * (raw_view.offset as f32 / file_size + sub_fid as f32)
                         / num_files as f32;
-                    worker_progress.store(progress_x100 as u16, Ordering::Relaxed);
+                    let progress_x100 = progress_x100 as u16;
+                    worker_progress.store(progress_x100, Ordering::Relaxed);
+                    // wake the progress thread every 5% instead of every record
+                    if progress_x100 >= last_progress_x100 + 500 {
+                        last_progress_x100 = progress_x100;
+                        let _ = worker_pg_wake.try_send(());
+                    }
 
                     let rec_view: StdfRecordView = (&raw_view).into();
                     if let Err(e) = process_record_view(
@@ -223,23 +244,44 @@ pub fn generate_database(
                 return Ok(());
             }
             Ok(())
-        });
+        };
+        let handle = match thread::Builder::new()
+            .name(format!("stdf-gen-worker-{fid}"))
+            .spawn(worker_job)
+        {
+            Ok(handle) => handle,
+            Err(e) => {
+                // Threads started before this point are dropped detached; they
+                // notice the closed channel on their next send and unwind.
+                return Err(StdfHelperError {
+                    msg: format!(
+                        "Cannot start the parsing thread for file group {}: {}",
+                        fid, e
+                    ),
+                }
+                .into());
+            }
+        };
         thread_handles.push(handle);
     }
 
     let global_stop_copy = global_stop.clone();
     let total_progress_copy = total_progress.clone();
     let progress_values_copy = progress_values.clone();
-    let fgroup_done_copy = fgroup_done.clone();
 
     if is_valid_progress_signal || is_valid_stop {
         // start another thread for updating stop signal
         // and sending progress back to python
-        let gil_th = thread::spawn(move || -> Result<(), StdfHelperError> {
+        let progress_job = move || -> Result<(), StdfHelperError> {
             let mut stop_cur_thread = false;
+            // set when the channel disconnects, i.e. the filler was dropped and
+            // the database is finished
+            let mut completed = false;
             loop {
-                let done = fgroup_done_copy.load(Ordering::Relaxed);
-                let current_progress: u16 = if done || num_groups == 0 {
+                let current_progress: u16 = if completed {
+                    // workers store the offset of the record they are reading,
+                    // which never reaches EOF, so the averaged value can stop
+                    // just short of 100%; generation is over, report it complete
                     10000
                 } else {
                     (progress_values_copy
@@ -250,7 +292,7 @@ pub fn generate_database(
                 };
                 total_progress_copy.store(current_progress, Ordering::Relaxed);
                 // access python object inside a gil block
-                if let Err(py_e) = Python::attach(|py| -> PyResult<()> {
+                let Some(attach_result) = Python::try_attach(|py| -> PyResult<()> {
                     if is_valid_progress_signal {
                         progress_signal
                             .bind(py)
@@ -265,31 +307,54 @@ pub fn generate_database(
                         stop_cur_thread |= stop_from_py;
                     };
                     Ok(())
-                }) {
+                }) else {
+                    break;
+                };
+                if let Err(py_e) = attach_result {
                     // print python exceptions occured
                     // in this thread and exit...
                     println!("{}", py_e);
                     break;
                 }
                 // exit when file group parsing is finished or the user stopped.
-                if done || stop_cur_thread {
+                if completed || stop_cur_thread {
                     break;
                 }
-                // sleep for 100ms
-                thread::sleep(time::Duration::from_millis(100));
+                // Wake as soon as a worker reports progress or disconnects.
+                // The timeout is for detecting Python-side stop request.
+                if let Err(crossbeam_channel::RecvTimeoutError::Disconnected) =
+                    progress_wake_rx.recv_timeout(time::Duration::from_millis(100))
+                {
+                    completed = true;
+                }
             }
             Ok(())
-        });
+        };
+        let gil_th = match thread::Builder::new()
+            .name("stdf-gen-progress".to_owned())
+            .spawn(progress_job)
+        {
+            Ok(handle) => handle,
+            Err(e) => {
+                return Err(StdfHelperError {
+                    msg: format!("Cannot start the progress thread: {}", e),
+                }
+                .into());
+            }
+        };
         thread_handles.push(gil_th);
     }
 
     py.detach(|| -> Result<(), StdfHelperError> {
         // use RAII to join threads
         let _joiner = ThreadJoiner(thread_handles);
+        // Move rx to local variable to ensure it is dropped
+        // before joining threads.
+        let rx = rx;
         // use RAII to fill bar and stop gil thread
         let _filler = ProgressBarFiller {
             progress: total_progress.clone(),
-            done: fgroup_done.clone(),
+            wake: progress_wake_tx,
         };
 
         // initiate sqlite3 database
@@ -329,8 +394,8 @@ pub fn generate_database(
             }
         }
 
-        // finalize database (flushes the writer-side multi-row batches)
-        db_ctx.finalize(build_db_index)?;
+        // finalize database (flushes everything)
+        db_ctx.finalize()?;
         if let Err((_, err)) = conn.close() {
             return Err(StdfHelperError::from(err));
         };

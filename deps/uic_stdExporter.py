@@ -315,7 +315,9 @@ class reportGenerator(QtCore.QObject):
         if DutSheet is None:
             return
         
-        headerLabelList = [["", self.tr("File ID"), self.tr("Part ID"), 
+        # keep in sync with `getFullDUTInfoFromDutArray` (plus the leading
+        # "#DUT index" cell the rows are written with)
+        headerLabelList = [["", self.tr("File ID"), self.tr("Part ID"), self.tr("Part Text"), 
                             self.tr("Test Head - Site"), self.tr("Tests Executed"), self.tr("Test Time"), 
                             self.tr("Hardware Bin"), self.tr("Software Bin"), 
                             self.tr("Wafer ID"), "(X, Y)", self.tr("DUT Flag")],
@@ -382,7 +384,7 @@ class reportGenerator(QtCore.QObject):
             flagList = []
             for fid, dutIndex in order:
                 try:
-                    recHeader = testData[fid]["recHeader"]
+                    recHeader = testData[fid]["SUB_CODE"]
                     dataIndex = summaryTable["dut2ind"][fid][dutIndex]
                     dataList.append(testData[fid]["dataList"][dataIndex])
                     flagList.append(testData[fid]["flagList"][dataIndex])
