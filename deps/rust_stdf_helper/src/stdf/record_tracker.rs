@@ -89,8 +89,11 @@ struct TestCacheEntry {
     test_id: TestId,
 }
 
-/// Slots in the direct-mapped test cache; must be a power of two.
-const TEST_CACHE_SIZE: usize = 1024;
+/// Ways per set; 1024 sets x 2 ways, flat layout `index = set * WAYS + way`.
+const TEST_CACHE_WAYS: usize = 2;
+
+/// Sets in the test cache; must be a power of two.
+const TEST_CACHE_SETS: usize = 1024;
 
 #[inline(always)]
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -112,8 +115,11 @@ pub struct RecordTracker {
     // string and only allocate on the vacant-entry path.
     id_map: HashMap<(usize, u32), HashMap<String, TestId>>,
 
-    // hot-path L1 cache for `id_map`: index = test_num & (TEST_CACHE_SIZE - 1)
+    // hot-path L1 cache for `id_map`, 2-way set associative
     test_cache: Vec<Option<TestCacheEntry>>,
+
+    // per-set round-robin victim
+    test_cache_victim: Vec<u8>,
 
     // number of unique tests seen by this tracker; local component of TestId
     test_id_counter: usize,
@@ -159,7 +165,10 @@ impl RecordTracker {
         RecordTracker {
             id_type,
             id_map: HashMap::with_capacity(1024),
-            test_cache: std::iter::repeat_with(|| None).take(TEST_CACHE_SIZE).collect(),
+            test_cache: std::iter::repeat_with(|| None)
+                .take(TEST_CACHE_SETS * TEST_CACHE_WAYS)
+                .collect(),
+            test_cache_victim: vec![0; TEST_CACHE_SETS],
             test_id_counter: 0,
             scale_vals: Vec::with_capacity(1024),
             default_llimit: Vec::with_capacity(1024),
@@ -402,14 +411,18 @@ impl RecordTracker {
         test_txt: &str,
     ) -> Result<TestId, StdfHelperError> {
         let name_hash = fnv1a(test_txt.as_bytes());
-        let slot = (test_num as usize) & (TEST_CACHE_SIZE - 1);
-        if let Some(e) = &self.test_cache[slot] {
-            if e.file_id == file_id
-                && e.test_num == test_num
-                && e.name_hash == name_hash
-                && e.name == test_txt
-            {
-                return Ok(e.test_id);
+        let set = (test_num as usize) & (TEST_CACHE_SETS - 1);
+        let base = set * TEST_CACHE_WAYS;
+
+        for way in 0..TEST_CACHE_WAYS {
+            if let Some(e) = &self.test_cache[base + way] {
+                if e.file_id == file_id
+                    && e.test_num == test_num
+                    && e.name_hash == name_hash
+                    && e.name == test_txt
+                {
+                    return Ok(e.test_id);
+                }
             }
         }
 
@@ -424,13 +437,38 @@ impl RecordTracker {
                 unique_id
             }
         };
-        self.test_cache[slot] = Some(TestCacheEntry {
-            file_id,
-            test_num,
-            name_hash,
-            name: test_txt.to_owned(),
-            test_id,
-        });
+
+        // fill empty ways first, otherwise two alternating tests thrash one way
+        let mut slot = base;
+        for way in 0..TEST_CACHE_WAYS {
+            if self.test_cache[base + way].is_none() {
+                slot = base + way;
+                break;
+            }
+        }
+        if self.test_cache[slot].is_some() {
+            let victim = (self.test_cache_victim[set] as usize) % TEST_CACHE_WAYS;
+            self.test_cache_victim[set] = self.test_cache_victim[set].wrapping_add(1);
+            slot = base + victim;
+        }
+
+        if self.test_cache[slot].is_none() {
+            self.test_cache[slot] = Some(TestCacheEntry {
+                file_id,
+                test_num,
+                name_hash,
+                name: test_txt.to_owned(),
+                test_id,
+            });
+        } else if let Some(e) = &mut self.test_cache[slot] {
+            e.file_id = file_id;
+            e.test_num = test_num;
+            e.name_hash = name_hash;
+            // keep the allocation; a same-length name does not reallocate
+            e.name.clear();
+            e.name.push_str(test_txt);
+            e.test_id = test_id;
+        }
         Ok(test_id)
     }
 
