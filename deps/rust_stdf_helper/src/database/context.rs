@@ -17,6 +17,7 @@ use crate::database::schema::*;
 use crate::StdfHelperError;
 use rusqlite::{Connection, Statement, ToSql};
 
+// number of data rows per multi-row INSERT,
 // 512 rows = 2560 bound params, within 32766 limit
 const ROWS_PER_BATCH: usize = 512;
 
