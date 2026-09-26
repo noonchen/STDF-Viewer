@@ -25,9 +25,20 @@ use pyo3::prelude::*;
 use pyo3::types::PyBool;
 use rusqlite::Connection;
 use rust_stdf::{stdf_file::*, StdfRecordView};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::{thread, time};
+
+// Progressive DUT counters for the File Info page.
+#[derive(Default)]
+struct DutStats {
+    total: AtomicU64,
+    passed: AtomicU64,
+    failed: AtomicU64,
+    superseded: AtomicU64,
+    unknown: AtomicU64,
+    tests: AtomicU64,
+}
 
 // RAII to join threads
 struct ThreadJoiner<T>(Vec<std::thread::JoinHandle<T>>);
@@ -63,6 +74,7 @@ impl Drop for ProgressBarFiller {
 /// create sqlite3 database for given stdf files
 #[pyfunction]
 #[pyo3(name = "generate_database")]
+#[pyo3(signature = (dbpath, stdf_paths, test_id_type, progress_signal, stop_flag, stats_signal=None))]
 pub fn generate_database(
     py: Python,
     dbpath: String,
@@ -70,6 +82,7 @@ pub fn generate_database(
     test_id_type: TestIDType,
     progress_signal: Bound<'_, PyAny>,
     stop_flag: Bound<'_, PyAny>,
+    stats_signal: Option<Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     // stdf_paths is a Vec of Vec<String>, each sub vec
     // indicates a group of stdf files that needs to be merged.
@@ -99,6 +112,16 @@ pub fn generate_database(
             false
         }
     };
+    let is_valid_stats_signal = match &stats_signal {
+        Some(sig) => match sig.getattr(intern!(py, "emit")) {
+            Ok(p) => p.is_callable(),
+            Err(_) => {
+                println!("stats_signal does not have a method `emit`");
+                false
+            }
+        },
+        None => false,
+    };
     let is_valid_stop = match stop_flag.getattr(intern!(py, "stop")) {
         Ok(p) => p.is_instance_of::<PyBool>(),
         Err(_) => {
@@ -110,6 +133,7 @@ pub fn generate_database(
     // signals without gil
     let progress_signal: Py<PyAny> = progress_signal.into();
     let stop_flag: Py<PyAny> = stop_flag.into();
+    let stats_signal: Option<Py<PyAny>> = stats_signal.map(|s| s.into());
 
     // Channel payload is now a batch of `DbOp`s.
     const OPS_PER_BATCH: usize = 128;
@@ -125,6 +149,9 @@ pub fn generate_database(
     let total_progress = Arc::new(AtomicU16::new(0));
     let progress_values: Vec<Arc<AtomicU16>> = (0..num_groups)
         .map(|_| Arc::new(AtomicU16::new(0)))
+        .collect();
+    let stats_values: Vec<Arc<DutStats>> = (0..num_groups)
+        .map(|_| Arc::new(DutStats::default()))
         .collect();
 
     let mut thread_handles = Vec::with_capacity(num_groups + 1);
@@ -143,6 +170,8 @@ pub fn generate_database(
     for (fid, thread_tx) in thread_txes.into_iter().enumerate() {
         let worker_stop = global_stop.clone();
         let worker_progress = progress_values[fid].clone();
+        let worker_stats = stats_values[fid].clone();
+        let worker_stats_enabled = is_valid_stats_signal;
         let worker_paths = Arc::clone(&stdf_paths);
         let worker_pg_wake = progress_wake_tx.clone();
         let worker_job = move || -> Result<(), StdfHelperError> {
@@ -152,6 +181,7 @@ pub fn generate_database(
             let mut ops: Vec<DbOp> = Vec::with_capacity(OPS_PER_BATCH);
             // last progress value reported to the progress thread
             let mut last_progress_x100: u16 = 0;
+            let mut last_test_count: u64 = 0;
 
             // loop fpath in a group in vector order,
             // this step CANNOT be parallel, since
@@ -214,6 +244,35 @@ pub fn generate_database(
                     }
 
                     let rec_view: StdfRecordView = (&raw_view).into();
+                    // progressive DUT counters for the File Info page
+                    // (only when a stats callback was provided)
+                    if worker_stats_enabled {
+                        if matches!(&rec_view, StdfRecordView::PIR(_)) {
+                            worker_stats.total.fetch_add(1, Ordering::Relaxed);
+                        }
+                        if let StdfRecordView::PRR(ref prr) = &rec_view {
+                            let flg = prr.part_flg()[0];
+                            match flg & 24 {
+                                0 => {
+                                    worker_stats.passed.fetch_add(1, Ordering::Relaxed);
+                                }
+                                8 => {
+                                    worker_stats.failed.fetch_add(1, Ordering::Relaxed);
+                                }
+                                _ => {
+                                    worker_stats.unknown.fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
+                            if flg & 3 != 0 {
+                                worker_stats.superseded.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        let test_count = record_tracker.test_count();
+                        if test_count != last_test_count {
+                            last_test_count = test_count;
+                            worker_stats.tests.store(test_count, Ordering::Relaxed);
+                        }
+                    }
                     if let Err(e) = process_record_view(
                         &mut record_tracker,
                         fid,
@@ -269,7 +328,7 @@ pub fn generate_database(
     let total_progress_copy = total_progress.clone();
     let progress_values_copy = progress_values.clone();
 
-    if is_valid_progress_signal || is_valid_stop {
+    if is_valid_progress_signal || is_valid_stop || is_valid_stats_signal {
         // start another thread for updating stop signal
         // and sending progress back to python
         let progress_job = move || -> Result<(), StdfHelperError> {
@@ -297,6 +356,23 @@ pub fn generate_database(
                         progress_signal
                             .bind(py)
                             .call_method1(intern!(py, "emit"), (current_progress,))?;
+                    }
+                    if let Some(sig) = &stats_signal {
+                        let payload: Vec<(u64, u64, u64, u64, u64, u64)> = stats_values
+                            .iter()
+                            .map(|s| {
+                                (
+                                    s.total.load(Ordering::Relaxed),
+                                    s.passed.load(Ordering::Relaxed),
+                                    s.failed.load(Ordering::Relaxed),
+                                    s.superseded.load(Ordering::Relaxed),
+                                    s.unknown.load(Ordering::Relaxed),
+                                    s.tests.load(Ordering::Relaxed),
+                                )
+                            })
+                            .collect();
+                        sig.bind(py)
+                            .call_method1(intern!(py, "emit"), (payload,))?;
                     }
                     if is_valid_stop {
                         let stop_from_py = stop_flag

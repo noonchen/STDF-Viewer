@@ -17,6 +17,7 @@ pub mod fetcher;
 pub mod generate_database;
 pub mod get_icon_src;
 pub mod read_mir;
+pub mod read_header;
 pub mod session;
 pub mod statistics;
 pub mod stdf_to_xlsx;
@@ -51,6 +52,7 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
         module
     )?)?;
     module.add_function(wrap_pyfunction!(read_mir::read_mir, module)?)?;
+    module.add_function(wrap_pyfunction!(read_header::read_header_extra, module)?)?;
     module.add_function(wrap_pyfunction!(get_icon_src::get_icon_src, module)?)?;
     module.add_function(wrap_pyfunction!(stdf_to_xlsx::stdf_to_xlsx, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_cdf, module)?)?;

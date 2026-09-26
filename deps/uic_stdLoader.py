@@ -40,10 +40,118 @@ from .ui.stdfViewer_loadingUI import Ui_loadingUI
 
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
-from deps.SharedSrc import getSetting, LOG_NAME
+from deps.SharedSrc import (getSetting, LOG_NAME, get_file_size, mirDict,
+                            mirFieldNames, buildFileMetaData, join_cells)
 
 
 logger = logging.getLogger(LOG_NAME)
+
+
+COUNTER_LABELS = ["Yield", "DUTs Tested", "DUTs Passed", "DUTs Failed",
+                  "DUTs Superseded", "DUTs Unknown"]
+
+
+# fields whose several occurrences within one file group are all shown; the
+# others only keep the first occurrence (see DatabaseFetcherRust.getFileInfo)
+JOINED_FIELDS = ("SETUP_T", "START_T", "FINISH_T", "SBLOT_ID")
+
+
+def header_info_fields(groups: list) -> dict:
+    """Collect the header fields of every group into per-group cells.
+
+    Mirrors `DatabaseFetcherRust.getFileInfo()`: within one group a field maps
+    to its value when it occurs once, to the joined `#1 → v1\\n#2 → v2` form for
+    `JOINED_FIELDS`, and to the first occurrence for every other field. Across
+    groups the values stay separate cells, as the finished table shows them.
+    """
+    fields = {}
+    for group in groups:
+        names = group.get("paths") or group.get("names") or []
+        n = max(1, len(names))
+        meta = group.get("meta") or {}
+        for key, value in meta.items():
+            if key in ("ATR", "SDR", "WIR"):
+                continue
+            name = {"BYTE_ORDER": "BYTE_ORD", "STDF_VER": "STDF Version"}.get(
+                key, key)
+            per_file = [str(v) for v in value] if isinstance(value, (list, tuple)) \
+                else [str(value)] * n
+            per_file = [v for v in per_file if v != ""]
+            if not per_file:
+                cell = ""
+            elif len(per_file) == 1:
+                cell = per_file[0]
+            elif name in JOINED_FIELDS:
+                cell = join_cells(per_file)
+            else:
+                cell = per_file[0]
+            fields.setdefault(name, []).append(cell)
+    # the database writes FINISH_T unconditionally, once per file (epoch when
+    # the file carries none), so show the same row here
+    for group in groups:
+        names = group.get("paths") or group.get("names") or []
+        n = max(1, len(names))
+        if "FINISH_T" not in (group.get("meta") or {}):
+            fields.setdefault("FINISH_T", []).append(
+                join_cells(["1970-01-01 08:00:00 (UTC+08:00)"] * n))
+    for name, cells in fields.items():
+        while len(cells) < len(groups):
+            cells.append("")
+    return {name: tuple(cells) for name, cells in fields.items()}
+
+
+def format_header_info(payload: object,
+                       dut_count_dict: dict = None) -> list:
+    """Build the early File Info rows from the header payload.
+
+    Goes through the same `buildFileMetaData()` the database path uses, so the
+    table layout cannot drift between "still building" and "done". `payload` is
+    what the loader emits: `{"groups": [{"names", "paths", "sizes", "meta"}]}`.
+    """
+    if not isinstance(payload, dict):
+        return []
+    groups = payload.get("groups") or []
+    if not groups:
+        return []
+    # one entry per group, joined the same way the database path joins them
+    file_names = [join_cells(g.get("names") or [g.get("name", "")])
+                  for g in groups]
+    file_paths = [g.get("paths") or [g.get("path", "")] for g in groups]
+    file_sizes = [join_cells(g.get("sizes") or [""]) for g in groups]
+    return buildFileMetaData(file_names, file_paths, file_sizes,
+                             dut_count_dict or {}, header_info_fields(groups))
+
+def read_group_headers(paths: list) -> dict:
+    """Read the header of every file of one group into per-file values.
+
+    MIR fields are collected once per file (`{"SETUP_T": [v1, v2]}`) because the
+    database keeps one value per file. FAR-derived fields (`BYTE_ORDER`,
+    `STDF_VER`) describe the file group, not a single file, so only the first
+    file contributes them.
+    """
+    meta = {}
+    for index, path in enumerate(paths):
+        file_meta = {}
+        try:
+            file_meta.update(rust_stdf_helper.read_MIR(path))
+        except Exception:
+            logger.exception("cannot read MIR of %s", path)
+        try:
+            extra = rust_stdf_helper.read_header_extra(path)
+            if isinstance(extra, dict):
+                if index == 0:
+                    file_meta.update(extra)
+                else:
+                    # keep the group-level FAR info out of the per-file values
+                    for key in ("BYTE_ORDER", "STDF_VER"):
+                        extra.pop(key, None)
+                    file_meta.update(extra)
+        except Exception:
+            logger.exception("cannot read extra header info of %s", path)
+        for key, value in file_meta.items():
+            meta.setdefault(key, []).append(str(value))
+    return meta
+
 
 class flags:
     stop = False
@@ -52,13 +160,23 @@ class flags:
 class signal4Loader(QtCore.QObject):
     # get progress from reader
     progressBarSignal = Signal(int)
+    # progressive DUT counts (so far) from the Rust helper
+    statsSignal = Signal(object)
     # get `DataInterface` from reader
     dataInterfaceSignal_reader = Signal(object)
     # get close signal
     closeSignal = Signal(bool)
+    # early metadata (MIR) from loader, before the database is ready
+    metadataSignal = Signal(object)
+    # emitted when a new load starts; the main window should clear old UI
+    loadStartedSignal = Signal()
     
     # object signal from parent
     dataInterfaceSignal_parent = None
+    # early metadata signal from parent (main window)
+    metadataSignal_parent = None
+    # parent signal used to clear the old UI when a new load starts
+    loadStartedSignal_parent = None
     # status bar signal from parent
     msgSignal = None
 
@@ -82,6 +200,8 @@ class stdfLoader(QtWidgets.QDialog):
         self.signals.closeSignal.connect(self.closeLoader)
         
         self.signals.dataInterfaceSignal_parent = getattr(parentSignal, "dataInterfaceSignal", None)
+        self.signals.metadataSignal_parent = getattr(parentSignal, "metadataSignal", None)
+        self.signals.loadStartedSignal_parent = getattr(parentSignal, "loadStartedSignal", None)
         self.signals.msgSignal = getattr(parentSignal, "statusSignal", None)
         
         self.loaderUI = Ui_loadingUI()
@@ -89,6 +209,20 @@ class stdfLoader(QtWidgets.QDialog):
         self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         
     def loadFile(self, stdPaths: list[list[str]]):
+        # ignore a new request while the previous one is still running
+        # (use __dict__ because QObject also has a thread() method)
+        _running_thread = self.__dict__.get("thread")
+        if _running_thread is not None and _running_thread.isRunning():
+            return
+        # clear the previous file UI before reading anything from the new file
+        if self.signals.loadStartedSignal_parent is not None:
+            self.signals.loadStartedSignal_parent.emit()
+        self.closeEventByThread = False    # init at new file
+        self.loaderUI.progressBar.setFormat("0.00%%")
+        self.loaderUI.progressBar.setValue(0)
+        # Read MIR (and basic file info) before the DB build starts so the
+        # main window can show something immediately.
+        self.sendEarlyMetadata(stdPaths)
         self.closeEventByThread = False    # init at new file
         self.loaderUI.progressBar.setFormat("0.00%%")
         self.loaderUI.progressBar.setValue(0)
@@ -106,9 +240,39 @@ class stdfLoader(QtWidgets.QDialog):
         self.reader.moveToThread(self.thread)
         self.thread.started.connect(self.reader.readBegin)
         self.thread.start()
-        # blocking parent if it's not finished
-        self.exec_()
+        # The loader dialog is intentionally not shown: progress is rendered
+        # in the main window status bar instead.
     
+    def sendEarlyMetadata(self, stdPaths: list[list[str]]):
+        """Read the header of every file group and emit it immediately.
+
+        One entry per group, like `DatabaseFetcher.file_paths`, so the early
+        File Info shows the same file list as the finished database (groups of
+        several files are numbered `#1 → ...` by the shared builder).
+        """
+        groups = []
+        for group in stdPaths:
+            if not group:
+                continue
+            paths = list(group)
+            # every file of the group, not just the first: the row lists them all
+            names = [os.path.basename(f) for f in paths]
+            sizes = []
+            for f in paths:
+                try:
+                    sizes.append(get_file_size(f))
+                except OSError:
+                    sizes.append("")
+            groups.append({"path": paths[0], "name": names[0],
+                           "paths": paths, "names": names, "sizes": sizes,
+                           "meta": read_group_headers(paths)})
+        payload = {"groups": groups, "num_files": sum(len(g) for g in stdPaths)}
+        try:
+            if self.signals.metadataSignal_parent is not None:
+                self.signals.metadataSignal_parent.emit(payload)
+        except Exception:
+            logger.exception("cannot emit early metadata")
+
     def closeEvent(self, event):
         if self.closeEventByThread:
             # close by thread
@@ -165,6 +329,7 @@ class stdReader(QtCore.QObject):
         
         self.QSignals = QSignal
         self.progressBarSignal = self.QSignals.progressBarSignal
+        self.statsSignal = self.QSignals.statsSignal
         self.closeSignal = self.QSignals.closeSignal
         self.dataInterfaceSignal = self.QSignals.dataInterfaceSignal_reader
         self.msgSignal = self.QSignals.msgSignal
@@ -189,7 +354,7 @@ class stdReader(QtCore.QObject):
             start = time.time()
             # auto generate a database name
             databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
-            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
+            rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag, self.statsSignal)
             end = time.time()
             if self.flag.stop:
                 # user terminated...
