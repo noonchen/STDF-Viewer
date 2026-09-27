@@ -18,7 +18,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyInt;
 use rust_stdf::*;
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 #[repr(u32)]
@@ -198,7 +198,8 @@ impl RecordTracker {
         let total = self.dut_total.entry(file_id).or_insert(0);
         *total += 1;
         let dut_index = *total;
-        self.dut_index_tracker.insert((file_id, head_num, site_num), dut_index);
+        self.dut_index_tracker
+            .insert((file_id, head_num, site_num), dut_index);
         self.dut_last = Some((file_id, head_num, site_num, dut_index));
         dut_index
     }
@@ -392,12 +393,7 @@ impl RecordTracker {
     }
 
     #[inline(always)]
-    fn get_dut_index(
-        &mut self,
-        file_id: usize,
-        head_num: u8,
-        site_num: u8,
-    ) -> Option<u64> {
+    fn get_dut_index(&mut self, file_id: usize, head_num: u8, site_num: u8) -> Option<u64> {
         if let Some((f, h, s, idx)) = self.dut_last {
             if f == file_id && h == head_num && s == site_num {
                 return Some(idx);
@@ -489,7 +485,7 @@ impl RecordTracker {
 
     /// return `true` if test_id is already in both limit hashmaps
     #[inline(always)]
-    pub fn default_limits_contains_id(&mut self, test_id: TestId) -> bool {
+    pub fn default_limits_contains_id(&self, test_id: TestId) -> bool {
         let local = get_local_id(test_id);
         matches!(self.default_llimit.get(local), Some(Some(_)))
             && matches!(self.default_hlimit.get(local), Some(Some(_)))
@@ -537,9 +533,9 @@ impl RecordTracker {
             None => {
                 return Err(StdfHelperError {
                     msg: format!(
-                        "Default low limit of Test ID [{}] cannot be read...this should never happen",
-                        test_id
-                    ),
+                    "Default low limit of Test ID [{}] cannot be read...this should never happen",
+                    test_id
+                ),
                 })
             }
         };
@@ -549,9 +545,9 @@ impl RecordTracker {
             None => {
                 return Err(StdfHelperError {
                     msg: format!(
-                        "Default high limit of Test ID [{}] cannot be read...this should never happen",
-                        test_id
-                    ),
+                    "Default high limit of Test ID [{}] cannot be read...this should never happen",
+                    test_id
+                ),
                 })
             }
         };
