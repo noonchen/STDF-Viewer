@@ -12,7 +12,7 @@
 // Copyright (c) 2022 noonchen
 //
 
-use crate::database::operations::{make_test_id, ColdOp, DbOp, TestId};
+use crate::database::operations::{get_local_id, make_test_id, ColdOp, DbOp, TestId};
 use crate::StdfHelperError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -335,7 +335,7 @@ impl RecordTracker {
     /// return (exist, scale) for [PTR], [MPR]
     #[inline(always)]
     pub fn update_scale(&mut self, test_id: TestId, scale: &Option<i8>) -> (bool, i32) {
-        let local = (test_id & 0xFFFF_FFFF) as usize;
+        let local = get_local_id(test_id);
         if local >= self.scale_vals.len() {
             self.scale_vals.resize(local + 1, None);
         }
@@ -490,7 +490,7 @@ impl RecordTracker {
     /// return `true` if test_id is already in both limit hashmaps
     #[inline(always)]
     pub fn default_limits_contains_id(&mut self, test_id: TestId) -> bool {
-        let local = (test_id & 0xFFFF_FFFF) as usize;
+        let local = get_local_id(test_id);
         matches!(self.default_llimit.get(local), Some(Some(_)))
             && matches!(self.default_hlimit.get(local), Some(Some(_)))
     }
@@ -498,7 +498,7 @@ impl RecordTracker {
     /// return `true` if test_id is already in hashmap, no update
     #[inline(always)]
     pub fn update_default_limits(&mut self, test_id: TestId, llimit: f32, hlimit: f32) -> bool {
-        let local = (test_id & 0xFFFF_FFFF) as usize;
+        let local = get_local_id(test_id);
         if local >= self.default_llimit.len() {
             self.default_llimit.resize(local + 1, None);
             self.default_hlimit.resize(local + 1, None);
@@ -526,7 +526,7 @@ impl RecordTracker {
         llimit: f32,
         hlimit: f32,
     ) -> Result<(bool, bool), StdfHelperError> {
-        let local = (test_id & 0xFFFF_FFFF) as usize;
+        let local = get_local_id(test_id);
         // llimit
         let llimit_changed = match self.default_llimit.get(local).copied().flatten() {
             Some(dft_ll) => {
