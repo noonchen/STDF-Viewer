@@ -1445,6 +1445,8 @@ class MyWindow(QtWidgets.QMainWindow):
             # the database is usable from here on
             self._fileLoading = False
             self.onSelect()
+            # the build is over, so the percentage has nothing left to report
+            self.loaderProgress.hide()
 
     
     @Slot(int)
