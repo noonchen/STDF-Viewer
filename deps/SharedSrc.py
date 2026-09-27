@@ -731,6 +731,100 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
         openOrRevealFileInOS(outPath, True)
 
 
+def join_cells(values, size: int = None) -> str:
+    """Join the values of one field group for display.
+
+    Single value: the value itself. Several values: numbered lines
+    (`#1 → a\\n#2 → b`). `size` may be given to avoid re-measuring `values`.
+    """
+    values = list(values)
+    n = len(values) if size is None else size
+    if n < 2:
+        return values[0] if values else ""
+    return "\n".join("#%d → %s" % (i + 1, v) for i, v in enumerate(values))
+
+
+def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
+                      dut_count_dict: dict, info_dict: dict,
+                      wafer_count: tuple = (), contains_wafer: bool = False,
+                      num_files: int = 1) -> list:
+    """Build the File Info rows shown in the Detailed Info tab.
+
+    Both the database connection (`DataInterface.getFileMetaData()`) and the
+    early header read (`uic_stdLoader.format_header_info()`) go through here, so
+    the table has exactly one layout definition and never shifts once the
+    database replaces the early values.
+
+    Order: file info, DUT counters, the MIR fields in `mirFieldNames` order,
+    wafer info (only when the file has wafers), then the remaining fields sorted
+    by name.
+    """
+    meta = []
+    meta.append(["File Name: ", join_cells(file_names)])
+    meta.append(["Directory Path: ",
+                 *tuple(os.path.dirname(fg[0]) for fg in file_paths)])
+    meta.append(["File Size: ", join_cells(file_sizes)])
+
+    counts = {k: tuple(v) for k, v in (dut_count_dict or {}).items()}
+
+    def _yield(p, f):
+        # the early table passes "..." placeholders until the build reports
+        if not isinstance(p, int) or not isinstance(f, int):
+            return p if p == f else "?"
+        return "%.2f%%" % (100 * p / (p + f)) if (p + f) else "?"
+
+    pairs = zip(counts.get("Pass", ()), counts.get("Failed", ()))
+    meta.append(["Yield: ", *[_yield(p, f) for (p, f) in pairs]])
+    meta.append(["DUTs Tested: ", *[str(n) for n in counts.get("Total", ())]])
+    meta.append(["DUTs Passed: ", *[str(n) for n in counts.get("Pass", ())]])
+    meta.append(["DUTs Failed: ", *[str(n) for n in counts.get("Failed", ())]])
+    meta.append(["DUTs Superseded: ", *[str(n) for n in counts.get("Superseded", ())]])
+    meta.append(["DUTs Unknown: ", *[str(n) for n in counts.get("Unknown", ())]])
+
+    remaining = dict(info_dict)
+    for name in mirFieldNames:
+        value = remaining.pop(name, ())
+        if value == ():
+            continue  # the file does not carry this MIR field
+        meta.append(["%s: " % mirDict[name],
+                     *[v if v is not None else "" for v in value]])
+
+    if contains_wafer:
+        meta.append(["Wafers Tested: ", *list(map(str, wafer_count))])
+        unit = remaining.pop("WF_UNITS", [""] * num_files)
+        if "WAFR_SIZ" in remaining:
+            meta.append(["Wafer Size: ",
+                         *["%s %s" % (s, u) if s is not None and u is not None else ""
+                           for (s, u) in zip(remaining.pop("WAFR_SIZ"), unit)]])
+        if "DIE_WID" in remaining and "DIE_HT" in remaining:
+            wid, ht = remaining.pop("DIE_WID"), remaining.pop("DIE_HT")
+            meta.append(["Wafer Die Width Height: ",
+                         *["%s %s × %s %s" % (w, u, h, u)
+                           if w is not None and h is not None and u is not None else ""
+                           for (w, h, u) in zip(wid, ht, unit)]])
+        if "CENTER_X" in remaining and "CENTER_Y" in remaining:
+            cx, cy = remaining.pop("CENTER_X"), remaining.pop("CENTER_Y")
+            meta.append(["Wafer Center: ",
+                         *["(%s, %s)" % (x, y) if x is not None and y is not None else ""
+                           for (x, y) in zip(cx, cy)]])
+        if "WF_FLAT" in remaining:
+            meta.append(["Wafer Flat Direction: ",
+                         *[wafer_direction_name(d) if d is not None else ""
+                           for d in remaining.pop("WF_FLAT")]])
+        if "POS_X" in remaining and "POS_Y" in remaining:
+            px, py = remaining.pop("POS_X"), remaining.pop("POS_Y")
+            meta.append(["Wafer XY Direction: ",
+                         *["(%s, %s)" % (wafer_direction_name(x), wafer_direction_name(y))
+                           if x is not None and y is not None else ""
+                           for (x, y) in zip(px, py)]])
+
+    # remaining header records (ATR, RDR, SDR, ...), sorted for a stable order
+    for name in sorted(remaining):
+        meta.append(["%s: " % name,
+                     *[v if v is not None else "" for v in remaining[name]]])
+    return meta
+
+
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
            "getSetting", "updateRecentFolder", 
@@ -745,5 +839,5 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "showCompleteMessage", "rHEX", "get_file_size", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
-           "wafer_direction_name",
+           "wafer_direction_name", "buildFileMetaData", "join_cells",
            ]

@@ -27,6 +27,7 @@
 import os, sys, gc, traceback, atexit
 import json, logging, urllib.request as rq
 import shutil
+import time
 import numpy as np
 from itertools import product
 from deps.SharedSrc import *
@@ -34,7 +35,7 @@ from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
 from deps.ChartWidgets import *
-from deps.uic_stdLoader import stdfLoader
+from deps.uic_stdLoader import COUNTER_LABELS, format_header_info, stdfLoader
 from deps.uic_stdMerge import MergePanel
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
@@ -79,6 +80,8 @@ logger = logging.getLogger(LOG_NAME)
 
 class signals4MainUI(QtCore.QObject):
     dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
+    metadataSignal = Signal(object)   # early MIR/file info, before DB is ready
+    loadStartedSignal = Signal()      # ask the window to clear old data before loading
     statusSignal = Signal(str, bool, bool, bool)   # status bar
     showDutDataSignal_TrendHisto = Signal(list)     # trend & histo
     showDutDataSignal_Bin = Signal(list)            # bin chart
@@ -113,12 +116,36 @@ class MyWindow(QtWidgets.QMainWindow):
         # init and connect signals
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
+        self.signals.metadataSignal.connect(self.showEarlyMetadata)
+        self.signals.loadStartedSignal.connect(self.prepareForLoading)
         self.signals.statusSignal.connect(self.updateStatus)
         self.signals.showDutDataSignal_TrendHisto.connect(self.onReadDutData_TrendHisto)
         self.signals.showDutDataSignal_Bin.connect(self.onReadDutData_Bin)
         self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
+        # progress + spinner are embedded in the status bar (no loader dialog).
+        # Same configuration the loader dialog's progress bar had: default Qt
+        # styling, 250x20, percentage centred inside the bar. The status bar
+        # message on the left says what is happening.
+        self.loaderProgress = QtWidgets.QProgressBar()
+        self.loaderProgress.setRange(0, 10000)
+        self.loaderProgress.setMinimumSize(QtCore.QSize(250, 20))
+        self.loaderProgress.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                          QtWidgets.QSizePolicy.Fixed)
+        self.loaderProgress.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.loaderProgress.setTextVisible(True)
+        self.loaderProgress.setFormat("0.00%")
+        self.loaderProgress.hide()
+        self.statusBar().addPermanentWidget(self.loaderProgress)
+        # grey italic font for the File Info counters that are still running;
+        # same point size so marking a row cannot change its height
+        self._counterFont = QtGui.QFont()
+        self._counterFont.setItalic(True)
+        # True from the moment a load starts until the new data is in place
+        self._fileLoading = False
+        self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
+        self.loader.signals.statsSignal.connect(self.updateEarlyStats)
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
@@ -160,6 +187,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # init callback for UI component
         self.ui.tabControl.currentChanged.connect(self.onSelect)
         self.ui.infoBox.currentChanged.connect(self.updateTestDataTable)
+
         # set drop down menu for session action
         self.utilityMenu = QtWidgets.QMenu()
         self.utilityMenu.addActions([self.ui.actionLoad_Session, 
@@ -726,12 +754,8 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateFileHeader(self):
         if isinstance(self.data_interface, DataInterface):
             # clear old info
+            self._clearCounterMarks()
             self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
-            
-            horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
-            verticalHeader = self.ui.fileInfoTable.verticalHeader()
-            horizontalHeader.setVisible(False)
-            verticalHeader.setVisible(False)
                 
             for tmpRow in self.data_interface.getFileMetaData():
                 # translate the first element, which is the field names
@@ -742,18 +766,44 @@ class MyWindow(QtWidgets.QMainWindow):
                     _ = [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
                 self.tmodel_info.appendRow(qitemRow)
             
-            # horizontalHeader.resizeSection(0, 250)
-            
-            for column in range(0, horizontalHeader.count()):
-                horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-                # horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
-            
-            # resize to content to show all texts, then add additional height to each row
-            for row in range(self.tmodel_info.rowCount()):
-                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.ResizeToContents)
-                newHeight = verticalHeader.sectionSize(row) + 20
-                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
-                verticalHeader.resizeSection(row, newHeight)
+            self.applyFileInfoStyle()
+    
+    
+    def _markCounterItem(self, item):
+        """Grey/italic while the counter is still a running total."""
+        item.setForeground(QtGui.QColor(150, 150, 150))
+        item.setFont(self._counterFont)
+
+    def _clearCounterMarks(self):
+        """Back to the author's plain black values (used for the final table)."""
+        items = getattr(self, "_earlyStatItems", None) or {}
+        for item in items.values():
+            item.setData(None, Qt.ItemDataRole.ForegroundRole)
+            item.setData(None, Qt.ItemDataRole.FontRole)
+
+    def applyFileInfoStyle(self):
+        '''
+        Apply the author's File Info layout to whatever rows are currently in
+        `tmodel_info`, so the entries shown early (before the database exists)
+        have exactly the same spacing as the final ones.
+
+        Column widths are fitted *before* the row heights are measured: on the
+        first fill the columns still have their default width, so a long value
+        like the directory path would wrap, report an inflated height and leave
+        the early rows unevenly spaced.
+        '''
+        horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
+        verticalHeader = self.ui.fileInfoTable.verticalHeader()
+        horizontalHeader.setVisible(False)
+        verticalHeader.setVisible(False)
+        for column in range(horizontalHeader.count()):
+            horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        # resize to content to show all texts, then add additional height to each row
+        for row in range(self.tmodel_info.rowCount()):
+            verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.ResizeToContents)
+            newHeight = verticalHeader.sectionSize(row) + 20
+            verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
+            verticalHeader.resizeSection(row, newHeight)
     
     
     def updateDutSummaryTable(self):
@@ -862,6 +912,12 @@ class MyWindow(QtWidgets.QMainWindow):
         return testList
     
     
+    def getSelectedWafers(self) -> list:
+        """Return list of tuple(wafer index, file id, wafer name) for the wafer list"""
+        return [parseTestString(ind.data(), True)
+                for ind in self.selModel_wafer.selection().indexes()]
+    
+    
     def onSelect(self):
         '''
         This func is called when events occurred in tab, site selection, test selection and wafer selection 
@@ -910,6 +966,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.updateTabContent()         # update tab
             
             self.preTab = currentTab
+            
             # always update pre selection at last
             self.selectionTracker[currentTab] = (selHeads, selSites, selTests)
     
@@ -969,7 +1026,7 @@ class MyWindow(QtWidgets.QMainWindow):
     def updateTestDataTable(self):
         if self.data_interface is None:
             return
-        
+
         if self.ui.infoBox.currentIndex() != 2:
             # do nothing if test data table is not selected
             return
@@ -978,61 +1035,7 @@ class MyWindow(QtWidgets.QMainWindow):
         d = self.data_interface.getTestDataTableContent(self.getSelectedTests(), 
                                                         self.getCheckedHeads(), 
                                                         self.getCheckedSites())
-        self.tmodel_data.setTestData(d["Data"])
-        self.tmodel_data.setTestInfo(d["TestInfo"])
-        self.tmodel_data.setDutIndexMap(d["dut2ind"])
-        self.tmodel_data.setDutInfoMap(d["dutInfo"])
-        self.tmodel_data.setTestLists(d["TestLists"])
-        self.tmodel_data.setHHeaderBase([self.tr("Part ID"), self.tr("Part Text"), self.tr("Test Head - Site")])
-        self.tmodel_data.setVHeaderBase([self.tr("Test Number"), self.tr("HLimit"), self.tr("LLimit"), self.tr("Unit")])
-        self.tmodel_data.setVHeaderExt(d["VHeader"])
-        self.tmodel_data.setFont(QtGui.QFont(settings.gen.font, 13 if isMac else 10))
-        self.tmodel_data.setFloatFormat(settings.getFloatFormat())
-        self.tmodel_data.layoutChanged.emit()
-        hheaderview = self.ui.rawDataTable.horizontalHeader()
-        hheaderview.setVisible(True)
-        # resize table columns to header string (test name)
-        for col in range(self.tmodel_data.columnCount()):
-            cellWidth = hheaderview.fontMetrics().horizontalAdvance(
-                self.tmodel_data.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-            )
-            hheaderview.resizeSection(col, max(cellWidth, 80))
-        self.ui.rawDataTable.verticalHeader().setVisible(True)
     
-                
-    def updateTabContent(self):
-        if self.data_interface is None:
-            return
-        
-        tabType = self.ui.tabControl.currentIndex()
-        selSites = self.getCheckedSites()
-        selHeads = self.getCheckedHeads()
-        # update Test Data table in info tab
-        if tabType == tab.Info:
-            # filter dut summary table if in Info tab and head & site changed
-            self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
-            self.updateTestDataTable()
-            return
-        
-        # get selected tests
-        if tabType in [tab.Bin, tab.Correlate]:
-            # BinChart & correlation are irrelevent to tests, 
-            # fake a list with only one element
-            selTests = [""]
-        else:
-            selTests = self.getSelectedTests()
-        # clean all plots in the current layout
-        self.clearCurrentTab(tabType)
-        tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
-        for testTuple, head in product(selTests, selHeads):
-            chart = self.genPlot(testTuple, head, selSites, tabType)
-            if isinstance(chart, QtWidgets.QGraphicsView):
-                tabLayout.addWidget(chart)
-            elif isinstance(chart, list):
-                for c in chart:
-                    if isinstance(c, QtWidgets.QGraphicsView):
-                        tabLayout.addWidget(c)
-        
     
     def updateStatTableContent(self):
         if self.data_interface is None:
@@ -1101,7 +1104,41 @@ class MyWindow(QtWidgets.QMainWindow):
         horizontalHeader.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         # set min size to avoid "compressed" cells
         horizontalHeader.setMinimumSectionSize(80)
-                
+    
+    
+    def updateTabContent(self):
+        if self.data_interface is None:
+            return
+        
+        tabType = self.ui.tabControl.currentIndex()
+        selSites = self.getCheckedSites()
+        selHeads = self.getCheckedHeads()
+        # update Test Data table in info tab
+        if tabType == tab.Info:
+            # filter dut summary table if in Info tab and head & site changed
+            self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
+            self.updateTestDataTable()
+            return
+        
+        # get selected tests
+        if tabType in [tab.Bin, tab.Correlate]:
+            # BinChart & correlation are irrelevent to tests, 
+            # fake a list with only one element
+            selTests = [""]
+        else:
+            selTests = self.getSelectedTests()
+        # clean all plots in the current layout
+        self.clearCurrentTab(tabType)
+        tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
+        for testTuple, head in product(selTests, selHeads):
+            chart = self.genPlot(testTuple, head, selSites, tabType)
+            if isinstance(chart, QtWidgets.QGraphicsView):
+                tabLayout.addWidget(chart)
+            elif isinstance(chart, list):
+                for c in chart:
+                    if isinstance(c, QtWidgets.QGraphicsView):
+                        tabLayout.addWidget(c)
+    
     
     def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
         '''
@@ -1149,8 +1186,8 @@ class MyWindow(QtWidgets.QMainWindow):
             return bcharts
         
         return None
-            
-            
+    
+    
     def getFileInfoForReport(self):
         # this table uses standarded model
         model = self.tmodel_info
@@ -1405,9 +1442,129 @@ class MyWindow(QtWidgets.QMainWindow):
             self.updateFileHeader()
             self.updateDutSummaryTable()
             self.updateGDR_DTR_Table()
+            # the database is usable from here on
+            self._fileLoading = False
             self.onSelect()
 
     
+    @Slot(int)
+    def onLoaderProgress(self, num: int):
+        # the percentage stays inside the bar, including the final 100%
+        self.loaderProgress.setValue(min(num, 10000))
+        self.loaderProgress.setFormat("%.2f%%" % (num / 100.0))
+        self.loaderProgress.show()
+
+    @Slot()
+    def prepareForLoading(self):
+        """Clear the previous file's UI before a new load starts."""
+        self._fileLoading = True
+        self.loaderProgress.setValue(0)
+        self.loaderProgress.setFormat("0.00%")
+        self.loaderProgress.show()
+        # close the previous database interface
+        if self.data_interface is not None:
+            try:
+                self.data_interface.close()
+            except Exception:
+                logger.exception("cannot close previous data interface")
+            self.data_interface = None
+        # clear plots and selection tracking
+        self.clearAllContents()
+        # clear test / wafer lists
+        self.completeTestList = []
+        self.completeWaferList = []
+        self.updateModelContent(self.sim_list, [])
+        self.updateModelContent(self.sim_list_wafer, [])
+        # clear file info (early MIR will repopulate it right away)
+        self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+        self._earlyStatItems = {}
+        # clear SQL models before closing the Qt database
+        self.tmodel_dut.clear()
+        self.tmodel_datalog.clear()
+        if self.db_dut.isOpen():
+            self.db_dut.close()
+        # clear statistic / raw data models
+        self.tmodel.setContent([])
+        self.tmodel.setColumnCount(0)
+        self.tmodel.setHHeader([])
+        self.tmodel.setVHeader([])
+        self.tmodel.layoutChanged.emit()
+        self.tmodel_data.setTestData({})
+        self.tmodel_data.setTestInfo({})
+        self.tmodel_data.setDutIndexMap({})
+        self.tmodel_data.setDutInfoMap({})
+        self.tmodel_data.setTestLists([])
+        self.tmodel_data.layoutChanged.emit()
+        self.preTab = None
+        self.setWindowTitle("STDF Viewer")
+        self.statusBar().showMessage("Loading STDF file...")
+
+    @Slot(object)
+    def showEarlyMetadata(self, payload: object):
+        """MIR/header info is available before the database build finishes."""
+        # empty counters first: the table then has exactly the final row order,
+        # and the counter cells are filled in place as the counts come in
+        rows = format_header_info(payload, self._emptyDutCounts())
+        if not rows:
+            return
+        self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+        self._earlyStatItems = {}
+        counter_labels = {self.tr(label) + ": " for label in COUNTER_LABELS}
+        for row in rows:
+            items = [QtGui.QStandardItem(self.tr(cell) if i == 0 else str(cell))
+                     for i, cell in enumerate(row)]
+            self.tmodel_info.appendRow(items)
+            if items and items[0].text() in counter_labels:
+                for item in items[1:]:
+                    self._markCounterItem(item)
+                self._earlyStatItems[items[0].text()[:-2]] = items[1]
+        self.applyFileInfoStyle()
+        meta = ((payload.get("groups") or [{}])[0].get("meta") or {})
+        self.statusBar().showMessage(
+            "MIR ready: %s | loading data..." % (meta.get("LOT_ID") or "?"))
+
+    @staticmethod
+    def _emptyDutCounts() -> dict:
+        """Counters before the build reports anything: shown as '...'."""
+        return {key: ("...",) for key in
+                ("Total", "Pass", "Failed", "Superseded", "Unknown")}
+
+    @Slot(object)
+    def updateEarlyStats(self, payload: object):
+        """Update the File Info counters while the DB is building."""
+        items = getattr(self, "_earlyStatItems", None)
+        if not items:
+            return
+        rows = []
+        if isinstance(payload, (list, tuple)):
+            for row in payload:
+                if isinstance(row, (list, tuple)) and len(row) >= 6:
+                    try:
+                        rows.append(tuple(int(x) for x in row[:6]))
+                    except (TypeError, ValueError):
+                        return
+        if not rows:
+            return
+        totals = [sum(r[i] for r in rows) for i in range(6)]
+        total, passed, failed, superseded, unknown, tests = totals
+        values = {
+            "Yield": f"{100 * passed / (passed + failed):.2f}%" if (passed + failed) else "?",
+            "DUTs Tested": str(total),
+            "DUTs Passed": str(passed),
+            "DUTs Failed": str(failed),
+            "DUTs Superseded": str(superseded),
+            "DUTs Unknown": str(unknown),
+        }
+        for label, value in values.items():
+            item = items.get(label)
+            if item is not None:
+                item.setText(value)
+        # only the numbers changed, so keep the row geometry untouched, just
+        # fit the wider text; the row height comes from applyFileInfoStyle()
+        for column in range(self.ui.fileInfoTable.horizontalHeader().count()):
+            self.ui.fileInfoTable.resizeColumnToContents(column)
+        self.statusBar().showMessage("Building database...")
+
     @Slot(str, bool, bool, bool)
     def updateStatus(self, new_msg, info=False, warning=False, error=False):
         self.statusBar().showMessage(new_msg)

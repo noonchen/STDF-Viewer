@@ -481,6 +481,11 @@ impl RecordTracker {
     }
 
     #[inline(always)]
+    pub fn test_count(&self) -> u64 {
+        self.test_id_counter as u64
+    }
+
+    #[inline(always)]
     pub fn uses_test_name(&self) -> bool {
         self.id_type == TestIDType::TestNumberAndName
     }

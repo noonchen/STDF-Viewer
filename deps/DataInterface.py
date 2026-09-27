@@ -62,9 +62,8 @@ class DataInterface:
         self.file_paths = self.DatabaseFetcher.file_paths
         self.num_files = self.DatabaseFetcher.num_files
         # get file name and size str for display
-        add_i_ifmany_then_join = lambda l, sz: "\n".join(l if sz < 2 else (f"#{i+1} → {e}" for i, e in enumerate(l)))
-        self.file_names = [add_i_ifmany_then_join(map(os.path.basename, fg), len(fg)) for fg in self.file_paths]
-        self.file_sizes = [add_i_ifmany_then_join(map(get_file_size, fg), len(fg)) for fg in self.file_paths]
+        self.file_names = [join_cells(map(os.path.basename, fg), len(fg)) for fg in self.file_paths]
+        self.file_sizes = [join_cells(map(get_file_size, fg), len(fg)) for fg in self.file_paths]
         self.containsWafer = any(map(lambda c: c>0, self.DatabaseFetcher.getWaferCount()))
         # for site/head selection
         self.availableSites = self.DatabaseFetcher.getSiteList()
@@ -98,79 +97,20 @@ class DataInterface:
     
     
     def getFileMetaData(self) -> list:
-        metaDataList = []
         # if database is not exist,
         # return a empty list instead
         if not self.dbConnected:
-            return metaDataList
-        # some basic os info
-        metaDataList.append(["File Name: ", *self.file_names ])
-        metaDataList.append(["Directory Path: ", *(os.path.dirname(fg[0]) for fg in self.file_paths) ])
-        metaDataList.append(["File Size: ", *self.file_sizes ])
-        # dut summary
-        dutCntDict = self.DatabaseFetcher.getDUTCountDict()
-        metaDataList.append(["Yield: ", *[f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?" for (p, f) in zip(dutCntDict["Pass"], dutCntDict["Failed"])] ])
-        metaDataList.append(["DUTs Tested: ", *[str(n) for n in dutCntDict["Total"]] ])
-        metaDataList.append(["DUTs Passed: ", *[str(n) for n in dutCntDict["Pass"]] ])
-        metaDataList.append(["DUTs Failed: ", *[str(n) for n in dutCntDict["Failed"]] ])
-        metaDataList.append(["DUTs Superseded: ", *[str(n) for n in dutCntDict["Superseded"]] ])
-        metaDataList.append(["DUTs Unknown: ", *[str(n) for n in dutCntDict["Unknown"]] ])
-        # MIR Record data
-        InfoDict = self.DatabaseFetcher.getFileInfo()
-        for fn in mirFieldNames:
-            value: tuple = InfoDict.pop(fn, ())
-            if value == (): 
-                # skip non-existed MIR fields
-                continue
-            metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
-        if self.containsWafer:
-            metaDataList.append(["Wafers Tested: ", *list(map(str, self.DatabaseFetcher.getWaferCount())) ])
-            wafer_unit_tuple = InfoDict.pop("WF_UNITS", ["" for _ in range(self.num_files)])
-            if "WAFR_SIZ" in InfoDict:
-                wafer_size_tuple = InfoDict.pop("WAFR_SIZ")
-                metaDataList.append(["Wafer Size: ", 
-                                     *[f"{size} {unit}" 
-                                       if size is not None and unit is not None 
-                                       else "" 
-                                       for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
-            if "DIE_WID" in InfoDict and "DIE_HT" in InfoDict:
-                wid_tuple = InfoDict.pop("DIE_WID")
-                ht_tuple = InfoDict.pop("DIE_HT")
-                metaDataList.append(["Wafer Die Width Height: ", 
-                                     *[f"{wid} {unit} × {ht} {unit}" 
-                                       if wid is not None and ht is not None and unit is not None 
-                                       else "" 
-                                       for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
-            if "CENTER_X" in InfoDict and "CENTER_Y" in InfoDict:
-                cent_x_tuple = InfoDict.pop("CENTER_X")
-                cent_y_tuple = InfoDict.pop("CENTER_Y")
-                metaDataList.append(["Wafer Center: ", 
-                                     *[f"({x}, {y})" 
-                                       if x is not None and y is not None 
-                                       else "" 
-                                       for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
-            if "WF_FLAT" in InfoDict:
-                flat_orient_tuple = InfoDict.pop("WF_FLAT")
-                metaDataList.append(["Wafer Flat Direction: ", 
-                                     *[wafer_direction_name(d) 
-                                       if d is not None 
-                                       else "" 
-                                       for d in flat_orient_tuple] ])
-            if "POS_X" in InfoDict and "POS_Y" in InfoDict:
-                pos_x_tuple = InfoDict.pop("POS_X")
-                pos_y_tuple = InfoDict.pop("POS_Y")
-                self.waferOrientation = (pos_x_tuple, pos_y_tuple)
-                metaDataList.append(["Wafer XY Direction: ", 
-                                     *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" 
-                                       if x_orient is not None and y_orient is not None 
-                                       else "" 
-                                       for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
-        # append other info: ATR, RDR, SDRs, sort names for better display
-        for propertyName in sorted(InfoDict.keys()):
-            value: tuple = InfoDict[propertyName]
-            metaDataList.append([f"{propertyName}: ", *[v if v is not None else "" for v in value]])
-        
-        return metaDataList
+            return []
+        infoDict = self.DatabaseFetcher.getFileInfo()
+        # keep the orientation for the wafer map; the row itself is laid out by
+        # the shared builder
+        if "POS_X" in infoDict and "POS_Y" in infoDict:
+            self.waferOrientation = (infoDict["POS_X"], infoDict["POS_Y"])
+        return buildFileMetaData(
+            self.file_names, self.file_paths, self.file_sizes,
+            self.DatabaseFetcher.getDUTCountDict(), infoDict,
+            wafer_count=self.DatabaseFetcher.getWaferCount(),
+            contains_wafer=self.containsWafer, num_files=self.num_files)
         
     
     def checkTestPassFail(self, testTuple: tuple) -> bool:
