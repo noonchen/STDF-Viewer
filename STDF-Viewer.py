@@ -144,6 +144,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self._counterFont.setItalic(True)
         # True from the moment a load starts until the new data is in place
         self._fileLoading = False
+        # set when the user asked to close while a load was still running
+        self._closeRequested = False
         self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
         self.loader.signals.statsSignal.connect(self.updateEarlyStats)
         self.mergePanel = MergePanel(self)
@@ -1447,6 +1449,10 @@ class MyWindow(QtWidgets.QMainWindow):
             self.onSelect()
             # the build is over, so the percentage has nothing left to report
             self.loaderProgress.hide()
+            if self._closeRequested:
+                # the user wanted out while this was still building; the loader
+                # has finished, so closing now does not cut the thread short
+                self.close()
 
     
     @Slot(int)
@@ -1627,6 +1633,24 @@ class MyWindow(QtWidgets.QMainWindow):
         return False
       
         
+    def closeEvent(self, event):
+        # The loader used to be a dialog, and its own closeEvent asked before
+        # dropping a build in progress. The dialog is gone now, so the question
+        # lives here: the same choice, the same rule -- set the stop flag and
+        # let the thread finish its job instead of killing it.
+        thread = self.loader.__dict__.get("thread")
+        if thread is not None and thread.isRunning():
+            answer = QMessageBox.question(
+                self, self.tr("QUIT"),
+                self.tr("Are you sure want to stop reading?"),
+                QMessageBox.Yes | QMessageBox.No)
+            if answer == QMessageBox.Yes:
+                self._closeRequested = True
+                self.loader.reader.flag.stop = True
+            event.ignore()
+            return
+        super().closeEvent(event)
+
     def onException(self, errorType, errorValue, tb):
         logger.error("Uncaught Error occurred", exc_info=(errorType, errorValue, tb))
         errMsg = traceback.format_exception(errorType, errorValue, tb, limit=0)
