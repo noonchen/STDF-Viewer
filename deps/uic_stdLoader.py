@@ -51,8 +51,7 @@ COUNTER_LABELS = ["Yield", "DUTs Tested", "DUTs Passed", "DUTs Failed",
                   "DUTs Superseded", "DUTs Unknown"]
 
 
-# fields whose several occurrences within one file group are all shown; the
-# others only keep the first occurrence (see DatabaseFetcherRust.getFileInfo)
+# joined per file; getFileInfo shows only the first occurrence
 JOINED_FIELDS = ("SETUP_T", "START_T", "FINISH_T", "SBLOT_ID")
 
 
@@ -86,8 +85,7 @@ def header_info_fields(groups: list) -> dict:
             else:
                 cell = per_file[0]
             fields.setdefault(name, []).append(cell)
-    # the database writes FINISH_T unconditionally, once per file (epoch when
-    # the file carries none), so show the same row here
+    # the database writes this unconditionally, once per file
     for group in groups:
         names = group.get("paths") or group.get("names") or []
         n = max(1, len(names))
@@ -209,8 +207,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         
     def loadFile(self, stdPaths: list[list[str]]):
-        # ignore a new request while the previous one is still running
-        # (use __dict__ because QObject also has a thread() method)
+        # __dict__ because QObject also has a thread() method
         _running_thread = self.__dict__.get("thread")
         if _running_thread is not None and _running_thread.isRunning():
             return
@@ -220,8 +217,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.closeEventByThread = False    # init at new file
         self.loaderUI.progressBar.setFormat("0.00%%")
         self.loaderUI.progressBar.setValue(0)
-        # Read MIR (and basic file info) before the DB build starts so the
-        # main window can show something immediately.
+        # read headers first so the window can show something immediately
         self.sendEarlyMetadata(stdPaths)
         self.closeEventByThread = False    # init at new file
         self.loaderUI.progressBar.setFormat("0.00%%")
@@ -240,8 +236,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.reader.moveToThread(self.thread)
         self.thread.started.connect(self.reader.readBegin)
         self.thread.start()
-        # The loader dialog is intentionally not shown: progress is rendered
-        # in the main window status bar instead.
+        # the dialog is not shown; progress is rendered in the status bar
     
     def sendEarlyMetadata(self, stdPaths: list[list[str]]):
         """Read the header of every file group and emit it immediately.

@@ -102,8 +102,7 @@ class DataInterface:
         if not self.dbConnected:
             return []
         infoDict = self.DatabaseFetcher.getFileInfo()
-        # keep the orientation for the wafer map; the row itself is laid out by
-        # the shared builder
+        # orientation is kept for the wafer map
         if "POS_X" in infoDict and "POS_Y" in infoDict:
             self.waferOrientation = (infoDict["POS_X"], infoDict["POS_Y"])
         return buildFileMetaData(

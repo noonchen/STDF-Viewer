@@ -14,8 +14,7 @@ use rust_stdf::{stdf_file::*, ByteOrder, StdfRecordView};
 /// Returns FAR/ATR/SDR fields and the first WIR (if any). This is a bounded
 /// header scan: it stops at the first DUT-level record (PIR/PTR/MPR/FTR/PRR)
 /// or after the first WIR.
-#[pyfunction]
-#[pyo3(name = "read_header_extra")]
+#[pyfunction(name = "read_header_extra")]
 pub fn read_header_extra<'py>(py: Python<'py>, fpath: String) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
     let mut reader = match StdfReader::new(&fpath) {

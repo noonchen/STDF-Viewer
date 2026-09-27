@@ -124,10 +124,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
-        # progress + spinner are embedded in the status bar (no loader dialog).
-        # Same configuration the loader dialog's progress bar had: default Qt
-        # styling, 250x20, percentage centred inside the bar. The status bar
-        # message on the left says what is happening.
+        # same configuration the loader dialog's bar had
         self.loaderProgress = QtWidgets.QProgressBar()
         self.loaderProgress.setRange(0, 10000)
         self.loaderProgress.setMinimumSize(QtCore.QSize(250, 20))
@@ -138,18 +135,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self.loaderProgress.setFormat("0.00%")
         self.loaderProgress.hide()
         self.statusBar().addPermanentWidget(self.loaderProgress)
-        # grey italic font for the File Info counters that are still running;
-        # same point size so marking a row cannot change its height
+        # grey italic, same point size so a marked row keeps its height
         self._counterFont = QtGui.QFont()
         self._counterFont.setItalic(True)
-        # True from the moment a load starts until the new data is in place
+        # true while a load runs, so panes without content spin
         self._fileLoading = False
         # set when the user asked to close while a load was still running
         self._closeRequested = False
         self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
         self.loader.signals.statsSignal.connect(self.updateEarlyStats)
-        # the loader emits this when its thread is done; if the user asked to
-        # close while it was building, the window goes away now that it is safe
+        # the loader emits this once its thread is done
         self.loader.signals.closeSignal.connect(self.onLoaderFinished)
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
@@ -1509,8 +1504,7 @@ class MyWindow(QtWidgets.QMainWindow):
     @Slot(object)
     def showEarlyMetadata(self, payload: object):
         """MIR/header info is available before the database build finishes."""
-        # empty counters first: the table then has exactly the final row order,
-        # and the counter cells are filled in place as the counts come in
+        # empty counters first, so the row order is already the final one
         rows = format_header_info(payload, self._emptyDutCounts())
         if not rows:
             return
@@ -1566,8 +1560,7 @@ class MyWindow(QtWidgets.QMainWindow):
             item = items.get(label)
             if item is not None:
                 item.setText(value)
-        # only the numbers changed, so keep the row geometry untouched, just
-        # fit the wider text; the row height comes from applyFileInfoStyle()
+        # only the numbers changed; row height comes from applyFileInfoStyle()
         for column in range(self.ui.fileInfoTable.horizontalHeader().count()):
             self.ui.fileInfoTable.resizeColumnToContents(column)
         self.statusBar().showMessage("Building database...")
@@ -1636,15 +1629,11 @@ class MyWindow(QtWidgets.QMainWindow):
     def onLoaderFinished(self):
         """The loader thread is done -- stopped early or finished normally."""
         if self._closeRequested:
-            # the build was cut short, so the "database is ready" path will not
-            # run; this is the only place left that closes the window
+            # a stopped build never reaches the "database is ready" path
             self.close()
 
     def closeEvent(self, event):
-        # The loader used to be a dialog, and its own closeEvent asked before
-        # dropping a build in progress. The dialog is gone now, so the question
-        # lives here: the same choice, the same rule -- set the stop flag, let
-        # the thread finish, and close once the loader reports it is done.
+        # the loader dialog that used to ask this is gone, so ask here
         thread = self.loader.__dict__.get("thread")
         if thread is not None and thread.isRunning():
             answer = QMessageBox.question(
@@ -1653,9 +1642,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 QMessageBox.Yes | QMessageBox.No)
             if answer == QMessageBox.Yes:
                 self._closeRequested = True
-                # closeLoader() drops the reader once the thread is done, so a
-                # build that finished while the question was up has nothing left
-                # to stop -- the queued closeSignal closes the window instead
+                # a build that ended while the question was up has no reader left
                 reader = self.loader.reader
                 if reader is not None:
                     reader.flag.stop = True
