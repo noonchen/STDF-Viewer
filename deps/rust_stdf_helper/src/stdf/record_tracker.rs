@@ -81,7 +81,7 @@ impl TestSubCode {
 }
 
 /// L1 cache entry for the hot `(file_id, test_num, test_name) -> TestId` lookup.
-struct TestCacheEntry {
+struct TestIdCacheEntry {
     file_id: usize,
     test_num: u32,
     name_hash: u64,
@@ -89,11 +89,11 @@ struct TestCacheEntry {
     test_id: TestId,
 }
 
-/// Ways per set; 1024 sets x 2 ways, flat layout `index = set * WAYS + way`.
-const TEST_CACHE_WAYS: usize = 2;
+/// Sets in the test id cache; must be a power of two.
+const TEST_ID_CACHE_SETS: usize = 1024;
 
-/// Sets in the test cache; must be a power of two.
-const TEST_CACHE_SETS: usize = 1024;
+/// Ways (entries) per test id cache set.
+const TEST_ID_CACHE_WAYS: usize = 2;
 
 #[inline(always)]
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -114,12 +114,12 @@ pub struct RecordTracker {
     // Nested so `TestNumberAndName` lookups can borrow the zero-copy view
     // string and only allocate on the vacant-entry path.
     id_map: HashMap<(usize, u32), HashMap<String, TestId>>,
-
-    // hot-path L1 cache for `id_map`, 2-way set associative
-    test_cache: Vec<Option<TestCacheEntry>>,
-
-    // per-set round-robin victim
-    test_cache_victim: Vec<u8>,
+    // hot-path L1 cache for `id_map`, N-way set associative,
+    // flat layout `index = set * TEST_ID_CACHE_WAYS + way`
+    id_cache: Vec<Option<TestIdCacheEntry>>,
+    // track next victim for each cache set to update using round-robin policy,
+    // when N-ways are all occupied.
+    id_cache_victim: Vec<u8>,
 
     // number of unique tests seen by this tracker; local component of TestId
     test_id_counter: usize,
@@ -136,9 +136,7 @@ pub struct RecordTracker {
 
     // file id, head, site -> dut index
     dut_index_tracker: HashMap<(usize, u8, u8), u64>,
-    // one-entry cache for `dut_index_tracker`: the same head/site often repeats,
-    // but records of a site are *not* guaranteed to be contiguous
-    // (see issue #87), so this is only a fast path
+    // one-entry cache for `dut_index_tracker`, only serves as a fast path
     dut_last: Option<(usize, u8, u8, u64)>,
 
     // file id, head -> wafer index
@@ -167,10 +165,10 @@ impl RecordTracker {
         RecordTracker {
             id_type,
             id_map: HashMap::with_capacity(1024),
-            test_cache: std::iter::repeat_with(|| None)
-                .take(TEST_CACHE_SETS * TEST_CACHE_WAYS)
+            id_cache: std::iter::repeat_with(|| None)
+                .take(TEST_ID_CACHE_SETS * TEST_ID_CACHE_WAYS)
                 .collect(),
-            test_cache_victim: vec![0; TEST_CACHE_SETS],
+            id_cache_victim: vec![0; TEST_ID_CACHE_SETS],
             test_id_counter: 0,
             scale_vals: Vec::with_capacity(1024),
             default_llimit: Vec::with_capacity(1024),
@@ -417,11 +415,12 @@ impl RecordTracker {
         test_txt: &str,
     ) -> Result<TestId, StdfHelperError> {
         let name_hash = fnv1a(test_txt.as_bytes());
-        let set = (test_num as usize) & (TEST_CACHE_SETS - 1);
-        let base = set * TEST_CACHE_WAYS;
+        let set = (test_num as usize) & (TEST_ID_CACHE_SETS - 1);
+        let base = set * TEST_ID_CACHE_WAYS;
 
-        for way in 0..TEST_CACHE_WAYS {
-            if let Some(e) = &self.test_cache[base + way] {
+        // check L1 cache for test id
+        for way in 0..TEST_ID_CACHE_WAYS {
+            if let Some(e) = &self.id_cache[base + way] {
                 if e.file_id == file_id
                     && e.test_num == test_num
                     && e.name_hash == name_hash
@@ -432,6 +431,7 @@ impl RecordTracker {
             }
         }
 
+        // fall back to the id map if L1 cache missed
         let names = self.id_map.entry((file_id, test_num)).or_default();
         let test_id = match names.get(test_txt) {
             Some(id) => *id,
@@ -446,31 +446,33 @@ impl RecordTracker {
 
         // fill empty ways first, otherwise two alternating tests thrash one way
         let mut slot = base;
-        for way in 0..TEST_CACHE_WAYS {
-            if self.test_cache[base + way].is_none() {
+        for way in 0..TEST_ID_CACHE_WAYS {
+            if self.id_cache[base + way].is_none() {
                 slot = base + way;
                 break;
             }
         }
-        if self.test_cache[slot].is_some() {
-            let victim = (self.test_cache_victim[set] as usize) % TEST_CACHE_WAYS;
-            self.test_cache_victim[set] = self.test_cache_victim[set].wrapping_add(1);
+        if self.id_cache[slot].is_some() {
+            // all ways are occupied, select a victim to update
+            // using round-robin policy
+            let victim = (self.id_cache_victim[set] as usize) % TEST_ID_CACHE_WAYS;
+            self.id_cache_victim[set] = self.id_cache_victim[set].wrapping_add(1);
             slot = base + victim;
         }
 
-        if self.test_cache[slot].is_none() {
-            self.test_cache[slot] = Some(TestCacheEntry {
+        if self.id_cache[slot].is_none() {
+            self.id_cache[slot] = Some(TestIdCacheEntry {
                 file_id,
                 test_num,
                 name_hash,
                 name: test_txt.to_owned(),
                 test_id,
             });
-        } else if let Some(e) = &mut self.test_cache[slot] {
+        } else if let Some(e) = &mut self.id_cache[slot] {
             e.file_id = file_id;
             e.test_num = test_num;
             e.name_hash = name_hash;
-            // keep the allocation; a same-length name does not reallocate
+            // reuse string allocation
             e.name.clear();
             e.name.push_str(test_txt);
             e.test_id = test_id;
