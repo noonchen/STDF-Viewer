@@ -148,6 +148,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self._closeRequested = False
         self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
         self.loader.signals.statsSignal.connect(self.updateEarlyStats)
+        # the loader emits this when its thread is done; if the user asked to
+        # close while it was building, the window goes away now that it is safe
+        self.loader.signals.closeSignal.connect(self.onLoaderFinished)
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
@@ -1449,10 +1452,6 @@ class MyWindow(QtWidgets.QMainWindow):
             self.onSelect()
             # the build is over, so the percentage has nothing left to report
             self.loaderProgress.hide()
-            if self._closeRequested:
-                # the user wanted out while this was still building; the loader
-                # has finished, so closing now does not cut the thread short
-                self.close()
 
     
     @Slot(int)
@@ -1633,11 +1632,19 @@ class MyWindow(QtWidgets.QMainWindow):
         return False
       
         
+    @Slot()
+    def onLoaderFinished(self):
+        """The loader thread is done -- stopped early or finished normally."""
+        if self._closeRequested:
+            # the build was cut short, so the "database is ready" path will not
+            # run; this is the only place left that closes the window
+            self.close()
+
     def closeEvent(self, event):
         # The loader used to be a dialog, and its own closeEvent asked before
         # dropping a build in progress. The dialog is gone now, so the question
-        # lives here: the same choice, the same rule -- set the stop flag and
-        # let the thread finish its job instead of killing it.
+        # lives here: the same choice, the same rule -- set the stop flag, let
+        # the thread finish, and close once the loader reports it is done.
         thread = self.loader.__dict__.get("thread")
         if thread is not None and thread.isRunning():
             answer = QMessageBox.question(
