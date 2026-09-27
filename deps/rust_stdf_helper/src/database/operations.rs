@@ -525,6 +525,12 @@ pub(crate) fn make_test_id(fid: usize, local_id: usize) -> Result<TestId, StdfHe
     Ok(i64::try_from(tid).unwrap())
 }
 
+/// Extract the local test id from a packed test id.
+#[inline(always)]
+pub(crate) fn get_local_id(test_id: TestId) -> usize {
+    (test_id & 0xFFFF_FFFF) as usize
+}
+
 #[inline(always)]
 pub(crate) fn push_cold_op(ops: &mut Vec<DbOp>, op: ColdOp) {
     ops.push(DbOp::Cold(Box::new(op)));
