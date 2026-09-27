@@ -136,7 +136,9 @@ pub struct RecordTracker {
 
     // file id, head, site -> dut index
     dut_index_tracker: HashMap<(usize, u8, u8), u64>,
-    // one-entry cache for `dut_index_tracker` (records of a site are contiguous)
+    // one-entry cache for `dut_index_tracker`: the same head/site often repeats,
+    // but records of a site are *not* guaranteed to be contiguous
+    // (see issue #87), so this is only a fast path
     dut_last: Option<(usize, u8, u8, u64)>,
 
     // file id, head -> wafer index
@@ -247,7 +249,14 @@ impl RecordTracker {
                 (String::new(), sbin_type)
             });
         // get dut_index
-        let dut_index = self.get_dut_index(file_id, head_num, site_num, 0)?;
+        let dut_index = self.get_dut_index(file_id, head_num, site_num).ok_or_else(|| {
+            StdfHelperError {
+                msg: format!(
+                    "STDF file structure error in File[{}]: PRR Head[{}] Site[{}] showed up before PIR",
+                    file_id, head_num, site_num
+                ),
+            }
+        })?;
         // get wafer_index if WIR is detected
         let wafer_index = self.wafer_index_tracker.get(&(file_id, head_num)).copied();
         Ok((dut_index, wafer_index))
@@ -357,7 +366,14 @@ impl RecordTracker {
         test_txt: Option<&str>,
     ) -> Result<(u64, TestId), StdfHelperError> {
         // get dut_index
-        let dut_index = self.get_dut_index(file_id, head_num, site_num, test_num)?;
+        let dut_index = self.get_dut_index(file_id, head_num, site_num).ok_or_else(|| {
+            StdfHelperError {
+                msg: format!(
+                    "STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR",
+                    file_id, test_num, head_num, site_num
+                ),
+            }
+        })?;
 
         let test_id = match self.id_type {
             TestIDType::TestNumberAndName => {
@@ -381,25 +397,19 @@ impl RecordTracker {
         file_id: usize,
         head_num: u8,
         site_num: u8,
-        test_num: u32,
-    ) -> Result<u64, StdfHelperError> {
+    ) -> Option<u64> {
         if let Some((f, h, s, idx)) = self.dut_last {
             if f == file_id && h == head_num && s == site_num {
-                return Ok(idx);
+                return Some(idx);
             }
         }
         match self.dut_index_tracker.get(&(file_id, head_num, site_num)) {
             Some(stored_ind) => {
                 let idx = *stored_ind;
                 self.dut_last = Some((file_id, head_num, site_num, idx));
-                Ok(idx)
+                Some(idx)
             }
-            None => Err(StdfHelperError {
-                msg: format!(
-                    "STDF file structure error in File[{}]: TestNumber[{}] Head[{}] Site[{}] showed up before PIR",
-                    file_id, test_num, head_num, site_num
-                ),
-            }),
+            None => None,
         }
     }
 
