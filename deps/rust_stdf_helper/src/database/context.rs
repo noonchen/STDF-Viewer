@@ -276,14 +276,14 @@ impl<'con> DatabaseCtx<'con> {
         if self.ptr_batch.len() >= ROWS_PER_BATCH {
             {
                 let stmt = &mut self.insert_ptr_batch_stmt;
-                let mut params: Vec<&dyn ToSql> = Vec::with_capacity(ROWS_PER_BATCH * 4);
-                for r in self.ptr_batch.iter() {
-                    params.push(&r.dut);
-                    params.push(&r.tid);
-                    params.push(&r.result);
-                    params.push(&r.flag);
+                for (index, row) in self.ptr_batch.iter().enumerate() {
+                    let param = index * 4 + 1;
+                    stmt.raw_bind_parameter(param, row.dut)?;
+                    stmt.raw_bind_parameter(param + 1, row.tid)?;
+                    stmt.raw_bind_parameter(param + 2, row.result)?;
+                    stmt.raw_bind_parameter(param + 3, row.flag)?;
                 }
-                stmt.execute(params.as_slice())?;
+                stmt.raw_execute()?;
             }
             self.ptr_batch.clear();
         }
@@ -302,13 +302,13 @@ impl<'con> DatabaseCtx<'con> {
         if self.ftr_batch.len() >= ROWS_PER_BATCH {
             {
                 let stmt = &mut self.insert_ftr_batch_stmt;
-                let mut params: Vec<&dyn ToSql> = Vec::with_capacity(ROWS_PER_BATCH * 3);
-                for r in self.ftr_batch.iter() {
-                    params.push(&r.dut);
-                    params.push(&r.tid);
-                    params.push(&r.flag);
+                for (index, row) in self.ftr_batch.iter().enumerate() {
+                    let param = index * 3 + 1;
+                    stmt.raw_bind_parameter(param, row.dut)?;
+                    stmt.raw_bind_parameter(param + 1, row.tid)?;
+                    stmt.raw_bind_parameter(param + 2, row.flag)?;
                 }
-                stmt.execute(params.as_slice())?;
+                stmt.raw_execute()?;
             }
             self.ftr_batch.clear();
         }
@@ -335,15 +335,15 @@ impl<'con> DatabaseCtx<'con> {
         if self.mpr_batch.len() >= ROWS_PER_BATCH {
             {
                 let stmt = &mut self.insert_mpr_batch_stmt;
-                let mut params: Vec<&dyn ToSql> = Vec::with_capacity(ROWS_PER_BATCH * 5);
-                for r in self.mpr_batch.iter() {
-                    params.push(&r.dut);
-                    params.push(&r.tid);
-                    params.push(&r.rslt);
-                    params.push(&r.stat);
-                    params.push(&r.flag);
+                for (index, row) in self.mpr_batch.iter().enumerate() {
+                    let param = index * 5 + 1;
+                    stmt.raw_bind_parameter(param, row.dut)?;
+                    stmt.raw_bind_parameter(param + 1, row.tid)?;
+                    stmt.raw_bind_parameter(param + 2, &row.rslt)?;
+                    stmt.raw_bind_parameter(param + 3, &row.stat)?;
+                    stmt.raw_bind_parameter(param + 4, row.flag)?;
                 }
-                stmt.execute(params.as_slice())?;
+                stmt.raw_execute()?;
             }
             self.mpr_batch.clear();
         }
@@ -370,15 +370,15 @@ impl<'con> DatabaseCtx<'con> {
         if self.datalog_batch.len() >= ROWS_PER_BATCH {
             {
                 let stmt = &mut self.insert_datalog_batch_stmt;
-                let mut params: Vec<&dyn ToSql> = Vec::with_capacity(ROWS_PER_BATCH * 5);
-                for r in self.datalog_batch.iter() {
-                    params.push(&r.fid);
-                    params.push(&r.rec_type);
-                    params.push(&r.value);
-                    params.push(&r.dut_index);
-                    params.push(&r.is_before_prr);
+                for (index, row) in self.datalog_batch.iter().enumerate() {
+                    let param = index * 5 + 1;
+                    stmt.raw_bind_parameter(param, row.fid)?;
+                    stmt.raw_bind_parameter(param + 1, row.rec_type)?;
+                    stmt.raw_bind_parameter(param + 2, &row.value)?;
+                    stmt.raw_bind_parameter(param + 3, row.dut_index)?;
+                    stmt.raw_bind_parameter(param + 4, row.is_before_prr)?;
                 }
-                stmt.execute(params.as_slice())?;
+                stmt.raw_execute()?;
             }
             self.datalog_batch.clear();
         }
