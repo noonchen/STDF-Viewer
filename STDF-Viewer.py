@@ -80,16 +80,31 @@ logger = logging.getLogger(LOG_NAME)
 class signals4MainUI(QtCore.QObject):
     dataInterfaceSignal = Signal(object)  # get `DataInterface` from loader
     statusSignal = Signal(str, bool, bool, bool)   # status bar
+    loadStatusSignal = Signal(str, int)            # status bar, loader messages with a timeout
     showDutDataSignal_TrendHisto = Signal(list)     # trend & histo
     showDutDataSignal_Bin = Signal(list)            # bin chart
     showDutDataSignal_Wafer = Signal(list)          # wafer
+    metadataSignal = Signal(object)                 # File Info read before the database
 
 
 class MyWindow(QtWidgets.QMainWindow):
+    # shown in the File Info entries that need the database
+    LOADING = "Loading"
+    
     def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        # whether the load currently running (or the last one) got a database
+        self._dbProduced = False
+        # whether a load is running right now
+        self._fileLoading = False
+        # the database to go back to when a load is abandoned
+        self._preDB = ""
+        # whether the user gave up on the load that is running
+        self._abandoned = False
+        # the window asked to close while a load was running
+        self._closeOnFinish = False
         sys.excepthook = self.onException
         # load fonts and config file
         loadFonts()
@@ -114,11 +129,15 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals = signals4MainUI()
         self.signals.dataInterfaceSignal.connect(self.updateData)
         self.signals.statusSignal.connect(self.updateStatus)
+        self.signals.loadStatusSignal.connect(self.updateLoadStatus)
+        self.signals.metadataSignal.connect(self.showEarlyFileInfo)
         self.signals.showDutDataSignal_TrendHisto.connect(self.onReadDutData_TrendHisto)
         self.signals.showDutDataSignal_Bin.connect(self.onReadDutData_Bin)
         self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
         # sub windows
         self.loader = stdfLoader(self.signals, self)
+        # the loader emits this when its thread is done, however it ended
+        self.loader.signals.closeSignal.connect(self.onLoaderFinished)
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
@@ -592,6 +611,9 @@ class MyWindow(QtWidgets.QMainWindow):
         for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
             obj.setAcceptDrops(True)
             obj.installEventFilter(self)
+    
+    # ways to ask for a new file, a running load ignores them
+    loadingEntries = ("actionOpen", "actionMerge", "actionLoad_Session")
 
     
     def updateIcons(self):
@@ -725,35 +747,64 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def updateFileHeader(self):
         if isinstance(self.data_interface, DataInterface):
-            # clear old info
-            self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+            self.applyFileInfoRows(self.data_interface.getFileMetaData())
+    
+    
+    def showEarlyFileInfo(self, payload: object):
+        '''File Info from the header, entries needing the database show LOADING'''
+        groups = payload.get("groups") or []
+        if not groups:
+            return
+        # counters are not in the header, so they are the same placeholder here
+        loading = (self.LOADING,)
+        counters = {key: loading for key in
+                    ("Total", "Pass", "Failed", "Superseded", "Unknown")}
+        rows, _ = buildFileMetaData(
+            [joinFileGroup(g["names"]) for g in groups],
+            [g["path"] for g in groups],
+            [joinFileGroup(g["sizes"]) for g in groups],
+            counters, payload.get("meta") or {},
+            payload.get("num_files") or len(groups), plainValues=True)
+        self.applyFileInfoRows(rows, pending=self.LOADING)
+    
+    
+    def applyFileInfoRows(self, rows: list, pending: str = None):
+        # clear old info
+        self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+        
+        horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
+        verticalHeader = self.ui.fileInfoTable.verticalHeader()
+        horizontalHeader.setVisible(False)
+        verticalHeader.setVisible(False)
             
-            horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
-            verticalHeader = self.ui.fileInfoTable.verticalHeader()
-            horizontalHeader.setVisible(False)
-            verticalHeader.setVisible(False)
-                
-            for tmpRow in self.data_interface.getFileMetaData():
-                # translate the first element, which is the field names
-                qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
-                if getSetting().gen.language != "English":
-                    # fix weird font when switch to chinese-s
-                    qfont = QtGui.QFont(getSetting().gen.font)
-                    _ = [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
-                self.tmodel_info.appendRow(qitemRow)
-            
-            # horizontalHeader.resizeSection(0, 250)
-            
-            for column in range(0, horizontalHeader.count()):
-                horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-                # horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
-            
-            # resize to content to show all texts, then add additional height to each row
-            for row in range(self.tmodel_info.rowCount()):
-                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.ResizeToContents)
-                newHeight = verticalHeader.sectionSize(row) + 20
-                verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
-                verticalHeader.resizeSection(row, newHeight)
+        for tmpRow in rows:
+            # translate the first element, which is the field names
+            qitemRow = [QtGui.QStandardItem(self.tr(ele) if i == 0 else ele) for i, ele in enumerate(tmpRow)]
+            if pending is not None:
+                pendingFont = QtGui.QFont(getSetting().gen.font)
+                pendingFont.setItalic(True)
+                for item in qitemRow[1:]:
+                    if item.text() == pending:
+                        item.setForeground(QtGui.QColor(150, 150, 150))
+                        item.setFont(pendingFont)
+            if getSetting().gen.language != "English":
+                # fix weird font when switch to chinese-s
+                qfont = QtGui.QFont(getSetting().gen.font)
+                _ = [qele.setData(qfont, Qt.ItemDataRole.FontRole) for qele in qitemRow]
+            self.tmodel_info.appendRow(qitemRow)
+        
+        # horizontalHeader.resizeSection(0, 250)
+        
+        for column in range(0, horizontalHeader.count()):
+            horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+            # horizontalHeader.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        
+        # resize to content to show all texts, then add additional height to each row
+        for row in range(self.tmodel_info.rowCount()):
+            verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.ResizeToContents)
+            newHeight = verticalHeader.sectionSize(row) + 20
+            verticalHeader.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
+            verticalHeader.resizeSection(row, newHeight)
     
     
     def updateDutSummaryTable(self):
@@ -1292,6 +1343,8 @@ class MyWindow(QtWidgets.QMainWindow):
     @Slot(object)
     def updateData(self, newDI: DataInterface):
         if newDI is not None:
+            # a cancelled load arrives as None, only a real one counts
+            self._dbProduced = True
             # clear old images & tables
             self.clearAllContents()
             # close old data interface first
@@ -1409,8 +1462,9 @@ class MyWindow(QtWidgets.QMainWindow):
 
     
     @Slot(str, bool, bool, bool)
-    def updateStatus(self, new_msg, info=False, warning=False, error=False):
-        self.statusBar().showMessage(new_msg)
+    def updateStatus(self, new_msg, info=False, warning=False, error=False, duration=0):
+        # duration 0 keeps the message, like it always did
+        self.statusBar().showMessage(new_msg, duration)
         if info: 
             QMessageBox.information(self, self.tr("Info"), new_msg)
         elif warning: 
@@ -1420,6 +1474,12 @@ class MyWindow(QtWidgets.QMainWindow):
             QMessageBox.critical(self, self.tr("Error"), new_msg)
             # sys.exit()
         QApplication.processEvents()
+
+    
+    @Slot(str, int)
+    def updateLoadStatus(self, new_msg, duration: int):
+        '''Status bar messages of the loader, the caller sets how long they stay'''
+        self.updateStatus(new_msg, duration=duration)
         
     
     def startIndexStatusPolling(self):
@@ -1460,6 +1520,10 @@ class MyWindow(QtWidgets.QMainWindow):
                     
             if (event.type() == QtCore.QEvent.Type.Drop):
                 if event.mimeData().hasUrls():   # if file or link is dropped
+                    if self._fileLoading:
+                        # a load is running; it cannot be replaced midway
+                        event.ignore()
+                        return True
                     urls = event.mimeData().urls()
                     paths = [url.toLocalFile() for url in urls]
                     event.accept()  # doesnt appear to be needed
@@ -1468,6 +1532,90 @@ class MyWindow(QtWidgets.QMainWindow):
         return False
       
         
+    @Slot()
+    def onLoaderFinished(self):
+        """The loader thread is done, stopped early or finished normally."""
+        self._fileLoading = False
+        if self._closeOnFinish:
+            # a build that was stopped never reaches the "database is ready" path
+            self.close()
+
+    def closeEvent(self, event):
+        # closing during a load used to quit and drop the half built database
+        if self._fileLoading:
+            if self.loader.askAbandon():
+                # closed in onLoaderFinished, leaving now would kill the thread
+                self._closeOnFinish = True
+                self.loader.abandon()
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    
+
+    def onLoadState(self, loading: bool):
+        '''Lock what would act on the previous database, the dialog did this before'''
+        if loading:
+            self._dbProduced = False
+            self._abandoned = False
+            # the database to go back to when the load is abandoned
+            self._preDB = (self.data_interface.dbPath
+                                if self.data_interface is not None
+                                and self.data_interface.dbConnected else "")
+        self._fileLoading = loading
+        self.ui.tabControl.setTabEnabled(tab.Info, True)
+        for index in range(self.ui.tabControl.count()):
+            if index != tab.Info:
+                self.ui.tabControl.setTabEnabled(index, not loading)
+        # File Info stays visible, the other pages cannot be opened
+        for index in range(self.ui.infoBox.count()):
+            if index != 0:
+                self.ui.infoBox.setItemEnabled(index, not loading)
+        if loading:
+            self.ui.tabControl.setCurrentIndex(tab.Info)
+            self.ui.infoBox.setCurrentIndex(0)
+        # selection acts on the loaded database
+        self.ui.Selection_stackedWidget.setEnabled(not loading)
+        # another file cannot be asked for while one is being read
+        for name in self.loadingEntries:
+            getattr(self.ui, name).setEnabled(not loading)
+        if not loading:
+            self.onLoadEnd()
+
+    
+    def markAbandoned(self):
+        # called by the loader when the user gives up on the running load
+        self._abandoned = True
+
+    def onLoadEnd(self):
+        '''The load is over, put back what it should not have changed'''
+        current = self.data_interface.dbPath if self.data_interface is not None else ""
+        if self._abandoned:
+            if current and current != self._preDB:
+                # its database had already been taken in, go back to the old one
+                return self.loadDatabase(self._preDB)
+            if not current and self._preDB:
+                # the load was abandoned before any database arrived, and the
+                # window keeps showing the old one, nothing to put back
+                return
+            if not self._preDB:
+                # nothing was opened before, so the header read is all there is
+                # and the abandoned file must not be left on screen
+                return self.clearAbandonedLoad()
+        if not self._dbProduced:
+            if self.data_interface is not None and self.data_interface.dbConnected:
+                self.updateFileHeader()
+
+    def clearAbandonedLoad(self):
+        '''Drop the header of an abandoned load, there is nothing to go back to'''
+        self.clearAllContents()
+        if self.data_interface is not None:
+            self.data_interface.close()
+            self.data_interface = None
+        if self.db_dut.isOpen():
+            self.db_dut.close()
+        self.applyFileInfoRows([])
+
     def onException(self, errorType, errorValue, tb):
         logger.error("Uncaught Error occurred", exc_info=(errorType, errorValue, tb))
         errMsg = traceback.format_exception(errorType, errorValue, tb, limit=0)

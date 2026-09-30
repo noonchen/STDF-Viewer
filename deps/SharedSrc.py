@@ -554,6 +554,91 @@ def wafer_direction_name(symbol: str) -> str:
     return direction_symbol.get(symbol, symbol)
 
 
+def joinFileGroup(items: list) -> str:
+    # the File Info cells of a file group: one name, or "#1 → a\n#2 → b"
+    return "\n".join(items if len(items) < 2
+                     else (f"#{i+1} → {e}" for i, e in enumerate(items)))
+
+
+def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
+                      dutCntDict: dict, InfoDict: dict, num_files: int,
+                      containsWafer: bool = False, waferCount: tuple = (),
+                      plainValues: bool = False) -> tuple:
+    '''Rows of the File Info table, and the wafer orientation when there is one'''
+    # plainValues keeps the values as given, for the entries still loading
+    fmt = (lambda p, f: p) if plainValues else \
+          (lambda p, f: f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?")
+    info = dict(InfoDict)
+    waferOrientation = ((), ())
+    metaDataList = []
+    # some basic os info
+    metaDataList.append(["File Name: ", *file_names ])
+    metaDataList.append(["Directory Path: ", *(os.path.dirname(p) for p in file_paths) ])
+    metaDataList.append(["File Size: ", *file_sizes ])
+    # dut summary
+    metaDataList.append(["Yield: ", *[fmt(p, f) for (p, f) in zip(dutCntDict["Pass"], dutCntDict["Failed"])] ])
+    metaDataList.append(["DUTs Tested: ", *[str(n) for n in dutCntDict["Total"]] ])
+    metaDataList.append(["DUTs Passed: ", *[str(n) for n in dutCntDict["Pass"]] ])
+    metaDataList.append(["DUTs Failed: ", *[str(n) for n in dutCntDict["Failed"]] ])
+    metaDataList.append(["DUTs Superseded: ", *[str(n) for n in dutCntDict["Superseded"]] ])
+    metaDataList.append(["DUTs Unknown: ", *[str(n) for n in dutCntDict["Unknown"]] ])
+    # MIR Record data
+    for fn in mirFieldNames:
+        value: tuple = info.pop(fn, ())
+        if value == (): 
+            # skip non-existed MIR fields
+            continue
+        metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
+    if containsWafer:
+        metaDataList.append(["Wafers Tested: ", *list(map(str, waferCount)) ])
+        wafer_unit_tuple = info.pop("WF_UNITS", ["" for _ in range(num_files)])
+        if "WAFR_SIZ" in info:
+            wafer_size_tuple = info.pop("WAFR_SIZ")
+            metaDataList.append(["Wafer Size: ", 
+                                 *[f"{size} {unit}" 
+                                   if size is not None and unit is not None 
+                                   else "" 
+                                   for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
+        if "DIE_WID" in info and "DIE_HT" in info:
+            wid_tuple = info.pop("DIE_WID")
+            ht_tuple = info.pop("DIE_HT")
+            metaDataList.append(["Wafer Die Width Height: ", 
+                                 *[f"{wid} {unit} × {ht} {unit}" 
+                                   if wid is not None and ht is not None and unit is not None 
+                                   else "" 
+                                   for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
+        if "CENTER_X" in info and "CENTER_Y" in info:
+            cent_x_tuple = info.pop("CENTER_X")
+            cent_y_tuple = info.pop("CENTER_Y")
+            metaDataList.append(["Wafer Center: ", 
+                                 *[f"({x}, {y})" 
+                                   if x is not None and y is not None 
+                                   else "" 
+                                   for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
+        if "WF_FLAT" in info:
+            flat_orient_tuple = info.pop("WF_FLAT")
+            metaDataList.append(["Wafer Flat Direction: ", 
+                                 *[wafer_direction_name(d) 
+                                   if d is not None 
+                                   else "" 
+                                   for d in flat_orient_tuple] ])
+        if "POS_X" in info and "POS_Y" in info:
+            pos_x_tuple = info.pop("POS_X")
+            pos_y_tuple = info.pop("POS_Y")
+            waferOrientation = (pos_x_tuple, pos_y_tuple)
+            metaDataList.append(["Wafer XY Direction: ", 
+                                 *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" 
+                                   if x_orient is not None and y_orient is not None 
+                                   else "" 
+                                   for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+    # append other info: ATR, RDR, SDRs, sort names for better display
+    for propertyName in sorted(info.keys()):
+        value: tuple = info[propertyName]
+        metaDataList.append([f"{propertyName}: ", *[v if v is not None else "" for v in value]])
+    
+    return metaDataList, waferOrientation
+
+
 @lru_cache(maxsize=None)
 def parseTestString(test_name_string: str, isWaferName: bool = False) -> tuple:
     '''
@@ -745,5 +830,5 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "showCompleteMessage", "rHEX", "get_file_size", 
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
-           "wafer_direction_name",
+           "wafer_direction_name", "buildFileMetaData", "joinFileGroup",
            ]
