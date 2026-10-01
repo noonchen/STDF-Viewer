@@ -73,10 +73,14 @@ if getattr(sys, "frozen", False):
     resourceFolder = getattr(sys, "_MEIPASS", os.path.dirname(sys.argv[0]))
 else:
     resourceFolder = os.path.dirname(sys.argv[0])
-# a macOS bundle is not meant to be written to, so logs, the working database
-# and the config live in the user's data folder instead
-if sys.platform == "darwin" and getattr(sys, "frozen", False):
+# a bundle is not meant to be written to, so logs, the working database and the
+# config live in the user's data folder instead
+if getattr(sys, "frozen", False) and sys.platform == "darwin":
     rootFolder = os.path.expanduser("~/Library/Application Support/STDF-Viewer")
+elif getattr(sys, "frozen", False) and sys.platform == "linux":
+    # the deb installs into /usr/local, which a normal user cannot write
+    rootFolder = os.path.join(os.environ.get("XDG_DATA_HOME",
+                             os.path.expanduser("~/.local/share")), "STDF-Viewer")
 else:
     rootFolder = resourceFolder
 setattr(sys, "resourceFolder", resourceFolder)
