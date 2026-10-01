@@ -189,7 +189,7 @@ class stdfSettings(QtWidgets.QDialog):
         # the association lives in the Windows registry; the deb and dmg
         # declare theirs, so there is nothing to show on those platforms
         self.assocAvailable = fileAssoc.isSupported()
-        self.settingsUI.assoc_groupBox.setHidden(not self.assocAvailable)
+        self.settingsUI.checkAssoc.setHidden(not self.assocAvailable)
                 
         
     def initWithParentParams(self):
