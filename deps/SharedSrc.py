@@ -228,9 +228,11 @@ def dumpConfigFile():
 
 
 def loadFonts():
-    # the bundled fonts ship with the app, so they come from the resource
-    # folder, which differs from the writable one in a frozen macOS build
-    fontFolder = os.path.join(getattr(sys, "resourceFolder", sys.rootFolder), "fonts")
+    # bundled fonts live in the resource folder, which a frozen macOS build
+    # keeps apart from the writable one
+    fontFolder = os.path.join(getattr(sys, "resourceFolder", ""), "fonts")
+    if not os.path.isdir(fontFolder):
+        fontFolder = os.path.join(sys.rootFolder, "fonts")
     for fn in os.listdir(fontFolder):
         if not fn.endswith(".ttf"): continue
         fontPath = os.path.join(fontFolder, fn)
