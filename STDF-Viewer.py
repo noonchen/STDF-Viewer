@@ -613,10 +613,6 @@ class MyWindow(QtWidgets.QMainWindow):
             obj.setAcceptDrops(True)
             obj.installEventFilter(self)
     
-    # ways to ask for a new file, or to read the database being replaced
-    loadingEntries = ("actionOpen", "actionMerge", "actionLoad_Session",
-                      "actionFailMarker", "actionExport", "actionSave_Session")
-
     
     def updateIcons(self):
         self.ui.actionOpen.setIcon(getIcon("Open"))
@@ -1550,23 +1546,23 @@ class MyWindow(QtWidgets.QMainWindow):
 
     @Slot(int)
     def onLoaderProgress(self, num: int):
-        # the percentage stays inside the bar, including the final 100%
         self.ui.loaderProgress.setValue(min(num, 10000))
         self.ui.loaderProgress.setFormat("%.2f%%" % (num / 100.0))
         self.ui.loaderProgress.show()
 
     @Slot()
     def onTerminateLoad(self):
-        '''Give up the running load, same confirmation the dialog asked'''
         if not self._fileLoading:
             return
         if not self.loader.askAbandon():
             return
         if not self._fileLoading:
+            # load complete while user gives up,
+            # discard the completed db.
             self.loader.abandon()
             self.onLoadEnd()
             return
-        # one press is enough, the build stops within ~0.1 s
+        # prevent repeated button triggers
         self.ui.stopLoadButton.setEnabled(False)
         self.loader.abandon()
 
@@ -1575,6 +1571,7 @@ class MyWindow(QtWidgets.QMainWindow):
         if self._fileLoading:
             if self.loader.askAbandon():
                 if not self._fileLoading:
+                    # same as `onTerminateLoad`
                     self.loader.abandon()
                     self.onLoadEnd()
                     super().closeEvent(event)
@@ -1589,7 +1586,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
 
     def onLoadState(self, loading: bool):
-        '''Lock what would act on the previous database, the dialog did this before'''
+        '''Lock certain functionalities during new file loading'''
         if loading:
             self._dbProduced = False
             self._abandoned = False
@@ -1612,14 +1609,15 @@ class MyWindow(QtWidgets.QMainWindow):
         if loading:
             self.ui.tabControl.setCurrentIndex(tab.Info)
             self.ui.infoBox.setCurrentIndex(0)
-            # the way out of a load, next to the progress in the status bar
             self.ui.stopLoadButton.setEnabled(True)
             self.ui.stopLoadButton.show()
         # selection acts on the loaded database
         self.ui.Selection_stackedWidget.setEnabled(not loading)
-        # another file cannot be asked for while one is being read
-        for name in self.loadingEntries:
-            getattr(self.ui, name).setEnabled(not loading)
+        # disable actions during loading to prevent race conditions
+        for action in ("actionOpen", "actionMerge",
+                       "actionFailMarker", "actionExport",
+                       "actionLoad_Session", "actionSave_Session"):
+            getattr(self.ui, action).setEnabled(not loading)
         if not loading:
             self.onLoadEnd()
 
@@ -1629,18 +1627,16 @@ class MyWindow(QtWidgets.QMainWindow):
         self._abandoned = True
 
     def onLoadEnd(self):
-        '''The load is over, put back what it should not have changed'''
-        # both go together, so the progress bar cannot jump when one hides
+        '''The load is over, restore'''
         self.ui.loaderProgress.hide()
         self.ui.stopLoadButton.hide()
         current = self.data_interface.dbPath if self.data_interface is not None else ""
         if self._abandoned:
             if self._preDB and current and current != self._preDB:
-                # its database had already been taken in, go back to the old one
+                # new database already in place, restore the old one
                 return self.loadDatabase(self._preDB)
             if not current and self._preDB:
-                # the load was abandoned before any database arrived, and the
-                # window keeps showing the old one, nothing to put back
+                # the load was abandoned before any database arrived, nothing to put back
                 return
             if not self._preDB:
                 # nothing was opened before, so the header read is all there is
@@ -1653,7 +1649,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 self.applyFileInfoRows([])
 
     def clearAbandonedLoad(self):
-        '''Drop the header of an abandoned load, there is nothing to go back to'''
+        '''Drop the header of an abandoned load'''
         self.clearAllContents()
         if self.data_interface is not None:
             self.data_interface.close()
