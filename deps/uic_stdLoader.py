@@ -110,7 +110,6 @@ class stdfLoader(QtWidgets.QDialog):
         self.buildDone = False    # the reader is done, the database is ready
         
         self.signals = signal4Loader()
-        self.signals.progressBarSignal.connect(self.updateProgressBar)
         self.signals.dataInterfaceSignal_reader.connect(self.sendDataInterface)
         self.signals.closeSignal.connect(self.closeLoader)
         
@@ -124,7 +123,6 @@ class stdfLoader(QtWidgets.QDialog):
         self.loaderUI.setupUi(self)
         # no ? button next to the X, this dialog has no help to offer
         self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint)
-        self.loaderUI.progressBar.setMaximum(10000)     # 100 (default max value) * 10^precision
         
     def loadFile(self, stdPaths: list[list[str]]):
         # ignore a new request while the previous one runs (__dict__, QObject has thread())
@@ -134,8 +132,6 @@ class stdfLoader(QtWidgets.QDialog):
         self.closeEventByThread = False    # init at new file
         self.abandoned = False
         self.buildDone = False
-        self.loaderUI.progressBar.setFormat("0.00%%")
-        self.loaderUI.progressBar.setValue(0)
         self.setParentLoading(True)
         self.sendEarlyFileInfo(stdPaths)
         # create new thread and move stdReader to the new thread
@@ -207,16 +203,6 @@ class stdfLoader(QtWidgets.QDialog):
         # we should simply ingnore the close event, let the thread finish its job and send close signal.
         event.ignore()
 
-    @Slot(int)
-    def updateProgressBar(self, num):
-        if num == 10000:
-            self.loaderUI.progressBar.setFormat("Loading database...")
-            self.loaderUI.progressBar.setValue(num)
-        else:
-            # e.g. num is 1234, num/100 is 12.34, the latter is the orignal number
-            self.loaderUI.progressBar.setFormat("%.02f%%" % (num/100))
-            self.loaderUI.progressBar.setValue(num)
-        
     @Slot(object)
     def sendDataInterface(self, di: object):
         # send `DataInterface` from reader to mainUI
