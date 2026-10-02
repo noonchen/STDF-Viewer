@@ -88,9 +88,6 @@ class signals4MainUI(QtCore.QObject):
 
 
 class MyWindow(QtWidgets.QMainWindow):
-    # shown in the File Info entries that need the database
-    LOADING = "Loading..."
-    
     def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
@@ -757,13 +754,17 @@ class MyWindow(QtWidgets.QMainWindow):
             self.applyFileInfoRows(self.data_interface.getFileMetaData())
     
     
-    def showEarlyFileInfo(self, payload: object):
-        '''File Info from the header, entries needing the database show LOADING'''
+    def showEarlyFileInfo(self, payload: dict):
+        '''
+        Display incomplete File Info during loading,
+        showing loading text for entries that are not available yet.
+        '''
         groups = payload.get("groups") or []
         if not groups:
             return
-        # counters are not in the header, so they are the same placeholder here
-        loading = (self.LOADING,)
+        # replace absent info with loading text
+        loadText = self.tr("Loading...")
+        loading = (loadText,)
         counters = {key: loading for key in
                     ("Total", "Pass", "Failed", "Superseded", "Unknown")}
         rows, _ = buildFileMetaData(
@@ -772,7 +773,7 @@ class MyWindow(QtWidgets.QMainWindow):
             [joinFileGroup(g["sizes"]) for g in groups],
             counters, payload.get("meta") or {},
             payload.get("num_files") or len(groups), plainValues=True)
-        self.applyFileInfoRows(rows, pending=self.LOADING)
+        self.applyFileInfoRows(rows, pending = loadText)
     
     
     def applyFileInfoRows(self, rows: list, pending: str = None):
