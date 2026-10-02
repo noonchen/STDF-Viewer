@@ -214,8 +214,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.statusBar().addPermanentWidget(self.loaderProgress)
         # the way out of a load, next to it; the dialog is not shown any more
         self.terminateBtn = QtWidgets.QToolButton()
-        # standardIcon comes from the app style, so ask the vista one directly:
-        # Fusion frames this glyph, the vista style draws it plain
+        # standardIcon comes from the app style, so ask the vista one directly
         vistaStyle = QtWidgets.QStyleFactory.create("windowsvista")
         self.terminateBtn.setIcon(vistaStyle.standardIcon(
             QtWidgets.QStyle.StandardPixmap.SP_TitleBarCloseButton))
