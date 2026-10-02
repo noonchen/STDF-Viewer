@@ -25,7 +25,6 @@
 
 
 from deps.SharedSrc import *
-from deps import fileAssoc
 from rust_stdf_helper import TestIDType
 # pyqt5
 from PyQt5 import QtWidgets, QtGui
@@ -186,10 +185,6 @@ class stdfSettings(QtWidgets.QDialog):
         # hide not implemented functions
         self.settingsUI.showBoxp_histo.setHidden(True)
         self.settingsUI.showBpOutlier_histo.setHidden(True)
-        # the association lives in the Windows registry; the deb and dmg
-        # declare theirs, so there is nothing to show on those platforms
-        self.assocAvailable = fileAssoc.isSupported()
-        self.settingsUI.checkAssoc.setHidden(not self.assocAvailable)
                 
         
     def initWithParentParams(self):
@@ -225,10 +220,6 @@ class stdfSettings(QtWidgets.QDialog):
         self.settingsUI.lineEdit_cpk.setText(str(settings.gen.cpk_thrsh))
         self.settingsUI.sortTestListComboBox.setCurrentIndex(indexDic_sortby_reverse.get(settings.gen.sort_tlist, 0))
         self.settingsUI.testIDTypecomboBox.setCurrentIndex(indexDic_testIdfy_reverse.get(settings.gen.id_type, 0))
-        # file association: a system setting, so the checkbox shows what the
-        # registry says instead of what the config file remembers
-        if self.assocAvailable:
-            self.settingsUI.checkAssoc.setChecked(fileAssoc.isRegistered())
         # file symbol
         fsLayout = self.settingsUI.gridLayout_file_symbol
         for i in range(fsLayout.count()):
@@ -335,8 +326,6 @@ class stdfSettings(QtWidgets.QDialog):
             # update global settings before updating UI
             origSettings.updateConfig(userSettings)
             
-            self.applyFileAssociation()
-            
             # TODO replace with signals
             if refreshTab: self.parent.updateTabContent()
             if refreshTable: self.parent.updateStatTableContent()
@@ -345,36 +334,6 @@ class stdfSettings(QtWidgets.QDialog):
             if retranslate: self.parent.changeLanguage()
         QtWidgets.QApplication.processEvents()
         self.close()
-    
-    
-    def applyFileAssociation(self):
-        """Add or remove the registry keys behind the association checkbox."""
-        if not self.assocAvailable:
-            return
-        wanted = self.settingsUI.checkAssoc.isChecked()
-        if wanted == fileAssoc.isRegistered():
-            return  # nothing changed
-
-        if not wanted:
-            if fileAssoc.unregister() == "failed":
-                QMessageBox.warning(self, self.tr("File Association"),
-                                    self.tr("Could not remove the file association."))
-            return
-
-        taken = fileAssoc.takenExtensions()
-        if taken:
-            answer = QMessageBox.question(
-                self, self.tr("File Association"),
-                self.tr("%s is currently opened by another program. "
-                        "Use STDF Viewer for it?") % ", ".join(taken))
-            if answer != QMessageBox.Yes:
-                self.settingsUI.checkAssoc.setChecked(False)
-                return
-
-        if fileAssoc.register() != "ok":
-            QMessageBox.warning(self, self.tr("File Association"),
-                                self.tr("Could not set the file association."))
-            self.settingsUI.checkAssoc.setChecked(False)
     
     
     def closeEvent(self, event):
