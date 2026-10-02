@@ -636,8 +636,9 @@ class MyWindow(QtWidgets.QMainWindow):
             obj.setAcceptDrops(True)
             obj.installEventFilter(self)
     
-    # ways to ask for a new file, a running load ignores them
-    loadingEntries = ("actionOpen", "actionMerge", "actionLoad_Session")
+    # ways to ask for a new file, or to read the database being replaced
+    loadingEntries = ("actionOpen", "actionMerge", "actionLoad_Session",
+                      "actionFailMarker", "actionExport", "actionSave_Session")
 
     
     def updateIcons(self):
