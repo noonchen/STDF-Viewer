@@ -1648,6 +1648,8 @@ class MyWindow(QtWidgets.QMainWindow):
         if not self._dbProduced:
             if self.data_interface is not None and self.data_interface.dbConnected:
                 self.updateFileHeader()
+            else:
+                self.applyFileInfoRows([])
 
     def clearAbandonedLoad(self):
         '''Drop the header of an abandoned load, there is nothing to go back to'''
