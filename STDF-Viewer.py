@@ -1563,6 +1563,10 @@ class MyWindow(QtWidgets.QMainWindow):
             return
         if not self.loader.askAbandon():
             return
+        if not self._fileLoading:
+            self.loader.abandon()
+            self.onLoadEnd()
+            return
         # one press is enough, the build stops within ~0.1 s
         self.ui.stopLoadButton.setEnabled(False)
         self.loader.abandon()
@@ -1571,6 +1575,11 @@ class MyWindow(QtWidgets.QMainWindow):
         # closing during a load used to quit and drop the half built database
         if self._fileLoading:
             if self.loader.askAbandon():
+                if not self._fileLoading:
+                    self.loader.abandon()
+                    self.onLoadEnd()
+                    super().closeEvent(event)
+                    return
                 # closed in onLoaderFinished, leaving now would kill the thread
                 self._closeOnFinish = True
                 self.loader.abandon()
