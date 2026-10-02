@@ -1608,6 +1608,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self._fileLoading = loading
         self.ui.tabControl.setTabEnabled(tab.Info, True)
         for index in range(self.ui.tabControl.count()):
+            if index == tab.Wafer:
+                # the file decides this one, unlocking it here overrides updateData
+                continue
             if index != tab.Info:
                 self.ui.tabControl.setTabEnabled(index, not loading)
         # File Info stays visible, the other pages cannot be opened
