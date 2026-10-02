@@ -1634,7 +1634,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.stopLoadButton.hide()
         current = self.data_interface.dbPath if self.data_interface is not None else ""
         if self._abandoned:
-            if current and current != self._preDB:
+            if self._preDB and current and current != self._preDB:
                 # its database had already been taken in, go back to the old one
                 return self.loadDatabase(self._preDB)
             if not current and self._preDB:
