@@ -89,7 +89,7 @@ class signals4MainUI(QtCore.QObject):
 
 class MyWindow(QtWidgets.QMainWindow):
     # shown in the File Info entries that need the database
-    LOADING = "Loading"
+    LOADING = "Loading..."
     
     def __init__(self):
         super(MyWindow, self).__init__()
@@ -138,6 +138,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.loader = stdfLoader(self.signals, self)
         # the loader emits this when its thread is done, however it ended
         self.loader.signals.closeSignal.connect(self.onLoaderFinished)
+        # the dialog stays hidden, so the progress goes to the status bar
+        self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
@@ -199,6 +201,29 @@ class MyWindow(QtWidgets.QMainWindow):
                                                                QtWidgets.QSizePolicy.Policy.Expanding))
         self.ui.toolBar.addWidget(self.spaceWidgetTB)
         self.ui.toolBar.addAction(self.ui.actionAbout)
+        # the dialog stays hidden, so the progress bar uses its configuration
+        self.loaderProgress = QtWidgets.QProgressBar()
+        self.loaderProgress.setRange(0, 10000)
+        self.loaderProgress.setMinimumSize(QtCore.QSize(250, 20))
+        self.loaderProgress.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                          QtWidgets.QSizePolicy.Fixed)
+        self.loaderProgress.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.loaderProgress.setTextVisible(True)
+        self.loaderProgress.setFormat("0.00%")
+        self.loaderProgress.hide()
+        self.statusBar().addPermanentWidget(self.loaderProgress)
+        # the way out of a load, next to it; the dialog is not shown any more
+        self.terminateBtn = QtWidgets.QToolButton()
+        # standardIcon comes from the app style, so ask the vista one directly:
+        # Fusion frames this glyph, the vista style draws it plain
+        vistaStyle = QtWidgets.QStyleFactory.create("windowsvista")
+        self.terminateBtn.setIcon(vistaStyle.standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_TitleBarCloseButton))
+        self.terminateBtn.setStyle(vistaStyle)
+        self.terminateBtn.setToolTip(self.tr("Give up this load"))
+        self.terminateBtn.hide()
+        self.terminateBtn.clicked.connect(self.onTerminateLoad)
+        self.statusBar().addPermanentWidget(self.terminateBtn)
         # disable wafer tab in default
         self.ui.tabControl.setTabEnabled(tab.Wafer, False)
         # clean up before exiting
@@ -1540,6 +1565,24 @@ class MyWindow(QtWidgets.QMainWindow):
             # a build that was stopped never reaches the "database is ready" path
             self.close()
 
+    @Slot(int)
+    def onLoaderProgress(self, num: int):
+        # the percentage stays inside the bar, including the final 100%
+        self.loaderProgress.setValue(min(num, 10000))
+        self.loaderProgress.setFormat("%.2f%%" % (num / 100.0))
+        self.loaderProgress.show()
+
+    @Slot()
+    def onTerminateLoad(self):
+        '''Give up the running load, same confirmation the dialog asked'''
+        if not self._fileLoading:
+            return
+        if not self.loader.askAbandon():
+            return
+        # one press is enough, the build stops within ~0.1 s
+        self.terminateBtn.setEnabled(False)
+        self.loader.abandon()
+
     def closeEvent(self, event):
         # closing during a load used to quit and drop the half built database
         if self._fileLoading:
@@ -1574,6 +1617,9 @@ class MyWindow(QtWidgets.QMainWindow):
         if loading:
             self.ui.tabControl.setCurrentIndex(tab.Info)
             self.ui.infoBox.setCurrentIndex(0)
+            # the way out of a load, next to the progress in the status bar
+            self.terminateBtn.setEnabled(True)
+            self.terminateBtn.show()
         # selection acts on the loaded database
         self.ui.Selection_stackedWidget.setEnabled(not loading)
         # another file cannot be asked for while one is being read
@@ -1589,6 +1635,9 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def onLoadEnd(self):
         '''The load is over, put back what it should not have changed'''
+        # both go together, so the progress bar cannot jump when one hides
+        self.loaderProgress.hide()
+        self.terminateBtn.hide()
         current = self.data_interface.dbPath if self.data_interface is not None else ""
         if self._abandoned:
             if current and current != self._preDB:

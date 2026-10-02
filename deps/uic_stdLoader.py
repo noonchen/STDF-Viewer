@@ -152,9 +152,7 @@ class stdfLoader(QtWidgets.QDialog):
         self.reader.moveToThread(self.thread)
         self.thread.started.connect(self.reader.readBegin)
         self.thread.start()
-        # not exec_(), the window stays usable, closing this dialog cancels
-        self.show()
-        self.raise_()
+        # the dialog is not shown, the progress and the cancel button are in the status bar
     
     def sendEarlyFileInfo(self, stdPaths: list[list[str]]):
         if self.signals.metadataSignal_parent is None:
@@ -189,7 +187,7 @@ class stdfLoader(QtWidgets.QDialog):
     def askAbandon(self) -> bool:
         # the question is asked no matter how far the build got
         return QtWidgets.QMessageBox.question(
-            self, "QUIT", "Are you sure want to stop reading?",
+            self, "QUIT", "Are you sure want to give up loading?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
 
     def closeEvent(self, event):
