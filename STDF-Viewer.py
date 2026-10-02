@@ -34,7 +34,7 @@ from deps.ui.transSrc import transDict
 from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
 from deps.ChartWidgets import *
-from deps.uic_stdLoader import stdfLoader
+from deps.StdLoader import StdfLoader
 from deps.uic_stdMerge import MergePanel
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
@@ -134,12 +134,11 @@ class MyWindow(QtWidgets.QMainWindow):
         self.signals.showDutDataSignal_TrendHisto.connect(self.onReadDutData_TrendHisto)
         self.signals.showDutDataSignal_Bin.connect(self.onReadDutData_Bin)
         self.signals.showDutDataSignal_Wafer.connect(self.onReadDutData_Wafer)
-        # sub windows
-        self.loader = stdfLoader(self.signals, self)
-        # the loader emits this when its thread is done, however it ended
+        # init loader
+        self.loader = StdfLoader(self.signals, self)
         self.loader.signals.closeSignal.connect(self.onLoaderFinished)
-        # the dialog stays hidden, so the progress goes to the status bar
         self.loader.signals.progressBarSignal.connect(self.onLoaderProgress)
+        # sub windows
         self.mergePanel = MergePanel(self)
         self.failmarker = FailMarker(self)
         self.exporter = stdfExporter(self)
@@ -304,7 +303,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.retranslateUi(self)
         # loader
         _app.installTranslator(self.loader.translator)
-        self.loader.loaderUI.retranslateUi(self.loader)
         # exporter
         _app.installTranslator(self.exporter.translatorUI)
         self.exporter.exportUI.retranslateUi(self.exporter)

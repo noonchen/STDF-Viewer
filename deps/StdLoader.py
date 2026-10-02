@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Sat Oct 03 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -28,15 +28,12 @@ import time, os, sys, logging, uuid
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
-from .ui.stdfViewer_loadingUI import Ui_loadingUI
 # pyside2
 # from PySide2 import QtCore, QtWidgets
 # from PySide2.QtCore import Signal, Slot, QTranslator
-# from .ui.stdfViewer_loadingUI_side2 import Ui_loadingUI
 # pyside6
 # from PySide6 import QtCore, QtWidgets
 # from PySide6.QtCore import Signal, Slot, QTranslator
-# from .ui.stdfViewer_loadingUI_side6 import Ui_loadingUI
 
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
@@ -82,7 +79,7 @@ class signal4Loader(QtCore.QObject):
     # get `DataInterface` from reader
     dataInterfaceSignal_reader = Signal(object)
     # get close signal
-    closeSignal = Signal(bool)
+    closeSignal = Signal()
     
     # object signal from parent
     dataInterfaceSignal_parent = None
@@ -100,14 +97,12 @@ TestIDTypeDict = {
                 }
 
 
-class stdfLoader(QtWidgets.QDialog):
+class StdfLoader(QtCore.QObject):
     
     def __init__(self, parentSignal = None, parent = None):
         super().__init__(parent)
         self.translator = QTranslator(self)
-        self.closeEventByThread = False    # used to determine the source of close event
-        self.abandoned = False    # X was clicked, do not show the new database
-        self.buildDone = False    # the reader is done, the database is ready
+        self.abandoned = False
         
         self.signals = signal4Loader()
         self.signals.dataInterfaceSignal_reader.connect(self.sendDataInterface)
@@ -119,24 +114,17 @@ class stdfLoader(QtWidgets.QDialog):
         # errors keep the shared status signal, they raise a dialog as well
         self.signals.statusSignal = getattr(parentSignal, "statusSignal", None)
         
-        self.loaderUI = Ui_loadingUI()
-        self.loaderUI.setupUi(self)
-        # no ? button next to the X, this dialog has no help to offer
-        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint)
-        
     def loadFile(self, stdPaths: list[list[str]]):
-        # ignore a new request while the previous one runs (__dict__, QObject has thread())
-        running = self.__dict__.get("thread")
-        if running is not None and running.isRunning():
+        # ignore a new request while the previous one runs
+        curThread = self.__dict__.get("thread")
+        if curThread is not None and curThread.isRunning():
             return
-        self.closeEventByThread = False    # init at new file
         self.abandoned = False
-        self.buildDone = False
         self.setParentLoading(True)
         self.sendEarlyFileInfo(stdPaths)
-        # create new thread and move stdReader to the new thread
+        # create new thread and move StdfReader to the new thread
         self.thread = QtCore.QThread(parent=self)
-        self.reader = stdReader(self.signals)
+        self.reader = StdfReader(self.signals)
         self.reader.readThis(stdPaths)
         
         # read test item identifier from setting
@@ -144,11 +132,9 @@ class stdfLoader(QtWidgets.QDialog):
         if setting.gen.id_type in TestIDTypeDict:
             self.reader.setIDType(TestIDTypeDict[setting.gen.id_type])
         
-        # self.reader.readBegin()
         self.reader.moveToThread(self.thread)
         self.thread.started.connect(self.reader.readBegin)
         self.thread.start()
-        # the dialog is not shown, the progress and the cancel button are in the status bar
     
     def sendEarlyFileInfo(self, stdPaths: list[list[str]]):
         if self.signals.metadataSignal_parent is None:
@@ -156,73 +142,45 @@ class stdfLoader(QtWidgets.QDialog):
         try:
             payload = readEarlyFileInfo(stdPaths)
         except Exception:
-            logger.exception("cannot read the file headers early")
+            logger.exception("Failed to read file info early")
             return
         self.signals.metadataSignal_parent.emit(payload)
     
     def setParentLoading(self, loading: bool):
-        # the modal dialog used to block the window on its own
-        parent = self.parent()
-        setter = getattr(parent, "onLoadState", None)
+        setter = getattr(self.parent(), "onLoadState", None)
         if setter is not None:
             setter(loading)
     
     def abandon(self):
-        # the user does not want this load any more, whatever stage it is at
+        # discard current load at any stages
         self.abandoned = True
-        parent = self.parent()
-        marker = getattr(parent, "markAbandoned", None)
+        marker = getattr(self.parent(), "markAbandoned", None)
         if marker is not None:
             marker()
-        if self.buildDone:
-            return          # nothing to stop, the window drops the database later
-        # still building: ask the reader to give up, it stops within ~0.1 s
         if self.reader is not None:
             self.reader.flag.stop = True
 
     def askAbandon(self) -> bool:
-        # the question is asked no matter how far the build got
         return QtWidgets.QMessageBox.question(
-            self, "QUIT", "Are you sure want to give up loading?",
+            self.parent(), "QUIT", self.tr("Are you sure to give up loading?"),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
-
-    def closeEvent(self, event):
-        if self.closeEventByThread or not self.isVisible():
-            # closed by the thread, or already hidden: nothing to ask
-            event.accept()
-            return
-        # close by clicking X
-        if self.askAbandon():
-            self.abandon()
-            # self.thread.quit()
-            # self.thread.wait()
-            # event.accept()
-        # else:
-        # lesson learned: do not enable the code above, as it would nullify the sender in the thread, 
-        # causing the slot is not invoked
-        # we should simply ingnore the close event, let the thread finish its job and send close signal.
-        event.ignore()
 
     @Slot(object)
     def sendDataInterface(self, di: object):
         # send `DataInterface` from reader to mainUI
-        # an abandoned load keeps what is on screen, even a finished build
+        # an abandoned load discard current build even if finished, then restore old db
         self.signals.dataInterfaceSignal_parent.emit(None if self.abandoned else di)
     
-    @Slot(bool)
-    def closeLoader(self, closeUI):
-        self.closeEventByThread = closeUI
-        if closeUI:
-            self.thread.quit()
-            self.thread.wait()
-            self.reader = None
-            # hide, a close would come back through closeEvent again
-            self.hide()
-            self.setParentLoading(False)
+    @Slot()
+    def closeLoader(self):
+        self.thread.quit()
+        self.thread.wait()
+        self.reader = None
+        self.setParentLoading(False)
         
         
         
-class stdReader(QtCore.QObject):
+class StdfReader(QtCore.QObject):
     def __init__(self, QSignal:signal4Loader):
         super().__init__()
         if (QSignal is None or
@@ -253,25 +211,23 @@ class stdReader(QtCore.QObject):
         finalMsg = ""
 
         try:
-            if self.msgSignal: self.msgSignal.emit("Loading STD file...", 0)
+            if self.msgSignal: self.msgSignal.emit(self.tr("Loading STD file..."), 0)
             start = time.time()
             # auto generate a database name
             databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
             rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
             end = time.time()
-            # the builder is done, the window still has to take the database
-            self.buildDone = True
             if self.flag.stop:
                 # user terminated...
                 sendDI = False
-                finalMsg = "Loading cancelled by user"
+                finalMsg = self.tr("Loading cancelled by user")
             else:
                 # send Data_interface object
                 # sqlite cannot be used between thread
                 # thus we need to store the db path and
                 # load database in the main thread
                 di.dbPath = databasePath
-                finalMsg = f"Load completed, process time {end - start :.3f} sec"
+                finalMsg = self.tr("Load completed, process time {:.3f} sec").format(end - start)
                 
         except Exception as e:
             # set stop flag to True to stop rust process
@@ -291,6 +247,6 @@ class stdReader(QtCore.QObject):
                 self.statusSignal.emit(finalMsg, False, True, False)
             else:
                 self.msgSignal.emit(finalMsg, 4000)
-        self.closeSignal.emit(True)     # close loaderUI
+        self.closeSignal.emit()
         
 
