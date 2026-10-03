@@ -659,13 +659,13 @@ def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
             # skip non-existed MIR fields
             continue
         metaDataList.append([f"{mirDict[fn]}: ", *value ])
-    # rendered wafer info: shown below, or dropped, never listed as raw fields
     wafer_fields = {name: info.pop(name, ()) for _, name, *_ in WAFER_INFO_FIELDS}
     if containsWafer:
         metaDataList.append(["Wafers Tested: ", *list(map(str, waferCount)) ])
-        for label, name, *_ in WAFER_INFO_FIELDS:
-            if any(map(hasDisplayValue, wafer_fields[name])):
-                metaDataList.append([label, *wafer_fields[name] ])
+    # display rendered wafer info even if no WIR detected (containsWafer == False).
+    for label, name, *_ in WAFER_INFO_FIELDS:
+        if any(map(hasDisplayValue, wafer_fields[name])):
+            metaDataList.append([label, *wafer_fields[name] ])
     # append other info: ATR, RDR, SDRs, sort names for better display
     for propertyName in sorted(info.keys()):
         metaDataList.append([f"{propertyName}: ", *info[propertyName] ])
