@@ -74,8 +74,7 @@ def readEarlyFileInfo(stdPaths: list[list[str]]) -> dict:
         groups.append({"path": fgroup[0], "names": names, "sizes": sizes})
     # drop the fields no file carries, the database skips those too
     meta = {fn: tuple(v) for fn, v in meta.items() if any(v)}
-    return {"groups": groups, "meta": meta,
-            "num_files": sum(len(g) for g in stdPaths)}
+    return {"groups": groups, "meta": meta}
 
 
 class signal4Loader(QtCore.QObject):

@@ -11,9 +11,9 @@
 
 import numpy as np
 import rust_stdf_helper
-from deps.SharedSrc import (formatFileGroupCompositeValues,
-                            formatFileGroupValues, record_name_dict,
-                            wafer_direction_name)
+from deps.SharedSrc import (WAFER_INFO_FIELDS,
+                            formatFileGroupCompositeValues,
+                            formatFileGroupValues, record_name_dict)
 
 
 class DatabaseFetcherRust:
@@ -172,51 +172,58 @@ class DatabaseFetcherRust:
         return BinStats
 
     def getFileInfo(self):
-        """Return ``{Field: (value per file, ...)}`` from the File_Info table.
+        """Return ``{Field: (value per file group, ...)}`` from the File_Info table.
 
-        A field maps to None when absent from a group. It is shown as a plain value
-        when every source file has the same value; sparse or differing values are
-        labeled with their source-file numbers.
+        A field maps to an empty string when a group carries no value for it.
+        
+        Every wafer field in ``WAFER_INFO_FIELDS`` is replaced by its rendered value.
+        
+        Plain values are used when all source files have same value, otherwise, they are
+        labeled with subfile index.
         """
         self.checkConnection()
-        rows = self._fetcher.get_file_info_rows()
         group_paths = self.file_paths
-        InfoDict = {}   # key: field, value: [(SubFid, Value)] per file group
-        for Fid, Field, SubFid, Value in rows:
-            valueList = InfoDict.setdefault(Field, [[] for _ in group_paths])
-            valueList[Fid].append((SubFid, Value))
 
-        formatted_info = {}
-        for field, values_per_group in InfoDict.items():
-            formatted_info[field] = tuple(
-                formatFileGroupValues(values, len(paths)) if values else None
-                for paths, values in zip(group_paths, values_per_group)
-            )
+        # key: field, value: [(SubFid, Value)] per file group
+        InfoDict = {}
+        for Fid, Field, SubFid, Value in self._fetcher.get_file_info_rows():
+            InfoDict.setdefault(Field, [[] for _ in group_paths])[Fid].append((SubFid, Value))
 
-        composite_fields = {}
-        if "WAFR_SIZ" in InfoDict and "WF_UNITS" in InfoDict:
-            composite_fields["WAFR_SIZ_UNIT"] = (
-                ("WAFR_SIZ", "WF_UNITS"),
-                lambda size, unit: f"{size} {unit}")
-        if all(field in InfoDict for field in ("DIE_WID", "DIE_HT", "WF_UNITS")):
-            composite_fields["DIE_SIZE"] = (
-                ("DIE_WID", "DIE_HT", "WF_UNITS"),
-                lambda width, height, unit: f"{width} {unit} × {height} {unit}")
-        if "CENTER_X" in InfoDict and "CENTER_Y" in InfoDict:
-            composite_fields["CENTER_XY"] = (
-                ("CENTER_X", "CENTER_Y"), lambda x, y: f"({x}, {y})")
-        if "POS_X" in InfoDict and "POS_Y" in InfoDict:
-            composite_fields["POS_XY"] = (
-                ("POS_X", "POS_Y"),
-                lambda x, y: f"({wafer_direction_name(x)}, {wafer_direction_name(y)})")
-        for composite, (fields, format_values) in composite_fields.items():
-            formatted_info[composite] = tuple(
+        # key: field, value: tuple of formatted file group value
+        info = {
+            field: tuple(formatFileGroupValues(values, len(paths))
+                         for paths, values in zip(group_paths, values_per_group))
+            for field, values_per_group in InfoDict.items()
+        }
+
+        # if unit field is missing, use (?) as its placeholder
+        for _, _, _, unit, _ in WAFER_INFO_FIELDS:
+            if not unit:
+                continue
+            info.pop(unit, None)
+            unitInfo = InfoDict.get(unit) or [[] for _ in group_paths]
+            InfoDict[unit] = [
+                [(index, dict(unitInfo[fid]).get(index) or "(?)")
+                 for index in range(len(paths))]
+                for fid, paths in enumerate(group_paths)
+            ]
+
+        # a rendered field replaces its components; a missing one leaves them listed
+        present_fields = set(InfoDict)
+        for _, name, components, unit, combine in WAFER_INFO_FIELDS:
+            if not present_fields.issuperset(components):
+                # not contains all wafer related fields
+                continue
+            sources = components + ((unit,) if unit else ())
+            for field in sources:
+                info.pop(field, None)
+            info[name] = tuple(
                 formatFileGroupCompositeValues(
-                    [InfoDict[field][fid] for field in fields],
-                    len(paths), format_values)
+                    [InfoDict[field][fid] for field in sources],
+                    len(paths), combine)
                 for fid, paths in enumerate(group_paths)
             )
-        return formatted_info
+        return info
 
     def getTestFailCnt(self) -> dict:
         """Return ``{(TEST_NUM, TEST_NAME): [FailCount per file]}``.

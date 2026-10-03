@@ -763,12 +763,11 @@ class MyWindow(QtWidgets.QMainWindow):
         loading = (loadText,)
         counters = {key: loading for key in
                     ("Total", "Pass", "Failed", "Superseded", "Unknown")}
-        rows, _ = buildFileMetaData(
+        rows = buildFileMetaData(
             [joinFileGroup(g["names"]) for g in groups],
             [g["path"] for g in groups],
             [joinFileGroup(g["sizes"]) for g in groups],
-            counters, payload.get("meta") or {},
-            payload.get("num_files") or len(groups), plainValues=True)
+            counters, payload.get("meta") or {}, plainValues=True)
         self.applyFileInfoRows(rows, pending = loadText)
     
     

@@ -42,7 +42,6 @@ class DataInterface:
         self.testRecTypeDict = {}       # used for get test record type
         self.waferInfoDict = {}
         self.failCntDict = {}
-        # self.waferOrientation = ((), ())
         # dict to store H/SBIN info
         self.HBIN_dict = {}
         self.SBIN_dict = {}
@@ -101,11 +100,11 @@ class DataInterface:
         # return a empty list instead
         if not self.dbConnected:
             return []
-        rows, self.waferOrientation = buildFileMetaData(
+        rows = buildFileMetaData(
             self.file_names, [fg[0] for fg in self.file_paths], self.file_sizes,
             self.DatabaseFetcher.getDUTCountDict(),
             self.DatabaseFetcher.getFileInfo(),
-            self.num_files, self.containsWafer,
+            self.containsWafer,
             self.DatabaseFetcher.getWaferCount())
         return rows
         

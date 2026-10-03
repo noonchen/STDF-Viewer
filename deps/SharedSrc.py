@@ -560,65 +560,86 @@ def joinFileGroup(items: list) -> str:
                      else (f"#{i+1} → {e}" for i, e in enumerate(items)))
 
 
+def hasDisplayValue(value) -> bool:
+    """
+    True when a value is worth showing: anything but None or a blank string.
+    """
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
 def formatFileGroupValues(values: list, groupSize: int) -> str:
     """Format ``(subfile_index, value)`` entries for one file group.
 
-    Collapse to one value only when every subfile has the same value; otherwise
-    retain source indices. Whitespace-only strings are quoted so they remain visible.
+    Collapse to a single value only when every subfile of the group carries the same
+    one; otherwise keep the source index of each value.
+    
+    Blank string is quoted so empty value stays visible.
     """
     values = sorted((index, value) for index, value in values if value is not None)
     if not values:
         return ""
 
     def display(value):
-        # quote invisible, not empty string which becomes empty after strip(), otherwise return as is
-        return f'"{value}"' if isinstance(value, str) and not value.strip() else value
+        # quote an empty or whitespace-only value
+        return f'"{value}"' if isinstance(value, str) and not value.strip() else str(value)
 
-    if (len(values) == groupSize
-            and all(index == i for i, (index, _) in enumerate(values))
-            and all(value == values[0][1] for _, value in values[1:])):
+    if ({index for index, _ in values} == set(range(groupSize))
+            and len({value for _, value in values}) == 1):
         return display(values[0][1])
     return "\n".join(f"#{index + 1} → {display(value)}" for index, value in values)
 
 
-def formatFileGroupCompositeValues(valueGroups: list, groupSize: int, formatValues) -> str:
-    """Format a composite value from parallel per-subfile fields.
+def formatFileGroupCompositeValues(valueGroups: list, groupSize: int, formatFunc) -> str:
+    """Format a composite value built from parallel per-subfile component fields.
 
-    Only subfile indices present in every component are included. ``formatValues``
-    combines those components into one display value for each shared index.
+    ``valueGroups`` holds one ``(subfile_index, value)`` list per component field.
+    A blank component counts as missing, so an index is composed only when every
+    field carries a value for it. ``formatFunc`` combines those components.
     """
     if not valueGroups:
         return ""
 
-    valuesByIndex = []
-    for group in valueGroups:
-        values = {}
-        for index, value in group:
-            if value is not None and (not isinstance(value, str) or value.strip()):
-                values[index] = value
-        valuesByIndex.append(values)
-
-    commonIndices = set(valuesByIndex[0])
-    for values in valuesByIndex[1:]:
-        commonIndices.intersection_update(values)
-
-    composites = []
-    for index in sorted(commonIndices):
-        components = [values[index] for values in valuesByIndex]
-        composites.append((index, formatValues(*components)))
+    # list of dict, whose key: subfile index, value: component element.
+    # dict order = element order = `formatFunc` args order.
+    valuesByField = [{index: value for index, value in group if hasDisplayValue(value)}
+                     for group in valueGroups]
+    # common subfile across all dicts, if certain subfile index is missing in any dict,
+    # that subfile is considered missing for that group.
+    sharedIndices = set.intersection(*(set(values) for values in valuesByField))
+    # format composite value using given function for all subfile indices in `sharedIndices`
+    composites = [(index, formatFunc(*(values[index] for values in valuesByField)))
+                  for index in sorted(sharedIndices)]
     return formatFileGroupValues(composites, groupSize)
 
 
+# List of wafer fields that are formatted via a function, each entry is a tuple of:
+# 
+# (row label, rendered field, component fields, unit field, formatter)
+#
+# All component fields must exist for the row, otherwise it is skipped.
+WAFER_INFO_FIELDS = (
+    ("Wafer Size: ", "WAFR_SIZ_UNIT", ("WAFR_SIZ",), "WF_UNITS",
+     lambda size, unit: f"{size} {unit}"),
+    ("Wafer Die Width Height: ", "DIE_SIZE", ("DIE_WID", "DIE_HT"), "WF_UNITS",
+     lambda width, height, unit: f"{width} {unit} × {height} {unit}"),
+    ("Wafer Center: ", "CENTER_XY", ("CENTER_X", "CENTER_Y"), None,
+     lambda x, y: f"({x}, {y})"),
+    ("Wafer Flat Direction: ", "WF_FLAT", ("WF_FLAT",), None,
+     wafer_direction_name),
+    ("Wafer XY Direction: ", "POS_XY", ("POS_X", "POS_Y"), None,
+     lambda x, y: f"({wafer_direction_name(x)}, {wafer_direction_name(y)})"),
+)
+
+
 def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
-                      dutCntDict: dict, InfoDict: dict, num_files: int,
+                      dutCntDict: dict, InfoDict: dict,
                       containsWafer: bool = False, waferCount: tuple = (),
-                      plainValues: bool = False) -> tuple:
-    '''Rows of the File Info table, and the wafer orientation when there is one'''
+                      plainValues: bool = False) -> list:
+    '''Rows of the File Info table'''
     # plainValues keeps the values as given, for the entries still loading
-    fmt = (lambda p, f: p) if plainValues else \
+    fmt = (lambda p, _: p) if plainValues else \
           (lambda p, f: f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?")
     info = dict(InfoDict)
-    waferOrientation = ((), ())
     metaDataList = []
     # some basic os info
     metaDataList.append(["File Name: ", *file_names ])
@@ -637,47 +658,19 @@ def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
         if value == (): 
             # skip non-existed MIR fields
             continue
-        metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
+        metaDataList.append([f"{mirDict[fn]}: ", *value ])
+    # rendered wafer info: shown below, or dropped, never listed as raw fields
+    wafer_fields = {name: info.pop(name, ()) for _, name, *_ in WAFER_INFO_FIELDS}
     if containsWafer:
         metaDataList.append(["Wafers Tested: ", *list(map(str, waferCount)) ])
-        info.pop("WF_UNITS", None)
-        if "WAFR_SIZ" in info:
-            info.pop("WAFR_SIZ")
-            size_unit_tuple = info.pop("WAFR_SIZ_UNIT", ())
-            if any(value.strip() for value in size_unit_tuple if isinstance(value, str)):
-                metaDataList.append(["Wafer Size: ", *size_unit_tuple])
-        if "DIE_WID" in info and "DIE_HT" in info:
-            info.pop("DIE_WID")
-            info.pop("DIE_HT")
-            die_size_tuple = info.pop("DIE_SIZE", ())
-            if any(value.strip() for value in die_size_tuple if isinstance(value, str)):
-                metaDataList.append(["Wafer Die Width Height: ", *die_size_tuple])
-        if "CENTER_X" in info and "CENTER_Y" in info:
-            info.pop("CENTER_X")
-            info.pop("CENTER_Y")
-            center_tuple = info.pop("CENTER_XY", ())
-            if any(value.strip() for value in center_tuple if isinstance(value, str)):
-                metaDataList.append(["Wafer Center: ", *center_tuple])
-        if "WF_FLAT" in info:
-            flat_orient_tuple = info.pop("WF_FLAT")
-            metaDataList.append(["Wafer Flat Direction: ", 
-                                 *[wafer_direction_name(d) 
-                                   if d is not None 
-                                   else "" 
-                                   for d in flat_orient_tuple] ])
-        if "POS_X" in info and "POS_Y" in info:
-            pos_x_tuple = info.pop("POS_X")
-            pos_y_tuple = info.pop("POS_Y")
-            waferOrientation = (pos_x_tuple, pos_y_tuple)
-            xy_tuple = info.pop("POS_XY", ())
-            if any(value.strip() for value in xy_tuple if isinstance(value, str)):
-                metaDataList.append(["Wafer XY Direction: ", *xy_tuple])
+        for label, name, *_ in WAFER_INFO_FIELDS:
+            if any(map(hasDisplayValue, wafer_fields[name])):
+                metaDataList.append([label, *wafer_fields[name] ])
     # append other info: ATR, RDR, SDRs, sort names for better display
     for propertyName in sorted(info.keys()):
-        value: tuple = info[propertyName]
-        metaDataList.append([f"{propertyName}: ", *[v if v is not None else "" for v in value]])
-    
-    return metaDataList, waferOrientation
+        metaDataList.append([f"{propertyName}: ", *info[propertyName] ])
+
+    return metaDataList
 
 
 @lru_cache(maxsize=None)
@@ -872,5 +865,6 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name", "buildFileMetaData", "joinFileGroup",
-           "formatFileGroupValues", "formatFileGroupCompositeValues",
+           "hasDisplayValue", "formatFileGroupValues", "formatFileGroupCompositeValues",
+           "WAFER_INFO_FIELDS"
            ]
