@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Sep 20 2026
+# Last Modified: Sat Oct 03 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -560,6 +560,55 @@ def joinFileGroup(items: list) -> str:
                      else (f"#{i+1} → {e}" for i, e in enumerate(items)))
 
 
+def formatFileGroupValues(values: list, groupSize: int) -> str:
+    """Format ``(subfile_index, value)`` entries for one file group.
+
+    Collapse to one value only when every subfile has the same value; otherwise
+    retain source indices. Whitespace-only strings are quoted so they remain visible.
+    """
+    values = sorted((index, value) for index, value in values if value is not None)
+    if not values:
+        return ""
+
+    def display(value):
+        # quote invisible, not empty string which becomes empty after strip(), otherwise return as is
+        return f'"{value}"' if isinstance(value, str) and not value.strip() else value
+
+    if (len(values) == groupSize
+            and all(index == i for i, (index, _) in enumerate(values))
+            and all(value == values[0][1] for _, value in values[1:])):
+        return display(values[0][1])
+    return "\n".join(f"#{index + 1} → {display(value)}" for index, value in values)
+
+
+def formatFileGroupCompositeValues(valueGroups: list, groupSize: int, formatValues) -> str:
+    """Format a composite value from parallel per-subfile fields.
+
+    Only subfile indices present in every component are included. ``formatValues``
+    combines those components into one display value for each shared index.
+    """
+    if not valueGroups:
+        return ""
+
+    valuesByIndex = []
+    for group in valueGroups:
+        values = {}
+        for index, value in group:
+            if value is not None and (not isinstance(value, str) or value.strip()):
+                values[index] = value
+        valuesByIndex.append(values)
+
+    commonIndices = set(valuesByIndex[0])
+    for values in valuesByIndex[1:]:
+        commonIndices.intersection_update(values)
+
+    composites = []
+    for index in sorted(commonIndices):
+        components = [values[index] for values in valuesByIndex]
+        composites.append((index, formatValues(*components)))
+    return formatFileGroupValues(composites, groupSize)
+
+
 def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
                       dutCntDict: dict, InfoDict: dict, num_files: int,
                       containsWafer: bool = False, waferCount: tuple = (),
@@ -591,30 +640,24 @@ def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
         metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
     if containsWafer:
         metaDataList.append(["Wafers Tested: ", *list(map(str, waferCount)) ])
-        wafer_unit_tuple = info.pop("WF_UNITS", ["" for _ in range(num_files)])
+        info.pop("WF_UNITS", None)
         if "WAFR_SIZ" in info:
-            wafer_size_tuple = info.pop("WAFR_SIZ")
-            metaDataList.append(["Wafer Size: ", 
-                                 *[f"{size} {unit}" 
-                                   if size is not None and unit is not None 
-                                   else "" 
-                                   for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
+            info.pop("WAFR_SIZ")
+            size_unit_tuple = info.pop("WAFR_SIZ_UNIT", ())
+            if any(value.strip() for value in size_unit_tuple if isinstance(value, str)):
+                metaDataList.append(["Wafer Size: ", *size_unit_tuple])
         if "DIE_WID" in info and "DIE_HT" in info:
-            wid_tuple = info.pop("DIE_WID")
-            ht_tuple = info.pop("DIE_HT")
-            metaDataList.append(["Wafer Die Width Height: ", 
-                                 *[f"{wid} {unit} × {ht} {unit}" 
-                                   if wid is not None and ht is not None and unit is not None 
-                                   else "" 
-                                   for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
+            info.pop("DIE_WID")
+            info.pop("DIE_HT")
+            die_size_tuple = info.pop("DIE_SIZE", ())
+            if any(value.strip() for value in die_size_tuple if isinstance(value, str)):
+                metaDataList.append(["Wafer Die Width Height: ", *die_size_tuple])
         if "CENTER_X" in info and "CENTER_Y" in info:
-            cent_x_tuple = info.pop("CENTER_X")
-            cent_y_tuple = info.pop("CENTER_Y")
-            metaDataList.append(["Wafer Center: ", 
-                                 *[f"({x}, {y})" 
-                                   if x is not None and y is not None 
-                                   else "" 
-                                   for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
+            info.pop("CENTER_X")
+            info.pop("CENTER_Y")
+            center_tuple = info.pop("CENTER_XY", ())
+            if any(value.strip() for value in center_tuple if isinstance(value, str)):
+                metaDataList.append(["Wafer Center: ", *center_tuple])
         if "WF_FLAT" in info:
             flat_orient_tuple = info.pop("WF_FLAT")
             metaDataList.append(["Wafer Flat Direction: ", 
@@ -626,11 +669,9 @@ def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
             pos_x_tuple = info.pop("POS_X")
             pos_y_tuple = info.pop("POS_Y")
             waferOrientation = (pos_x_tuple, pos_y_tuple)
-            metaDataList.append(["Wafer XY Direction: ", 
-                                 *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" 
-                                   if x_orient is not None and y_orient is not None 
-                                   else "" 
-                                   for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+            xy_tuple = info.pop("POS_XY", ())
+            if any(value.strip() for value in xy_tuple if isinstance(value, str)):
+                metaDataList.append(["Wafer XY Direction: ", *xy_tuple])
     # append other info: ATR, RDR, SDRs, sort names for better display
     for propertyName in sorted(info.keys()):
         value: tuple = info[propertyName]
@@ -831,4 +872,5 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name", "buildFileMetaData", "joinFileGroup",
+           "formatFileGroupValues", "formatFileGroupCompositeValues",
            ]

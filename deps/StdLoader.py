@@ -37,7 +37,8 @@ from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, QTranslator
 
 import rust_stdf_helper
 from deps.DataInterface import DataInterface
-from deps.SharedSrc import getSetting, LOG_NAME, get_file_size, mirFieldNames
+from deps.SharedSrc import (getSetting, LOG_NAME, get_file_size, mirFieldNames,
+                            formatFileGroupValues)
 
 
 logger = logging.getLogger(LOG_NAME)
@@ -61,11 +62,15 @@ def readEarlyFileInfo(stdPaths: list[list[str]]) -> dict:
                 sizes.append(get_file_size(path))
             except OSError:
                 sizes.append("")
-        for path in fgroup:
+        group_meta = {fn: [] for fn in mirFieldNames}
+        for sub_fid, path in enumerate(fgroup):
             mir = rust_stdf_helper.read_MIR(path)
             for fn in mirFieldNames:
                 value = mir.get(fn)
-                meta[fn].append(str(value) if value is not None else "")
+                if value is not None:
+                    group_meta[fn].append((sub_fid, str(value)))
+        for fn in mirFieldNames:
+            meta[fn].append(formatFileGroupValues(group_meta[fn], len(fgroup)))
         groups.append({"path": fgroup[0], "names": names, "sizes": sizes})
     # drop the fields no file carries, the database skips those too
     meta = {fn: tuple(v) for fn, v in meta.items() if any(v)}

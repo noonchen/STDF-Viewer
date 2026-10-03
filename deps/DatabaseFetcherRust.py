@@ -11,7 +11,9 @@
 
 import numpy as np
 import rust_stdf_helper
-from deps.SharedSrc import record_name_dict
+from deps.SharedSrc import (formatFileGroupCompositeValues,
+                            formatFileGroupValues, record_name_dict,
+                            wafer_direction_name)
 
 
 class DatabaseFetcherRust:
@@ -172,41 +174,49 @@ class DatabaseFetcherRust:
     def getFileInfo(self):
         """Return ``{Field: (value per file, ...)}`` from the File_Info table.
 
-        Per file, a field maps to None when unset, to the value itself when it occurs
-        once, and otherwise to:
-            * "SETUP_T", "START_T", "FINISH_T", "SBLOT_ID": every occurrence joined by
-              newlines as ``"#1 → v1\n#2 → v2"``;
-            * any other field: only the first occurrence.
+        A field maps to None when absent from a group. It is shown as a plain value
+        when every source file has the same value; sparse or differing values are
+        labeled with their source-file numbers.
         """
         self.checkConnection()
         rows = self._fetcher.get_file_info_rows()
-        InfoDict = {}
-        for Fid, Field, Value in rows:
-            valueList = InfoDict.setdefault(Field, [[] for _ in range(self.num_files)])
-            valueList[Fid].append(Value)
+        group_paths = self.file_paths
+        InfoDict = {}   # key: field, value: [(SubFid, Value)] per file group
+        for Fid, Field, SubFid, Value in rows:
+            valueList = InfoDict.setdefault(Field, [[] for _ in group_paths])
+            valueList[Fid].append((SubFid, Value))
 
-        # convert dict value to tuple of strings
-        def process(key, old_value: list) -> tuple:
-            new = []
-            for info_per_file in old_value:
-                # info_per_file contains same field value from all merged files
-                if len(info_per_file) == 1:
-                    new.append(info_per_file[0])
-                elif len(info_per_file) == 0:
-                    new.append(None)
-                else:
-                    if key in ["SETUP_T", "START_T", "FINISH_T", "SBLOT_ID"]:
-                        # concat these field values by "\n"
-                        new.append("\n".join([f"#{i+1} → {v}" for i, v in enumerate(info_per_file)]))
-                    else:
-                        # for other fields, only extract info from 1st file
-                        new.append(info_per_file[0])
-            return tuple(new)
+        formatted_info = {}
+        for field, values_per_group in InfoDict.items():
+            formatted_info[field] = tuple(
+                formatFileGroupValues(values, len(paths)) if values else None
+                for paths, values in zip(group_paths, values_per_group)
+            )
 
-        for key in InfoDict.keys():
-            old_value = InfoDict[key]
-            InfoDict[key] = process(key, old_value)
-        return InfoDict
+        composite_fields = {}
+        if "WAFR_SIZ" in InfoDict and "WF_UNITS" in InfoDict:
+            composite_fields["WAFR_SIZ_UNIT"] = (
+                ("WAFR_SIZ", "WF_UNITS"),
+                lambda size, unit: f"{size} {unit}")
+        if all(field in InfoDict for field in ("DIE_WID", "DIE_HT", "WF_UNITS")):
+            composite_fields["DIE_SIZE"] = (
+                ("DIE_WID", "DIE_HT", "WF_UNITS"),
+                lambda width, height, unit: f"{width} {unit} × {height} {unit}")
+        if "CENTER_X" in InfoDict and "CENTER_Y" in InfoDict:
+            composite_fields["CENTER_XY"] = (
+                ("CENTER_X", "CENTER_Y"), lambda x, y: f"({x}, {y})")
+        if "POS_X" in InfoDict and "POS_Y" in InfoDict:
+            composite_fields["POS_XY"] = (
+                ("POS_X", "POS_Y"),
+                lambda x, y: f"({wafer_direction_name(x)}, {wafer_direction_name(y)})")
+        for composite, (fields, format_values) in composite_fields.items():
+            formatted_info[composite] = tuple(
+                formatFileGroupCompositeValues(
+                    [InfoDict[field][fid] for field in fields],
+                    len(paths), format_values)
+                for fid, paths in enumerate(group_paths)
+            )
+        return formatted_info
 
     def getTestFailCnt(self) -> dict:
         """Return ``{(TEST_NUM, TEST_NAME): [FailCount per file]}``.
