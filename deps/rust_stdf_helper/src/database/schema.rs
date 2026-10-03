@@ -601,7 +601,7 @@ pub(crate) mod fetcher_queries {
     GROUP by Fid, SBIN";
 
     pub(crate) static FETCH_SELECT_FILE_INFO: &str = "SELECT 
-        Fid, Field, Value 
+        Fid, Field, SubFid, Value 
     FROM 
         File_Info 
     ORDER By 

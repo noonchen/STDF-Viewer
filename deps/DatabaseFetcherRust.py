@@ -11,7 +11,9 @@
 
 import numpy as np
 import rust_stdf_helper
-from deps.SharedSrc import record_name_dict
+from deps.SharedSrc import (WAFER_INFO_FIELDS,
+                            formatFileGroupCompositeValues,
+                            formatFileGroupValues, record_name_dict)
 
 
 class DatabaseFetcherRust:
@@ -170,43 +172,58 @@ class DatabaseFetcherRust:
         return BinStats
 
     def getFileInfo(self):
-        """Return ``{Field: (value per file, ...)}`` from the File_Info table.
+        """Return ``{Field: (value per file group, ...)}`` from the File_Info table.
 
-        Per file, a field maps to None when unset, to the value itself when it occurs
-        once, and otherwise to:
-            * "SETUP_T", "START_T", "FINISH_T", "SBLOT_ID": every occurrence joined by
-              newlines as ``"#1 → v1\n#2 → v2"``;
-            * any other field: only the first occurrence.
+        A field maps to an empty string when a group carries no value for it.
+        
+        Every wafer field in ``WAFER_INFO_FIELDS`` is replaced by its rendered value.
+        
+        Plain values are used when all source files have same value, otherwise, they are
+        labeled with subfile index.
         """
         self.checkConnection()
-        rows = self._fetcher.get_file_info_rows()
+        group_paths = self.file_paths
+
+        # key: field, value: [(SubFid, Value)] per file group
         InfoDict = {}
-        for Fid, Field, Value in rows:
-            valueList = InfoDict.setdefault(Field, [[] for _ in range(self.num_files)])
-            valueList[Fid].append(Value)
+        for Fid, Field, SubFid, Value in self._fetcher.get_file_info_rows():
+            InfoDict.setdefault(Field, [[] for _ in group_paths])[Fid].append((SubFid, Value))
 
-        # convert dict value to tuple of strings
-        def process(key, old_value: list) -> tuple:
-            new = []
-            for info_per_file in old_value:
-                # info_per_file contains same field value from all merged files
-                if len(info_per_file) == 1:
-                    new.append(info_per_file[0])
-                elif len(info_per_file) == 0:
-                    new.append(None)
-                else:
-                    if key in ["SETUP_T", "START_T", "FINISH_T", "SBLOT_ID"]:
-                        # concat these field values by "\n"
-                        new.append("\n".join([f"#{i+1} → {v}" for i, v in enumerate(info_per_file)]))
-                    else:
-                        # for other fields, only extract info from 1st file
-                        new.append(info_per_file[0])
-            return tuple(new)
+        # key: field, value: tuple of formatted file group value
+        info = {
+            field: tuple(formatFileGroupValues(values, len(paths))
+                         for paths, values in zip(group_paths, values_per_group))
+            for field, values_per_group in InfoDict.items()
+        }
 
-        for key in InfoDict.keys():
-            old_value = InfoDict[key]
-            InfoDict[key] = process(key, old_value)
-        return InfoDict
+        # if unit field is missing, use (?) as its placeholder
+        for _, _, _, unit, _ in WAFER_INFO_FIELDS:
+            if not unit:
+                continue
+            info.pop(unit, None)
+            unitInfo = InfoDict.get(unit) or [[] for _ in group_paths]
+            InfoDict[unit] = [
+                [(index, dict(unitInfo[fid]).get(index) or "(?)")
+                 for index in range(len(paths))]
+                for fid, paths in enumerate(group_paths)
+            ]
+
+        # a rendered field replaces its components; a missing one leaves them listed
+        present_fields = set(InfoDict)
+        for _, name, components, unit, combine in WAFER_INFO_FIELDS:
+            if not present_fields.issuperset(components):
+                # not contains all wafer related fields
+                continue
+            sources = components + ((unit,) if unit else ())
+            for field in sources:
+                info.pop(field, None)
+            info[name] = tuple(
+                formatFileGroupCompositeValues(
+                    [InfoDict[field][fid] for field in sources],
+                    len(paths), combine)
+                for fid, paths in enumerate(group_paths)
+            )
+        return info
 
     def getTestFailCnt(self) -> dict:
         """Return ``{(TEST_NUM, TEST_NAME): [FailCount per file]}``.

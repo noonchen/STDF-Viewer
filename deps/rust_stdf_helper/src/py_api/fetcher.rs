@@ -258,11 +258,11 @@ impl PyDataFetcher {
         Ok(py.detach(move || inner.is_dut_info_column_empty(column))?)
     }
 
-    /// Rows of `(Fid, Field, Value)` ordered by `Fid, Field, SubFid`.
+    /// Rows of `(Fid, Field, SubFid, Value)` ordered by `Fid, Field, SubFid`.
     pub fn get_file_info_rows(
         &mut self,
         py: Python<'_>,
-    ) -> PyResult<Vec<(i64, String, Option<String>)>> {
+    ) -> PyResult<Vec<(i64, String, i64, Option<String>)>> {
         let inner = &mut self.inner;
         Ok(py.detach(move || inner.file_info_rows())?)
     }

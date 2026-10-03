@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Sep 20 2026
+# Last Modified: Sat Oct 03 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -560,16 +560,86 @@ def joinFileGroup(items: list) -> str:
                      else (f"#{i+1} → {e}" for i, e in enumerate(items)))
 
 
+def hasDisplayValue(value) -> bool:
+    """
+    True when a value is worth showing: anything but None or a blank string.
+    """
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
+def formatFileGroupValues(values: list, groupSize: int) -> str:
+    """Format ``(subfile_index, value)`` entries for one file group.
+
+    Collapse to a single value only when every subfile of the group carries the same
+    one; otherwise keep the source index of each value.
+    
+    Blank string is quoted so empty value stays visible.
+    """
+    values = sorted((index, value) for index, value in values if value is not None)
+    if not values:
+        return ""
+
+    def display(value):
+        # quote an empty or whitespace-only value
+        return f'"{value}"' if isinstance(value, str) and not value.strip() else str(value)
+
+    if ({index for index, _ in values} == set(range(groupSize))
+            and len({value for _, value in values}) == 1):
+        return display(values[0][1])
+    return "\n".join(f"#{index + 1} → {display(value)}" for index, value in values)
+
+
+def formatFileGroupCompositeValues(valueGroups: list, groupSize: int, formatFunc) -> str:
+    """Format a composite value built from parallel per-subfile component fields.
+
+    ``valueGroups`` holds one ``(subfile_index, value)`` list per component field.
+    A blank component counts as missing, so an index is composed only when every
+    field carries a value for it. ``formatFunc`` combines those components.
+    """
+    if not valueGroups:
+        return ""
+
+    # list of dict, whose key: subfile index, value: component element.
+    # dict order = element order = `formatFunc` args order.
+    valuesByField = [{index: value for index, value in group if hasDisplayValue(value)}
+                     for group in valueGroups]
+    # common subfile across all dicts, if certain subfile index is missing in any dict,
+    # that subfile is considered missing for that group.
+    sharedIndices = set.intersection(*(set(values) for values in valuesByField))
+    # format composite value using given function for all subfile indices in `sharedIndices`
+    composites = [(index, formatFunc(*(values[index] for values in valuesByField)))
+                  for index in sorted(sharedIndices)]
+    return formatFileGroupValues(composites, groupSize)
+
+
+# List of wafer fields that are formatted via a function, each entry is a tuple of:
+# 
+# (row label, rendered field, component fields, unit field, formatter)
+#
+# All component fields must exist for the row, otherwise it is skipped.
+WAFER_INFO_FIELDS = (
+    ("Wafer Size: ", "WAFR_SIZ_UNIT", ("WAFR_SIZ",), "WF_UNITS",
+     lambda size, unit: f"{size} {unit}"),
+    ("Wafer Die Width Height: ", "DIE_SIZE", ("DIE_WID", "DIE_HT"), "WF_UNITS",
+     lambda width, height, unit: f"{width} {unit} × {height} {unit}"),
+    ("Wafer Center: ", "CENTER_XY", ("CENTER_X", "CENTER_Y"), None,
+     lambda x, y: f"({x}, {y})"),
+    ("Wafer Flat Direction: ", "WF_FLAT", ("WF_FLAT",), None,
+     wafer_direction_name),
+    ("Wafer XY Direction: ", "POS_XY", ("POS_X", "POS_Y"), None,
+     lambda x, y: f"({wafer_direction_name(x)}, {wafer_direction_name(y)})"),
+)
+
+
 def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
-                      dutCntDict: dict, InfoDict: dict, num_files: int,
+                      dutCntDict: dict, InfoDict: dict,
                       containsWafer: bool = False, waferCount: tuple = (),
-                      plainValues: bool = False) -> tuple:
-    '''Rows of the File Info table, and the wafer orientation when there is one'''
+                      plainValues: bool = False) -> list:
+    '''Rows of the File Info table'''
     # plainValues keeps the values as given, for the entries still loading
-    fmt = (lambda p, f: p) if plainValues else \
+    fmt = (lambda p, _: p) if plainValues else \
           (lambda p, f: f"{100*p/(p+f) :.2f}%" if (p+f)!=0 else "?")
     info = dict(InfoDict)
-    waferOrientation = ((), ())
     metaDataList = []
     # some basic os info
     metaDataList.append(["File Name: ", *file_names ])
@@ -588,55 +658,19 @@ def buildFileMetaData(file_names: list, file_paths: list, file_sizes: list,
         if value == (): 
             # skip non-existed MIR fields
             continue
-        metaDataList.append([f"{mirDict[fn]}: ", *[v if v is not None else "" for v in value] ])
+        metaDataList.append([f"{mirDict[fn]}: ", *value ])
+    wafer_fields = {name: info.pop(name, ()) for _, name, *_ in WAFER_INFO_FIELDS}
     if containsWafer:
         metaDataList.append(["Wafers Tested: ", *list(map(str, waferCount)) ])
-        wafer_unit_tuple = info.pop("WF_UNITS", ["" for _ in range(num_files)])
-        if "WAFR_SIZ" in info:
-            wafer_size_tuple = info.pop("WAFR_SIZ")
-            metaDataList.append(["Wafer Size: ", 
-                                 *[f"{size} {unit}" 
-                                   if size is not None and unit is not None 
-                                   else "" 
-                                   for (size, unit) in zip(wafer_size_tuple, wafer_unit_tuple)] ])
-        if "DIE_WID" in info and "DIE_HT" in info:
-            wid_tuple = info.pop("DIE_WID")
-            ht_tuple = info.pop("DIE_HT")
-            metaDataList.append(["Wafer Die Width Height: ", 
-                                 *[f"{wid} {unit} × {ht} {unit}" 
-                                   if wid is not None and ht is not None and unit is not None 
-                                   else "" 
-                                   for (wid, ht, unit) in zip(wid_tuple, ht_tuple, wafer_unit_tuple)] ])
-        if "CENTER_X" in info and "CENTER_Y" in info:
-            cent_x_tuple = info.pop("CENTER_X")
-            cent_y_tuple = info.pop("CENTER_Y")
-            metaDataList.append(["Wafer Center: ", 
-                                 *[f"({x}, {y})" 
-                                   if x is not None and y is not None 
-                                   else "" 
-                                   for (x, y) in zip(cent_x_tuple, cent_y_tuple)] ])
-        if "WF_FLAT" in info:
-            flat_orient_tuple = info.pop("WF_FLAT")
-            metaDataList.append(["Wafer Flat Direction: ", 
-                                 *[wafer_direction_name(d) 
-                                   if d is not None 
-                                   else "" 
-                                   for d in flat_orient_tuple] ])
-        if "POS_X" in info and "POS_Y" in info:
-            pos_x_tuple = info.pop("POS_X")
-            pos_y_tuple = info.pop("POS_Y")
-            waferOrientation = (pos_x_tuple, pos_y_tuple)
-            metaDataList.append(["Wafer XY Direction: ", 
-                                 *[f"({wafer_direction_name(x_orient)}, {wafer_direction_name(y_orient)})" 
-                                   if x_orient is not None and y_orient is not None 
-                                   else "" 
-                                   for (x_orient, y_orient) in zip(pos_x_tuple, pos_y_tuple)] ])
+    # display rendered wafer info even if no WIR detected (containsWafer == False).
+    for label, name, *_ in WAFER_INFO_FIELDS:
+        if any(map(hasDisplayValue, wafer_fields[name])):
+            metaDataList.append([label, *wafer_fields[name] ])
     # append other info: ATR, RDR, SDRs, sort names for better display
     for propertyName in sorted(info.keys()):
-        value: tuple = info[propertyName]
-        metaDataList.append([f"{propertyName}: ", *[v if v is not None else "" for v in value]])
-    
-    return metaDataList, waferOrientation
+        metaDataList.append([f"{propertyName}: ", *info[propertyName] ])
+
+    return metaDataList
 
 
 @lru_cache(maxsize=None)
@@ -831,4 +865,6 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            
            "translate_const_dicts", "dut_flag_parser", "test_flag_parser", "return_state_parser", 
            "wafer_direction_name", "buildFileMetaData", "joinFileGroup",
+           "hasDisplayValue", "formatFileGroupValues", "formatFileGroupCompositeValues",
+           "WAFER_INFO_FIELDS"
            ]

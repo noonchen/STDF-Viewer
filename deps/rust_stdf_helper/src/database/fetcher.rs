@@ -1278,16 +1278,16 @@ impl DataFetcher {
         Ok(valid_data_exists == 0)
     }
 
-    /// `getFileInfo()` row source — `(Fid, Field, Value)` ordered by
-    /// `Fid, Field, SubFid` (per-field processing is done by the caller).
-    pub fn file_info_rows(&self) -> Result<Vec<(i64, String, Option<String>)>, StdfHelperError> {
+    /// `getFileInfo()` row source — `(Fid, Field, SubFid, Value)`.
+    pub fn file_info_rows(&self) -> Result<Vec<(i64, String, i64, Option<String>)>, StdfHelperError> {
         let mut stmt = self.conn.prepare_cached(FETCH_SELECT_FILE_INFO)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
