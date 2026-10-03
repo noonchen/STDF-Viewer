@@ -16,6 +16,10 @@ dependencies = [
     "pyqtgraph>=0.13.7",
     "tomlkit>=0.13.3",
     "xlsxwriter>=3.2.9",
+    # Finder hands opened files over as an Apple Event rather than on the
+    # command line, so AppKit is needed to receive them
+    "pyobjc-core; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa; sys_platform == 'darwin'",
     "rust_stdf_helper",
 ]
 

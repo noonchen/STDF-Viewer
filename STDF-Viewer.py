@@ -68,7 +68,22 @@ QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRou
 Version = "V4.1.0"
     
 # save config path to sys
-rootFolder = os.path.dirname(sys.argv[0])
+if getattr(sys, "frozen", False):
+    # bundles unpack their data elsewhere; sys.argv[0] points at the executable
+    resourceFolder = getattr(sys, "_MEIPASS", os.path.dirname(sys.argv[0]))
+else:
+    resourceFolder = os.path.dirname(sys.argv[0])
+# a bundle is not meant to be written to, so logs, the working database and the
+# config live in the user's data folder instead
+if getattr(sys, "frozen", False) and sys.platform == "darwin":
+    rootFolder = os.path.expanduser("~/Library/Application Support/STDF-Viewer")
+elif getattr(sys, "frozen", False) and sys.platform == "linux":
+    # the deb installs into /usr/local, which a normal user cannot write
+    rootFolder = os.path.join(os.environ.get("XDG_DATA_HOME",
+                             os.path.expanduser("~/.local/share")), "STDF-Viewer")
+else:
+    rootFolder = resourceFolder
+setattr(sys, "resourceFolder", resourceFolder)
 setattr(sys, "rootFolder", rootFolder)
 setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
 
@@ -461,7 +476,7 @@ class MyWindow(QtWidgets.QMainWindow):
             QMessageBox.warning(self, self.tr("Warning"), self.tr("This font cannot be loaded:\n{}").format(p))
         else:
             shutil.copy(src=p, 
-                        dst=os.path.join(sys.rootFolder, "fonts"), 
+                        dst=os.path.join(sys.resourceFolder, "fonts"), 
                         follow_symlinks=True)
             # manually refresh font list
             loadFonts()
@@ -1677,6 +1692,10 @@ def run():
     window.show()
     if pathFromArgs:
         window.callFileLoader(pathFromArgs)
+    if sys.platform == "darwin":
+        # Finder opens documents as an Apple Event, not on the command line
+        from deps import macOpenFile
+        macOpenFile.install(lambda paths: window.callFileLoader([[p] for p in paths]))
     sys.exit(app.exec_())
     
 

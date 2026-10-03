@@ -228,9 +228,14 @@ def dumpConfigFile():
 
 
 def loadFonts():
-    for fn in os.listdir(os.path.join(sys.rootFolder, "fonts")):
+    # bundled fonts live in the resource folder, which a frozen macOS build
+    # keeps apart from the writable one
+    fontFolder = os.path.join(getattr(sys, "resourceFolder", ""), "fonts")
+    if not os.path.isdir(fontFolder):
+        fontFolder = os.path.join(sys.rootFolder, "fonts")
+    for fn in os.listdir(fontFolder):
         if not fn.endswith(".ttf"): continue
-        fontPath = os.path.join(sys.rootFolder, "fonts", fn)
+        fontPath = os.path.join(fontFolder, fn)
         fontIdx = QtGui.QFontDatabase.addApplicationFont(fontPath)
         if fontIdx < 0:
             print(f"Font {fn} cannot be loaded to QT")
