@@ -64,31 +64,33 @@ from PyQt5.QtCore import (Qt, QTranslator,
 
 # high dpi support
 QApplication.setHighDpiScaleFactorRoundingPolicy(QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    
+
+# application name is required to use
+# `StandardLocation.AppDataLocation`
+QtCore.QCoreApplication.setApplicationName("STDF-Viewer")
+
 Version = "V4.1.0"
-    
-# save config path to sys
+
 if getattr(sys, "frozen", False):
-    # bundles unpack their data elsewhere; sys.argv[0] points at the executable
-    resourceFolder = getattr(sys, "_MEIPASS", os.path.dirname(sys.argv[0]))
+    resourceFolder = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    # following files are put to AppDataLocation when FROZEN:
+    # - STDF-Viewer.config
+    # - Logs
+    # - Databases
+    # - User-added fonts
+    appDataFolder = QtCore.QStandardPaths.writableLocation(
+        QtCore.QStandardPaths.StandardLocation.AppDataLocation)
 else:
-    resourceFolder = os.path.dirname(sys.argv[0])
-# a bundle is not meant to be written to, so logs, the working database and the
-# config live in the user's data folder instead
-if getattr(sys, "frozen", False) and sys.platform == "darwin":
-    rootFolder = os.path.expanduser("~/Library/Application Support/STDF-Viewer")
-elif getattr(sys, "frozen", False) and sys.platform == "linux":
-    # the deb installs into /usr/local, which a normal user cannot write
-    rootFolder = os.path.join(os.environ.get("XDG_DATA_HOME",
-                             os.path.expanduser("~/.local/share")), "STDF-Viewer")
-else:
-    rootFolder = resourceFolder
+    # dev env, use .py source folder to load/save everything
+    resourceFolder = os.path.dirname(os.path.abspath(__file__))
+    appDataFolder = resourceFolder
+
 setattr(sys, "resourceFolder", resourceFolder)
-setattr(sys, "rootFolder", rootFolder)
-setattr(sys, "CONFIG_PATH", os.path.join(rootFolder, "STDF-Viewer.config"))
+setattr(sys, "appDataFolder", appDataFolder)
+setattr(sys, "CONFIG_PATH", os.path.join(appDataFolder, "STDF-Viewer.config"))
 
 # logger
-init_logger(rootFolder)
+init_logger(appDataFolder)
 logger = logging.getLogger(LOG_NAME)
 
 
@@ -550,9 +552,10 @@ class MyWindow(QtWidgets.QMainWindow):
         if QtGui.QFontDatabase.addApplicationFont(p) < 0:
             QMessageBox.warning(self, self.tr("Warning"), self.tr("This font cannot be loaded:\n{}").format(p))
         else:
-            shutil.copy(src=p, 
-                        dst=os.path.join(sys.resourceFolder, "fonts"), 
-                        follow_symlinks=True)
+            # a user font belongs to the writable data folder, not to the bundle
+            fontFolder = os.path.join(sys.appDataFolder, "fonts")
+            os.makedirs(fontFolder, exist_ok=True)
+            shutil.copy(src=p, dst=fontFolder, follow_symlinks=True)
             # manually refresh font list
             loadFonts()
             self.settingUI.refreshFontList()
@@ -590,7 +593,7 @@ class MyWindow(QtWidgets.QMainWindow):
         dumpConfigFile()
         # clean generated databases; keep the current one and any sidecar left
         # behind when the checkpoint above failed
-        dbFolder = os.path.join(sys.rootFolder, "logs")
+        dbFolder = os.path.join(sys.appDataFolder, "logs")
         currentName = os.path.basename(currentDB)
         for f in os.listdir(dbFolder):
             # keep the current database and any sidecar of it
@@ -1425,7 +1428,7 @@ class MyWindow(QtWidgets.QMainWindow):
         looking for database of previous loaded
         stdf files
         '''
-        dbFolder = os.path.join(sys.rootFolder, "logs")
+        dbFolder = os.path.join(sys.appDataFolder, "logs")
         dbs = [f for f in os.listdir(dbFolder) if f.endswith(".db")]
         if dbs:
             dbPath = os.path.join(dbFolder, dbs[0])

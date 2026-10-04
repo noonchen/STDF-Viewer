@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sat Oct 03 2026
+# Last Modified: Sun Oct 04 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -224,21 +224,26 @@ def loadConfigFile():
     
     
 def dumpConfigFile():
+    # the config folder is not necessarily the one the logger created
+    os.makedirs(os.path.dirname(sys.CONFIG_PATH), exist_ok=True)
     GlobalSetting.dumpConfig(sys.CONFIG_PATH)
 
 
 def loadFonts():
-    # bundled fonts live in the resource folder, which a frozen macOS build
-    # keeps apart from the writable one
-    fontFolder = os.path.join(getattr(sys, "resourceFolder", ""), "fonts")
-    if not os.path.isdir(fontFolder):
-        fontFolder = os.path.join(sys.rootFolder, "fonts")
-    for fn in os.listdir(fontFolder):
-        if not fn.endswith(".ttf"): continue
-        fontPath = os.path.join(fontFolder, fn)
-        fontIdx = QtGui.QFontDatabase.addApplicationFont(fontPath)
-        if fontIdx < 0:
-            print(f"Font {fn} cannot be loaded to QT")
+    # scan fonts in the bundled and user-added font folders
+    fontFolders = sorted(set([
+        os.path.join(sys.resourceFolder, "fonts"),
+        os.path.join(sys.appDataFolder, "fonts")
+        ]))
+    for fontFolder in fontFolders:
+        if not os.path.isdir(fontFolder):
+            continue
+        for fn in os.listdir(fontFolder):
+            if not fn.endswith(".ttf"): continue
+            fontPath = os.path.join(fontFolder, fn)
+            fontIdx = QtGui.QFontDatabase.addApplicationFont(fontPath)
+            if fontIdx < 0:
+                print(f"Font {fn} cannot be loaded to QT")
 
 
 def getLoadedFontNames() -> list:
@@ -421,10 +426,10 @@ def getProperFontColor(background: QtGui.QColor) -> QtGui.QColor:
         return QtGui.QColor("#FFFFFF")
 
 
-def init_logger(rootFolder):
+def init_logger(appDataFolder):
     logger = logging.getLogger("STDF-Viewer")
     logger.setLevel(logging.WARNING)
-    logFolder = os.path.join(rootFolder, "logs")
+    logFolder = os.path.join(appDataFolder, "logs")
     logPath = os.path.join(logFolder, f"STDF-Viewer-{datetime.date.today()}.log")
     setattr(sys, "LOG_PATH", logFolder)   # save the log location globally
     os.makedirs(os.path.dirname(logPath), exist_ok=True)

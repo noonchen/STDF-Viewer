@@ -221,7 +221,7 @@ class StdfReader(QtCore.QObject):
             if self.msgSignal: self.msgSignal.emit(self.tr("Loading STD file..."), 0)
             start = time.time()
             # auto generate a database name
-            databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
+            databasePath = os.path.join(sys.appDataFolder, "logs", f"{uuid.uuid4().hex}.db")
             rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
             end = time.time()
             if self.flag.stop:
