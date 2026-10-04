@@ -117,6 +117,10 @@ class StdfApplication(QApplication):
         super().__init__(argv)
         self._openRequests = []
         self._dropTargets = []
+        # a copy of sys.argv for macOS, because command line args
+        # are converted to QFileOpenEvent on macOS, the list is
+        # for filtering unwanted QFileOpenEvent.
+        self._cliPaths = {os.path.realpath(p) for p in sys.argv} if isMac else set()
         # function to determine if the app can accept dropped files,
         # updated by `MyWindow`.
         self.canAcceptDrop = lambda: True
@@ -134,8 +138,14 @@ class StdfApplication(QApplication):
 
     def event(self, e):
         if e.type() == QtCore.QEvent.Type.FileOpen:
+            # only macOS has this event
             path = e.url().toLocalFile() or e.file()
-            if path:
+            # macOS AppKit converts cli args as file open requests,
+            # ignore any request whose path belongs to cli so that:
+            # 1. non-stdf path (such as *.py) will not be triggered.
+            # 2. avoid duplicate trigger.
+            # 3. real finder file event is unaffected.
+            if path and os.path.realpath(path) not in self._cliPaths:
                 self._openRequests.append(path)
                 # ensure all files are appended before calling `_openRequestedFiles`
                 QtCore.QTimer.singleShot(0, self._openRequestedFiles)
