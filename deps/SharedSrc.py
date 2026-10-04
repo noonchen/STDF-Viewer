@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 5th 2022
 # -----
-# Last Modified: Sun Oct 04 2026
+# Last Modified: Mon Oct 05 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -24,7 +24,8 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal as Signal
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pydantic import BaseModel, Field, field_validator, field_serializer
-from rust_stdf_helper import TestSubCode, dut_summary_query, get_icon_src
+from rust_stdf_helper import (TestSubCode, datalog_query, dut_summary_query,
+                              get_icon_src, simple_probe)
 
 
 class TrendPlotConfig(BaseModel):
@@ -296,24 +297,9 @@ FILE_FILTER = '''All Supported Files (*.std* *.std*.gz *.std*.bz2 *.std*.zip);;
                 All Files (*.*)'''
 
 
+SIMPLE_PROBE = simple_probe()
 DUT_SUMMARY_QUERY = dut_summary_query()
-DATALOG_QUERY = '''SELECT
-                        Fid as "File ID",
-                        RecordType AS "Record Type",
-                        '\n' || Value || '\n' AS "Value",
-                        printf("%s ··· %s ··· %s",  
-                                CASE 
-                                    WHEN AfterDUTIndex == 0 THEN "|" 
-                                    ELSE printf("PIR #%d", AfterDUTIndex) END, 
-                                CASE 
-                                    WHEN isBeforePRR == 1 THEN RecordType 
-                                    ELSE printf("PRR #%d", AfterDUTIndex) END, 
-                                CASE 
-                                    WHEN AfterDUTIndex == 0 THEN "PIR #1" 
-                                    WHEN isBeforePRR == 1 THEN printf("PRR #%d", AfterDUTIndex) 
-                                    ELSE RecordType END) AS "Approx. Location"
-                    FROM
-                        Datalog'''
+DATALOG_QUERY = datalog_query()
 
 
 # check if a test item passed: bit7-6: 00 pass; 10 fail; x1 none, treated as pass; treat negative flag (indicate not tested) as pass
@@ -866,7 +852,8 @@ __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolCha
            "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
            
            "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 
-           "LOG_NAME", "FILE_FILTER", "DUT_SUMMARY_QUERY", "DATALOG_QUERY", "mirFieldNames", "mirDict", "isMac", 
+           "LOG_NAME", "FILE_FILTER", "SIMPLE_PROBE", "DUT_SUMMARY_QUERY", "DATALOG_QUERY",
+           "mirFieldNames", "mirDict", "isMac", 
            
            "parseTestString", "isHexColor", "getProperFontColor", "init_logger", "runInQThread", 
            "loadFonts", "getLoadedFontNames", "rSymbol", "getIcon", "get_png_size", 

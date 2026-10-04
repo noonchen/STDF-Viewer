@@ -24,11 +24,22 @@ pub mod stdf_to_xlsx;
 use crate::stdf::record_tracker::{TestIDType, TestSubCode};
 use pyo3::prelude::*;
 
-/// Single source of truth for the DUT summary / datalog SQL, exported so the
-/// Python reference fetcher (SharedSrc) uses the exact same query text.
+/// Query for DUT Summary Table
 #[pyfunction]
 fn dut_summary_query() -> &'static str {
     crate::database::schema::fetcher_queries::FETCH_SELECT_DUT_SUMMARY
+}
+
+/// Query for Datalog Table
+#[pyfunction]
+fn datalog_query() -> &'static str {
+    crate::database::schema::fetcher_queries::FETCH_SELECT_DATALOG
+}
+
+/// Used as the first statement for QtSql
+#[pyfunction]
+fn simple_probe() -> &'static str {
+    crate::database::schema::fetcher_queries::SIMPLE_PROBE
 }
 
 pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -57,6 +68,8 @@ pub fn register(py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(statistics::empirical_cdf, module)?)?;
     module.add_function(wrap_pyfunction!(statistics::norm_ppf, module)?)?;
     module.add_function(wrap_pyfunction!(dut_summary_query, module)?)?;
+    module.add_function(wrap_pyfunction!(datalog_query, module)?)?;
+    module.add_function(wrap_pyfunction!(simple_probe, module)?)?;
     module.add_function(wrap_pyfunction!(session::validate_session, module)?)?;
     module.add_function(wrap_pyfunction!(session::save_session, module)?)?;
     module.add_function(wrap_pyfunction!(fetcher::checkpoint_truncate, module)?)?;

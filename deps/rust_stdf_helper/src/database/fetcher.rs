@@ -255,12 +255,19 @@ impl IndexBuildState {
             self.elapsed_ms.load(Ordering::Relaxed),
         )
     }
+
+    /// Report that no index build will run, so the GUI stops polling.
+    pub fn mark_none(&self) {
+        self.state.store(INDEX_NONE, Ordering::Relaxed);
+    }
 }
 
 /// Rust version of DatabaseFetcher, owns the database connection
 /// and manages caches for fast access.
 pub struct DataFetcher {
     conn: Connection,
+    /// Path of the open database; kept for the deferred index build.
+    db_path: String,
     file_paths: Vec<Vec<String>>,
     /// fid -> full dut array (starts from 1).
     full_dut: HashMap<FileId, Array1<u64>>,
@@ -277,7 +284,10 @@ pub struct DataFetcher {
     head_list: Vec<HeadNum>,
     /// LRU cache for test data.
     test_data: TestDataLru,
-    /// Background query-index build; joined by `close()` / drop.
+    /// Whether the database is in WAL mode, prerequisite for the index build.
+    wal: bool,
+    /// Background query-index build;
+    /// started by `start_index_build()`, joined by `close()` or drop.
     index_thread: Option<std::thread::JoinHandle<()>>,
     index_stop: Arc<AtomicBool>,
     /// Interrupt handle for aborting the long-time running index build.
@@ -319,6 +329,7 @@ impl DataFetcher {
         let index_progress = Arc::new(IndexBuildState::default());
         let mut fetcher = Self {
             conn,
+            db_path: path.to_owned(),
             file_paths: Vec::new(),
             full_dut: HashMap::new(),
             head_site_dutarr_idx: HashMap::new(),
@@ -328,6 +339,7 @@ impl DataFetcher {
             site_list: Vec::new(),
             head_list: Vec::new(),
             test_data: TestDataLru::new(budget_bytes),
+            wal,
             index_thread: None,
             index_stop: Arc::clone(&index_stop),
             index_interrupt: Arc::clone(&index_interrupt),
@@ -336,19 +348,38 @@ impl DataFetcher {
         fetcher.read_file_paths()?;
         fetcher.build_file_caches()?;
         fetcher.load_test_info()?;
-        // Build missing query indexes in the background; the caches above are
-        // already loaded, so this never delays the first fetch.
-        if wal {
-            fetcher.index_thread = spawn_index_build(
-                path.to_owned(),
-                index_stop,
-                index_interrupt,
-                Arc::clone(&index_progress),
-            );
-        } else {
-            eprintln!("index build: {path} is not in WAL mode, skipping index build");
-        }
         Ok(fetcher)
+    }
+
+    /// Start the background index build, it is intentionally moved out of `open*()`.
+    /// 
+    /// The index build must start after every *other* SQLite version that connects
+    /// to this database (e.g. QtSql in the GUI) has run its first statement. 
+    /// 
+    /// Because different SQLite version cannot see others `F_GETLK`, it will attach to
+    /// the WAL index (`-shm`) on first statement and reset that `-shm` in func
+    /// `unixLockSharedMemory`: truncates it to 3 bytes and the mapping code grows it back.
+    /// 
+    /// The index build thread maps `-shm` and access it repeatedly, the reset operation
+    /// can lead to SIGBUS on macOS/Linux quite easily.
+    pub fn start_index_build(&mut self) {
+        if self.index_thread.is_some() {
+            return;
+        }
+        if !self.wal {
+            eprintln!(
+                "index build: {} is not in WAL mode, skipping index build",
+                self.db_path
+            );
+            self.index_progress.mark_none();
+            return;
+        }
+        self.index_thread = spawn_index_build(
+            self.db_path.clone(),
+            Arc::clone(&self.index_stop),
+            Arc::clone(&self.index_interrupt),
+            Arc::clone(&self.index_progress),
+        );
     }
 
     pub fn close(&mut self) {
@@ -1745,22 +1776,6 @@ impl DataFetcher {
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
-        Ok(rows)
-    }
-
-    /// `getDTR_GDRs()` rows — (Record Type, Value, Approx. Location) as
-    /// formatted by `FETCH_SELECT_DATALOG`.
-    pub fn datalog_rows(&self) -> Result<Vec<(String, String, String)>, StdfHelperError> {
-        let mut stmt = self.conn.prepare_cached(FETCH_SELECT_DATALOG)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 }
