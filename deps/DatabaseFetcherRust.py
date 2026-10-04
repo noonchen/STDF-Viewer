@@ -70,6 +70,16 @@ class DatabaseFetcherRust:
         self.checkConnection()
         return self._fetcher.index_build_state()
 
+    def startIndexBuild(self):
+        """
+        Start the background query-index build thread.
+
+        Caller must ensure every other SQLite version (e.g. QtSql) in this process
+        that attaches to the same database has run its first statement.
+        """
+        self.checkConnection()
+        self._fetcher.start_index_build()
+
     def isDutInfoColumnEmpty(self, columnName: str) -> bool:
         """Return True when no Dut_Info row carries a value for ``columnName``.
 
@@ -498,10 +508,3 @@ class DatabaseFetcherRust:
             nested["x"] = np.array(nested["x"])
             nested["y"] = np.array(nested["y"])
         return failDict
-
-    def getDTR_GDRs(self):
-        """Return the GDR/DTR records as a list of
-        ``(Record Type, Value, Approx. Location)`` tuples.
-        """
-        self.checkConnection()
-        return self._fetcher.get_datalog_rows()
