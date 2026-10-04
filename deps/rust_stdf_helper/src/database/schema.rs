@@ -609,7 +609,10 @@ pub(crate) mod fetcher_queries {
 
     /****** DUT-level queries ******/
 
-    /****** Queries moved out of database/fetcher.rs (fixed SQL, no appended conditions) ******/
+    /// The cheapest statement that reads the database file.
+    ///
+    /// Used as the first statement for QtSql, see `start_index_build` for detail.
+    pub(crate) static SIMPLE_PROBE: &str = "SELECT count(*) FROM File_List";
 
     pub(crate) static FETCH_SELECT_DUT_SUMMARY: &str = "SELECT 
         DUTIndex, 
@@ -634,8 +637,9 @@ pub(crate) mod fetcher_queries {
             ON Dut_Info.Fid = wf.Fid AND Dut_Info.WaferIndex = wf.WaferIndex)";
 
     pub(crate) static FETCH_SELECT_DATALOG: &str = "SELECT 
+        Fid as \"File ID\", 
         RecordType AS \"Record Type\", 
-        '\\n' || Value || '\\n' AS \"Value\", 
+        '\n' || Value || '\n' AS \"Value\", 
         printf(\"%s ··· %s ··· %s\", 
             CASE WHEN AfterDUTIndex == 0 THEN \"|\" 
                  ELSE printf(\"PIR #%d\", AfterDUTIndex) END, 

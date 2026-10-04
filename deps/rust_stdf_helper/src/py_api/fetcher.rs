@@ -50,6 +50,16 @@ impl PyDataFetcher {
         self.inner.close();
     }
 
+    /// Start the background index build.
+    ///
+    /// The caller **MUST** ensure every other SQLite connection
+    /// to the same database (e.g. QtSql) has already run its
+    /// first statement, which will reset the WAL index (`-shm`);
+    /// otherwise, it can leads to SIGBUS if the build thread maps it.
+    pub fn start_index_build(&mut self) {
+        self.inner.start_index_build();
+    }
+
     pub fn num_files(&self) -> PyResult<usize> {
         Ok(self.inner.num_files())
     }
@@ -508,11 +518,6 @@ impl PyDataFetcher {
     ) -> PyResult<Vec<(i64, i64, i64, i64)>> {
         let inner = &mut self.inner;
         Ok(py.detach(move || inner.stacked_wafer_rows(&sites))?)
-    }
-
-    pub fn get_datalog_rows(&mut self, py: Python<'_>) -> PyResult<Vec<(String, String, String)>> {
-        let inner = &mut self.inner;
-        Ok(py.detach(move || inner.datalog_rows())?)
     }
 }
 
