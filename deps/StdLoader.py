@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sat Oct 03 2026
+# Last Modified: Sun Oct 04 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -122,6 +122,9 @@ class StdfLoader(QtCore.QObject):
         # ignore a new request while the previous one runs
         curThread = self.__dict__.get("thread")
         if curThread is not None and curThread.isRunning():
+            self.signals.statusSignal.emit(
+                self.tr("Cancel current loading before opening new files."),
+                False, False, False)
             return
         self.abandoned = False
         self.setParentLoading(True)

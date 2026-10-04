@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sat Oct 03 2026
+# Last Modified: Sun Oct 04 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -100,6 +100,78 @@ class signals4MainUI(QtCore.QObject):
     showDutDataSignal_Bin = Signal(list)            # bin chart
     showDutDataSignal_Wafer = Signal(list)          # wafer
     metadataSignal = Signal(object)                 # File Info read before the database
+
+
+
+class StdfApplication(QApplication):
+    '''
+    QApplication subclass for handling
+    stdf file open requests and drag-and-drop events.
+    '''
+
+    filesOpenSignal = Signal(list)
+
+    def __init__(self, argv):
+        super().__init__(argv)
+        self._openRequests = []
+        self._dropTargets = []
+        # function to determine if the app can accept dropped files,
+        # updated by `MyWindow`.
+        self.canAcceptDrop = lambda: True
+
+
+    def acceptDropsOn(self, *widgets):
+        '''
+        Handle the files dropped on the given widgets.
+        '''
+        for widget in widgets:
+            widget.setAcceptDrops(True)
+            widget.installEventFilter(self)
+        self._dropTargets.extend(widgets)
+
+
+    def event(self, e):
+        if e.type() == QtCore.QEvent.Type.FileOpen:
+            path = e.url().toLocalFile() or e.file()
+            if path:
+                self._openRequests.append(path)
+                # ensure all files are appended before calling `_openRequestedFiles`
+                QtCore.QTimer.singleShot(0, self._openRequestedFiles)
+            return True
+        return super().event(e)
+
+
+    def _openRequestedFiles(self):
+        if self._openRequests:
+            paths, self._openRequests = self._openRequests, []
+            self.filesOpenSignal.emit(paths)
+
+
+    def eventFilter(self, widget, event):
+        # modified from https://stackoverflow.com/questions/18001944/pyqt-drop-event-without-subclassing
+        if widget not in self._dropTargets:
+            return False
+
+        if event.type() == QtCore.QEvent.Type.DragEnter:
+            if event.mimeData().hasUrls():
+                # the drop event only follows once this one is accepted
+                event.accept()
+                return True
+            event.ignore()
+            return False
+
+        if event.type() == QtCore.QEvent.Type.Drop and event.mimeData().hasUrls():
+            if not self.canAcceptDrop():
+                # a load is in progress, ignore any dropped files
+                event.ignore()
+            else:
+                event.accept()
+                self.filesOpenSignal.emit([url.toLocalFile()
+                                           for url in event.mimeData().urls()])
+            return True
+
+        return False
+
 
 
 class MyWindow(QtWidgets.QMainWindow):
@@ -342,6 +414,10 @@ class MyWindow(QtWidgets.QMainWindow):
     
 
     def openNewFile(self, files: list[str]):
+        '''
+        Open input STDF files in compare mode,
+        prompting the user to select files if none are provided.
+        '''
         if not files:
             files, _ = QFileDialog.getOpenFileNames(self, caption=self.tr("Select STDF Files To Open"), 
                                                     directory=getSetting().gen.recent_dir, 
@@ -352,7 +428,6 @@ class MyWindow(QtWidgets.QMainWindow):
         if files:
             # store folder path
             updateRecentFolder(files[0])
-            # self.callFileLoader([files])
             self.callFileLoader([[f] for f in files])
               
     
@@ -624,9 +699,11 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def enableDragDrop(self):
-        for obj in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
-            obj.setAcceptDrops(True)
-            obj.installEventFilter(self)
+        # dropped files are handled by the application, like the ones the OS opens
+        _app = QApplication.instance()
+        if isinstance(_app, StdfApplication):
+            _app.canAcceptDrop = lambda: not self._fileLoading
+            _app.acceptDropsOn(self.ui.TestList, self.ui.tabControl, self.ui.dataTable)
     
     
     def updateIcons(self):
@@ -1336,6 +1413,9 @@ class MyWindow(QtWidgets.QMainWindow):
     
     
     def callFileLoader(self, paths: list[list[str]]):
+        '''
+        Open input STDF files groups
+        '''
         if paths:
             self.loader.loadFile(paths)
 
@@ -1525,31 +1605,6 @@ class MyWindow(QtWidgets.QMainWindow):
                         round(elapsed_ms / 1000, 1)), 4000)
         
     
-    def eventFilter(self, widget, event: QtCore.QEvent):
-        # modified from https://stackoverflow.com/questions/18001944/pyqt-drop-event-without-subclassing
-        if widget in [self.ui.TestList, self.ui.tabControl, self.ui.dataTable]:
-            if (event.type() == QtCore.QEvent.Type.DragEnter):
-                if event.mimeData().hasUrls():
-                    event.accept()   # must accept the dragEnterEvent or else the dropEvent can't occur !!!
-                    return True
-                else:
-                    event.ignore()
-                    return False
-                    
-            if (event.type() == QtCore.QEvent.Type.Drop):
-                if event.mimeData().hasUrls():   # if file or link is dropped
-                    if self._fileLoading:
-                        # a load is running; it cannot be replaced midway
-                        event.ignore()
-                        return True
-                    urls = event.mimeData().urls()
-                    paths = [url.toLocalFile() for url in urls]
-                    event.accept()  # doesnt appear to be needed
-                    self.openNewFile(paths)
-                    return True
-        return False
-      
-        
     @Slot()
     def onLoaderFinished(self):
         """The loader thread is done, stopped early or finished normally."""
@@ -1558,11 +1613,13 @@ class MyWindow(QtWidgets.QMainWindow):
             # a build that was stopped never reaches the "database is ready" path
             self.close()
 
+
     @Slot(int)
     def onLoaderProgress(self, num: int):
         self.ui.loaderProgress.setValue(min(num, 10000))
         self.ui.loaderProgress.setFormat("%.2f%%" % (num / 100.0))
         self.ui.loaderProgress.show()
+
 
     @Slot()
     def onTerminateLoad(self):
@@ -1579,6 +1636,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # prevent repeated button triggers
         self.ui.stopLoadButton.setEnabled(False)
         self.loader.abandon()
+
 
     def closeEvent(self, event):
         # closing during a load used to quit and drop the half built database
@@ -1597,7 +1655,6 @@ class MyWindow(QtWidgets.QMainWindow):
             return
         super().closeEvent(event)
 
-    
 
     def onLoadState(self, loading: bool):
         '''Lock certain functionalities during new file loading'''
@@ -1635,10 +1692,11 @@ class MyWindow(QtWidgets.QMainWindow):
         if not loading:
             self.onLoadEnd()
 
-    
+
     def markAbandoned(self):
         # called by the loader when the user gives up on the running load
         self._abandoned = True
+
 
     def onLoadEnd(self):
         '''The load is over, restore'''
@@ -1662,6 +1720,7 @@ class MyWindow(QtWidgets.QMainWindow):
             else:
                 self.applyFileInfoRows([])
 
+
     def clearAbandonedLoad(self):
         '''Drop the header of an abandoned load'''
         self.clearAllContents()
@@ -1672,29 +1731,27 @@ class MyWindow(QtWidgets.QMainWindow):
             self.db_dut.close()
         self.applyFileInfoRows([])
 
+
     def onException(self, errorType, errorValue, tb):
         logger.error("Uncaught Error occurred", exc_info=(errorType, errorValue, tb))
         errMsg = traceback.format_exception(errorType, errorValue, tb, limit=0)
         self.updateStatus("\n".join(errMsg), False, False, True)
-    
-    
+
+
 
 # application entry point
 def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    app = QApplication([])
+    app = StdfApplication([])
     app.setStyle('Fusion')
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
     app.setWindowIcon(getIcon("App"))
-    pathFromArgs = [[item] for item in sys.argv[1:] if os.path.isfile(item)]
+    pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
     window.show()
     if pathFromArgs:
-        window.callFileLoader(pathFromArgs)
-    if sys.platform == "darwin":
-        # Finder opens documents as an Apple Event, not on the command line
-        from deps import macOpenFile
-        macOpenFile.install(lambda paths: window.callFileLoader([[p] for p in paths]))
+        window.openNewFile(pathFromArgs)
+    app.filesOpenSignal.connect(window.openNewFile)
     sys.exit(app.exec_())
     
 
