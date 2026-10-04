@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Sun Oct 04 2026
+# Last Modified: Mon Oct 05 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -1466,6 +1466,14 @@ class MyWindow(QtWidgets.QMainWindow):
             self.db_dut.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000")
             if not self.db_dut.open():
                 raise RuntimeError(f"Database cannot be opened by Qt: {self.data_interface.dbPath}")
+            # QtSql is a second SQLite version in this process, it cannot see F_GETLK
+            # in Rust fetcher, so it will attach to the WAL index and resets it on first
+            # statement, leading to SIGBUS if index building thread is running on macOS/Linux.
+            # 
+            # Add a simple query before starting index build thread avoids the issue.
+            QtSql.QSqlQuery(SIMPLE_PROBE, self.db_dut)
+            # index build thread must be started after QtSql's first statement
+            self.data_interface.DatabaseFetcher.startIndexBuild()
             
             # report the background index build in the status bar
             self.startIndexStatusPolling()
@@ -1584,7 +1592,7 @@ class MyWindow(QtWidgets.QMainWindow):
         
     
     def startIndexStatusPolling(self):
-        '''Report the background index build (started when a session opens).'''
+        '''Report the background index build (started by updateData).'''
         if not hasattr(self, "indexStatusTimer"):
             self.indexStatusTimer = QtCore.QTimer(self)
             self.indexStatusTimer.setInterval(400)
