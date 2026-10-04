@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: August 11th 2020
 # -----
-# Last Modified: Sat Oct 03 2026
+# Last Modified: Sun Oct 04 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -122,6 +122,9 @@ class StdfLoader(QtCore.QObject):
         # ignore a new request while the previous one runs
         curThread = self.__dict__.get("thread")
         if curThread is not None and curThread.isRunning():
+            self.signals.statusSignal.emit(
+                self.tr("Cancel current loading before opening new files."),
+                False, False, False)
             return
         self.abandoned = False
         self.setParentLoading(True)
@@ -218,7 +221,7 @@ class StdfReader(QtCore.QObject):
             if self.msgSignal: self.msgSignal.emit(self.tr("Loading STD file..."), 0)
             start = time.time()
             # auto generate a database name
-            databasePath = os.path.join(sys.rootFolder, "logs", f"{uuid.uuid4().hex}.db")
+            databasePath = os.path.join(sys.appDataFolder, "logs", f"{uuid.uuid4().hex}.db")
             rust_stdf_helper.generate_database(databasePath, self.stdPaths, self.idType, self.progressBarSignal, self.flag)
             end = time.time()
             if self.flag.stop:
