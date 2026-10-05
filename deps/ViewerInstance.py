@@ -113,29 +113,31 @@ class ViewerInstance(QtCore.QObject):
         # for other launches, wait a short time and try again,
         # until the deadline is reached.
         deadline = time.monotonic() + self.HANDOFF_TIMEOUT / 1000
+        warnMsg = self.tr("STDF-Viewer was already running, but new file request "
+                          "was not accepted.\nClose it and try again.")
         while True:
             socket = QtNetwork.QLocalSocket()
             socket.connectToServer(ViewerInstance.pipeName())
             if socket.waitForConnected(self.HANDOFF_TIMEOUT):
-                socket.write(payload)
-                socket.flush()
-                socket.waitForBytesWritten(self.HANDOFF_TIMEOUT)
-                # the window reads the message up to this disconnect
+                wcnt = socket.write(payload)
+                # init a graceful disconnection
                 socket.disconnectFromServer()
-                return
+                # block until write complete or timeout
+                socket.waitForDisconnected(self.HANDOFF_TIMEOUT)
+                if wcnt == len(payload) and socket.bytesToWrite() == 0:
+                    warnMsg = ""
+                break
             if time.monotonic() >= deadline:
                 # cannot reach the owner within the timeout,
                 # log and show warning dialog.
                 logger.warning(
                     f"Cannot send files {files} to the running "
                     f"STDF-Viewer process: {socket.errorString()}")
-                QtWidgets.QMessageBox.warning(
-                    None,
-                    self.tr("Warning"),
-                    self.tr("STDF-Viewer was already running, but new file request "
-                            "was not accepted.\nClose it and try again."))
-                return
+                break
             time.sleep(self.RETRY_INTERVAL)
+        
+        if warnMsg:
+            QtWidgets.QMessageBox.warning(None, self.tr("Warning"), warnMsg)
     
     @staticmethod
     def pipeName() -> str:
