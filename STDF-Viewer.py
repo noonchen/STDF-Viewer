@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Mon Oct 05 2026
+# Last Modified: Tue Oct 06 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -35,6 +35,7 @@ from deps.DataInterface import DataInterface
 from deps.customizedQtClass import *
 from deps.ChartWidgets import *
 from deps.StdLoader import StdfLoader
+from deps.ViewerInstance import ViewerInstance
 from deps.uic_stdMerge import MergePanel
 from deps.uic_stdFailMarker import FailMarker
 from deps.uic_stdExporter import stdfExporter
@@ -619,6 +620,18 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def getDataInterface(self) -> DataInterface:
         return self.data_interface
+    
+    
+    def bringGuiToFront(self):
+        '''
+        Show and raise the window, for a later launch that handed files over.
+        '''
+        self.show()
+        if self.isMinimized():
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized
+                                | Qt.WindowState.WindowActive)
+        self.raise_()
+        self.activateWindow()
     
     
     def showDutDataTable(self, selectedDutIndexes: list):
@@ -1764,15 +1777,25 @@ class MyWindow(QtWidgets.QMainWindow):
 def run():
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = StdfApplication([])
+    pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
+    
+    # only a single STDF-Viwer process should be running
+    instance = ViewerInstance()
+    if not instance.tryClaim():
+        # already owned, pass files to owner and exit
+        instance.passFilesToOwner(pathFromArgs)
+        sys.exit(0)
+    
     app.setStyle('Fusion')
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
     app.setWindowIcon(getIcon("App"))
-    pathFromArgs = [item for item in sys.argv[1:] if os.path.isfile(item)]
     window = MyWindow()
     window.show()
     if pathFromArgs:
         window.openNewFile(pathFromArgs)
     app.filesOpenSignal.connect(window.openNewFile)
+    instance.filesReceived.connect(window.openNewFile)
+    instance.activateRequested.connect(window.bringGuiToFront)
     sys.exit(app.exec_())
     
 
