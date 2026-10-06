@@ -81,3 +81,6 @@ deps/cystdf/cystdf_amalgamation.c
 deps/cystdf/cython_test.py
 STDF-Viewer.config
 test.py
+
+# single app instance lock
+STDF-Viewer.lock
