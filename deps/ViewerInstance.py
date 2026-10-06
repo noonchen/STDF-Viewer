@@ -120,12 +120,21 @@ class ViewerInstance(QtCore.QObject):
             socket.connectToServer(ViewerInstance.pipeName())
             if socket.waitForConnected(self.HANDOFF_TIMEOUT):
                 wcnt = socket.write(payload)
-                # init a graceful disconnection
+                # init a graceful disconnection, pending data is written first
                 socket.disconnectFromServer()
-                # block until write complete or timeout
-                socket.waitForDisconnected(self.HANDOFF_TIMEOUT)
-                if wcnt == len(payload) and socket.bytesToWrite() == 0:
+                # `waitForDisconnected` returns false when the socket is already
+                # disconnected, so check state first.
+                closed = (socket.state()
+                          == QtNetwork.QLocalSocket.LocalSocketState.UnconnectedState
+                          or socket.waitForDisconnected(self.HANDOFF_TIMEOUT))
+                if wcnt == len(payload) and closed:
                     warnMsg = ""
+                else:
+                    logger.warning(
+                        "Files sent to the running STDF-Viewer may not complete: "
+                        "%d of %d bytes written, %d still pending, state=%s, %s",
+                        wcnt, len(payload), socket.bytesToWrite(),
+                        socket.state(), socket.errorString())
                 break
             if time.monotonic() >= deadline:
                 # cannot reach the owner within the timeout,
