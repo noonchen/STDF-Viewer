@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: May 26th 2021
 # -----
-# Last Modified: Sun Aug 30 2026
+# Last Modified: Thu Oct 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2021 noonchen
@@ -124,6 +124,7 @@ class DutSortFilter(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.hsFilterString = QtCore.QRegularExpression(r".*")
+        self.fileFilterSet: set | None = None
         
     
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
@@ -177,12 +178,31 @@ class DutSortFilter(QSortFilterProxyModel):
         self.invalidateFilter()
 
     
+    def setSelectedFiles(self, selFiles: list | None):
+        '''
+        set file filter.
+        ``None`` means no file filter, show all rows;
+        empty set means no rows will match.
+        '''
+        self.fileFilterSet = None if selFiles is None else set(selFiles)
+        self.invalidateFilter()
+
+    
     def filterAcceptsRow(self, source_row: int, source_parent: QtCore.QModelIndex) -> bool:
         hsIndex = self.sourceModel().index(source_row, DutTableColIndex.HeadSite, source_parent)
         
         hsMatched = self.hsFilterString.match(self.sourceModel().data(hsIndex, Qt.ItemDataRole.DisplayRole)).hasMatch()
         
-        return hsMatched
+        if not hsMatched:
+            return False
+        
+        if self.fileFilterSet is not None:
+            fidIndex = self.sourceModel().index(source_row, DutTableColIndex.FileID, source_parent)
+            fid = int(self.sourceModel().data(fidIndex, Qt.ItemDataRole.DisplayRole))
+            if fid not in self.fileFilterSet:
+                return False
+        
+        return True
     
     
 class FlippedProxyModel(QAbstractProxyModel):
