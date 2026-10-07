@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 3rd 2022
 # -----
-# Last Modified: Sat Sep 26 2026
+# Last Modified: Thu Oct 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -332,14 +332,14 @@ class DataInterface:
         return self.testDataProcessCore(testTuple, testInfo, testData, FileID)
     
     
-    def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None) -> dict:
+    def getTestDataTableContent(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]) -> dict:
         '''
         Get all required test data for TestDataTable display
         
         `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
-        `_selectFiles`: default read all files, currently not in use
+        `selectFiles`: list of selected file ids
         
         return a dictionary contains:
         `VHeader`: dut index as vertical header
@@ -352,7 +352,7 @@ class DataInterface:
         data = {}
         testInfo = {}
         dutIndexDict = {}
-        for testTup, fid in itertools.product(testTuples, range(self.num_files)):
+        for testTup, fid in itertools.product(testTuples, selectFiles):
             test_fid = self.getTestDataFromHeadSite(testTup, selectHeads, selectSites, fid)
             if ("TEST_NAME" in test_fid) and (testTup not in testInfo):
                 testInfo[testTup] = [test_fid.pop("TEST_NAME"), 
@@ -368,7 +368,7 @@ class DataInterface:
         vheader = []
         dutInfo = {}
         dut2ind = {}
-        for fid in range(self.num_files):
+        for fid in selectFiles:
             if fid in dutIndexDict:
                 vheader.extend(map(lambda i: f"File{fid} #{i}", dutIndexDict[fid]))
                 dut2ind[fid] = dict(zip(dutIndexDict[fid], 
@@ -479,14 +479,14 @@ class DataInterface:
             return stop.value
     
     
-    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):
+    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]):
         '''
         Generate data of `Test Statistic` table when `Trend`/`Histo`/`Info` tab is activated
         
         `testTuples`: list of selected tests, e.g. [(1000, 1, "name"), ...] 
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
-        `_selectFiles`: default read all files, currently not in use
+        `selectFiles`: list of selected file ids
         
         return a dictionary contains:
         `VHeader`: list, vertial header
@@ -509,7 +509,7 @@ class DataInterface:
         rowList = []
         
         # TODO Configurable order of rows?
-        default_order = [testTuples, selectHeads, selectSites, range(self.num_files)]
+        default_order = [testTuples, selectHeads, selectSites, selectFiles]
         floatFormat = getSetting().getFloatFormat()
         for testTup, head, site, fid in itertools.product(*default_order):
             testDataDict = self.getTestDataFromHeadSite(testTup, [head], [site], fid)
@@ -553,13 +553,13 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "HHeader": hHeaderLabels, "Rows": rowList}
     
     
-    def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], _selectFiles: list[int] = None):
+    def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], selectFiles: list[int]):
         '''
         Generate HBIN/SBIN distribution of selected heads and sites
         
         `selectHeads`: list of selected STDF heads
         `selectSites`: list of selected STDF sites
-        `_selectFiles`: default read all files, currently not in use
+        `selectFiles`: list of selected file ids
         
         return a dictionary contains:
         `VHeader`: list, vertial header
@@ -573,7 +573,7 @@ class DataInterface:
         ## maxLen
         maxLen = 0
         
-        default_order = [["H", "S"], selectHeads, selectSites, range(self.num_files)]
+        default_order = [["H", "S"], selectHeads, selectSites, selectFiles]
         for binType, head, site, fid in itertools.product(*default_order):
             isHbin: bool = binType == "H"
             binFullName = "Hardware Bin" if isHbin else "Software Bin"
@@ -674,14 +674,14 @@ class DataInterface:
         return {"VHeader": vHeaderLabels, "Rows": rowList, "maxLen": maxLen}    
 
 
-    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], _selectFiles: list[int] = None) -> dict:
+    def getTrendChartData(self, testTuple: tuple, head: int, selectSites: list[int], selectFiles: list[int]) -> dict:
         '''
         Get single-head, multi-site trend chart data of ONE test item
         
         `testTuple`:  selected test, e.g. (1000, 1, "name")
         `head`: a selected STDF head
         `selectSites`: list of selected STDF sites
-        `_selectFiles`: default read all files, currently not in use
+        `selectFiles`: list of selected file ids
         
         return a dictionary contains:
         `TestInfo`: dict, key: file id, value: infoDict
@@ -695,7 +695,7 @@ class DataInterface:
         '''
         data = {}
         testInfo = {}
-        for fid, site in itertools.product(range(self.num_files), selectSites):
+        for fid, site in itertools.product(selectFiles, selectSites):
             sitesDict = data.setdefault(fid, {})
             infoDict: dict = testInfo.setdefault(fid, {})
             # retrieve single site data only
@@ -733,9 +733,11 @@ class DataInterface:
         return {"TestInfo": testInfo, "Data": data}
 
 
-    def getBinChartData(self, head: int, site: int) -> dict:
+    def getBinChartData(self, head: int, site: int, selectFiles: list[int]) -> dict:
         '''
-        Get single-head, single-site HBIN & SBIN data from all files
+        Get single-head, single-site HBIN & SBIN data from selected files
+        
+        `selectFiles`: list of selected file ids
         
         return a dictionary contains:
         `HS`: (head, site)
@@ -751,18 +753,19 @@ class DataInterface:
             orig = self.DatabaseFetcher.getBinStats(head, site, isHBIN=isHBIN)
             new = {}
             for bin_num, cntList in orig.items():
-                for fid, cnt in enumerate(cntList):
-                    binCntDict = new.setdefault(fid, {})
+                for fid in selectFiles:
+                    cnt = cntList[fid]
                     if cnt:
-                        binCntDict[bin_num] = cnt
+                        new.setdefault(fid, {})[bin_num] = cnt
             keyName = "HBIN" if isHBIN else "SBIN"
             binData[keyName] = new
             # create ticks for pyqtgraph BarGraphItem
-            # all files share a same tick, all bin num should
-            # be included
+            # all files share a same tick, only bins appearing in the
+            # selected files are listed
             tickDict = {}
             binInfo = self.HBIN_dict if isHBIN else self.SBIN_dict
-            for i, bin_num in enumerate(sorted(orig.keys())):
+            allBins = sorted(set(bin_num for stats in new.values() for bin_num in stats))
+            for i, bin_num in enumerate(allBins):
                 # i is the real coordinate for Bars
                 bin_name = binInfo[bin_num].get("BIN_NAME", "")
                 tick_name = bin_name if bin_name else f"{keyName} {bin_num}"
