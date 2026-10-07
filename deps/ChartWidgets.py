@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: November 25th 2022
 # -----
-# Last Modified: Tue Sep 08 2026
+# Last Modified: Thu Oct 08 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2022 noonchen
@@ -804,12 +804,17 @@ class TrendChart(GraphicViewWithMenu):
         
     def draw(self):
         settings = ss.getSetting()
+        # only files that carry the test and have data get a plot, so the
+        # remaining plots stay adjacent when files are filtered out by the
+        # file selection
+        plottedFids = [fid for fid in sorted(self.testInfo.keys())
+                       if len(self.testData.get(fid, {})) > 0 and len(self.testInfo[fid]) > 0]
         # add title
         self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=len(self.testInfo),
+                                 rowspan=1, colspan=max(len(plottedFids), 1),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(self.testInfo.keys()):
+        for col, fid in enumerate(plottedFids):
             isFirstPlot = len(self.view_list) == 0
             view = TrendViewBox()
             view.setFileID(fid)
@@ -874,7 +879,7 @@ class TrendChart(GraphicViewWithMenu):
             unit = infoDict["Unit"]
             pitem.getAxis("left").setLabel(f"Test Value" + f" ({unit})" if unit else "")
             pitem.getAxis("bottom").setLabel(f"DUTIndex")
-            if len(self.testInfo) > 1:
+            if len(plottedFids) > 1:
                 # only add if there are multiple files
                 self.addFileLabel(view, fid)
             pitem.setClipToView(True)
@@ -888,7 +893,7 @@ class TrendChart(GraphicViewWithMenu):
                            yMin=self.y_min, yMax=self.y_max,
                            minXRange=2)                 # avoid zoom too deep
             # add to layout
-            self.plotlayout.addItem(pitem, row=1, col=fid, rowspan=1, colspan=1)
+            self.plotlayout.addItem(pitem, row=1, col=col, rowspan=1, colspan=1)
             # link current viewbox to previous, hide axis
             # for 2nd+ plots
             if not isFirstPlot:
@@ -980,12 +985,17 @@ class HistoChart(TrendChart):
         settings = ss.getSetting()
         isVertical = settings.gen.vert_bar
 
+        # only files that carry the test and have data get a plot, so the
+        # remaining plots stay adjacent when files are filtered out by the
+        # file selection
+        plottedFids = [fid for fid in sorted(self.testInfo.keys())
+                       if len(self.testData.get(fid, {})) > 0 and len(self.testInfo[fid]) > 0]
         # add title
         self.plotlayout.addLabel(f"{self.test_num} {self.test_name}", row=0, col=0, 
-                                 rowspan=1, colspan=1 if isVertical else len(self.testInfo),
+                                 rowspan=1, colspan=1 if isVertical else max(len(plottedFids), 1),
                                  size="20pt")
         # create same number of viewboxes as file counts
-        for fid in sorted(self.testInfo.keys()):
+        for index, fid in enumerate(plottedFids):
             isFirstPlot = len(self.view_list) == 0
             view = SVBarViewBox()
             view.setFileID(fid)
@@ -1076,13 +1086,13 @@ class HistoChart(TrendChart):
             # add test limits and specs
             self.addLimitsToPlot(infoDict, pitem, isVertical)
             
-            if len(self.testInfo) > 1:
+            if len(plottedFids) > 1:
                 # only add if there are multiple files
                 self.addFileLabel(view, fid)
             # set min range to avoid zoom too much
             minZoomRange = 4 * min(bin_width_list)
             if isVertical:
-                layoutArg = dict(row=fid + 1, col=0, rowspan=1, colspan=1)
+                layoutArg = dict(row=index + 1, col=0, rowspan=1, colspan=1)
                 rangeArg = dict(yRange=(0, bar_base), xRange=(self.y_min, self.y_max))
                 limitArg = dict(yMin=0, yMax=bar_base,
                                 xMin=self.y_min, xMax=self.y_max,
@@ -1091,7 +1101,7 @@ class HistoChart(TrendChart):
                 valueAxis = "bottom"
                 linkAttr = "setXLink"
             else:
-                layoutArg = dict(row=1, col=fid, rowspan=1, colspan=1)
+                layoutArg = dict(row=1, col=index, rowspan=1, colspan=1)
                 rangeArg = dict(xRange=(0, bar_base), yRange=(self.y_min, self.y_max))
                 limitArg = dict(xMin=0, xMax=bar_base,
                                 yMin=self.y_min, yMax=self.y_max,
@@ -1220,7 +1230,8 @@ class BinChartGenerator:
                                            "HBIN_Ticks", "SBIN_Ticks"]]):
             return
         
-        self.validData = True
+        # set validData to False when the selected files contain no bin data at all
+        self.validData = bool(any(binData["HBIN"].values()) or any(binData["SBIN"].values()))
         self.binData = binData
         head, site = binData["HS"]
         self.titleSuffix = f" - Head {head} - " + (f"All Site" if site == -1 else f"Site {site}")
@@ -1266,11 +1277,19 @@ class BinChartGenerator:
         gvm.plotlayout.addLabel(f"{binTypeName}{self.titleSuffix}", 
                                 row=0, col=0, 
                                 rowspan=1, 
-                                colspan=1 if self.isVertical else num_files, 
+                                colspan=1 if self.isVertical else max(num_files, 1), 
                                 size="20pt")
+        if num_files == 0:
+            return gvm
+        
+        # vertical mode: one row per file, tick axis on the bottom
+        # horizontal mode: one column per file, tick axis on the left
+        tickAxis = "bottom" if self.isVertical else "left"
+        valueAxis = "left" if self.isVertical else "bottom"
         # iterate thru all files
-        for fid in sorted(hsbin.keys()):
+        for index, fid in enumerate(sorted(hsbin.keys())):
             isFirstPlot = len(gvm.view_list) == 0
+            isLastPlot = index == num_files - 1
             view_bin = BinViewBox()
             view_bin.setFileID(fid)
             # in horizontal mode, invert y axis to put Bin0 at top
@@ -1295,23 +1314,19 @@ class BinChartGenerator:
             ind_max = len(numList)
             if self.isVertical:
                 barArg = dict(y0=0, x=tickInd, height=cntList, width=binWidth)
-                layoutArg = dict(row=fid + 1, col=0, rowspan=1, colspan=1)
+                layoutArg = dict(row=index + 1, col=0, rowspan=1, colspan=1)
                 rangeArg = dict(yRange=(0, cnt_max), xRange=(-1, ind_max))
                 limitArg = dict(yMin=0, yMax=cnt_max, 
                                 xMin=-1, xMax=ind_max, 
                                 minXRange=min(4, ind_max+1), minYRange=min(3, cnt_max))
-                tickAxis = "bottom"
-                valueAxis = "left"
                 linkAttr = "setXLink"
             else:
                 barArg = dict(x0=0, y=tickInd, width=cntList, height=binWidth)
-                layoutArg = dict(row=1, col=fid, rowspan=1, colspan=1)
+                layoutArg = dict(row=1, col=index, rowspan=1, colspan=1)
                 rangeArg = dict(xRange=(0, cnt_max), yRange=(-1, ind_max))
                 limitArg = dict(xMin=0, xMax=cnt_max, 
                                 yMin=-1, yMax=ind_max, 
                                 minYRange=min(4, ind_max+1), minXRange=min(3, cnt_max))
-                tickAxis = "left"
-                valueAxis = "bottom"
                 linkAttr = "setYLink"
             bar = SVBarGraphItem(**barArg, brushes=colorList)
             bar.setRectDutList(rectList)
@@ -1339,19 +1354,19 @@ class BinChartGenerator:
             # this list is for storing all
             # view boxes from HBIN/SBIN plot
             gvm.view_list.append(view_bin)
-        
-        if self.isVertical:
-            # vertical mode, show axis of last plot
-            pitem.getAxis(tickAxis).show()
-        else:
-            # horizontal mode, axis tick might be overlapping
-            # resize plot if necessary.
-            # any viewbox and axis can be used as arg, because y linked
-            ratio = BinChartGenerator.getWindowsHeightResizeRatio(
-                gvm.view_list[0],
-                pitem.getAxis(tickAxis))
-            if ratio > 1.0:
-                gvm.setMinimumHeight(int(ratio * gvm.minimumHeight()))
+            if isLastPlot:
+                if self.isVertical:
+                    # vertical mode, show axis of last plot
+                    pitem.getAxis(tickAxis).show()
+                else:
+                    # horizontal mode, axis tick might be overlapping
+                    # resize plot if necessary.
+                    # any viewbox and axis can be used as arg, because y linked
+                    ratio = BinChartGenerator.getWindowsHeightResizeRatio(
+                        gvm.view_list[0],
+                        pitem.getAxis(tickAxis))
+                    if ratio > 1.0:
+                        gvm.setMinimumHeight(int(ratio * gvm.minimumHeight()))
         return gvm
 
 
