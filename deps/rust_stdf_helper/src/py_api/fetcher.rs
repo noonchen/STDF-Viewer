@@ -515,9 +515,10 @@ impl PyDataFetcher {
         &mut self,
         py: Python<'_>,
         sites: Vec<i32>,
+        file_ids: Vec<u64>,
     ) -> PyResult<Vec<(i64, i64, i64, i64)>> {
         let inner = &mut self.inner;
-        Ok(py.detach(move || inner.stacked_wafer_rows(&sites))?)
+        Ok(py.detach(move || inner.stacked_wafer_rows(&sites, &file_ids))?)
     }
 }
 

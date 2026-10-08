@@ -774,12 +774,13 @@ class DataInterface:
         return binData
     
     
-    def getWaferMapData(self, testTuple: tuple, selectSites: list[int]) -> dict:
+    def getWaferMapData(self, testTuple: tuple, selectSites: list[int], selectFiles: list[int]) -> dict:
         '''
         Get single-head, multi-site trend chart data of ONE test item
         
         `testTuple`:  selected wafer (wafer index, file id, wafer name)
         `selectSites`: list of selected STDF sites
+        `selectFiles`: list of selected file ids, only used by the stacked wafer map
         
         return a dictionary contains:
         `Bounds`: a tuple contains wafer boundaries (`xmax`, `xmin`, `ymax`, `ymin`)
@@ -797,7 +798,8 @@ class DataInterface:
             return {}
         statistic = {}
         if waferInd == -1:
-            data = self.DatabaseFetcher.getStackedWaferData(selectSites)
+            # stacked wafer map aggregates the checked files only
+            data = self.DatabaseFetcher.getStackedWaferData(selectSites, selectFiles)
             for count in data.keys():
                 # for bypass validation check only
                 statistic[count] = count
