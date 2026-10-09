@@ -649,7 +649,9 @@ pub(crate) mod fetcher_queries {
                  WHEN isBeforePRR == 1 THEN printf(\"PRR #%d\", AfterDUTIndex) 
                  ELSE RecordType END) AS \"Approx. Location\" 
     FROM 
-        Datalog";
+        Datalog
+    ORDER by 
+        Fid";
 
     pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT 
         Fid, HEAD_NUM, WaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, 
