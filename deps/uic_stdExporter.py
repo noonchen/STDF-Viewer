@@ -178,8 +178,8 @@ class signals(QtCore.QObject):
     # heads, sites, fids, chartType, {testTupleS} or {isHBIN}
     retrieveDataListSignal = Signal(list, list, list, tab, dict)
     
-    # True, FileInfo table; False: DTR table
-    retrieveTableDataSignal = Signal(bool)
+    # True, FileInfo table; False: DTR table; and the selected file ids
+    retrieveTableDataSignal = Signal(bool, list)
     
     # selected heads, selected sites, selected files, testTuples
     retrieveDutSummarySignal = Signal(list, list, list, list)
@@ -237,7 +237,7 @@ class reportGenerator(QtCore.QObject):
     
     def waitForTableData(self, isFileInfo: bool) -> list[str]:
         self.mutex.lock()
-        self.retrieveTableDataSignal.emit(isFileInfo)
+        self.retrieveTableDataSignal.emit(isFileInfo, self.selectedFiles)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
@@ -763,12 +763,12 @@ class progressDisplayer(QtWidgets.QDialog):
         self.mutex.unlock()
           
           
-    @Slot(bool)
-    def getTableDataFromParent(self, isFileInfo: bool):
+    @Slot(bool, list)
+    def getTableDataFromParent(self, isFileInfo: bool, fids: list):
         if isFileInfo:                    
-            self.channel.dataListChannel = self.mainUI.getFileInfoForReport()
+            self.channel.dataListChannel = self.mainUI.getFileInfoForReport(fids)
         else:
-            self.channel.dataListChannel = self.mainUI.getDatalogForReport()
+            self.channel.dataListChannel = self.mainUI.getDatalogForReport(fids)
         self.mutex.lock()
         self.condWait.wakeAll()
         self.mutex.unlock()
@@ -828,7 +828,6 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
         # disable not implemented
-        self.exportUI.file_selection.setDisabled(True)
         self.exportUI.PPQQ_cb.setHidden(True)
         self.exportUI.Correlation_cb.setHidden(True)
         
@@ -1009,6 +1008,21 @@ class stdfExporter(QtWidgets.QDialog):
         return checkedFiles, checkedHeads, checkedSites
     
     
+    def getExportWaferTuples(self) -> list:
+        '''
+        Wafers to export: the stacked wafer map (fid == -1) plus the wafers of
+        the checked files.
+        '''
+        checkedFiles, _, _ = self.getSelected_FileHeadSite()
+        checkedFileSet = set(checkedFiles)
+        waferTuples = [parseTestString(witem, True) for witem in self.AllWaferItems]
+        waferTuples = [wt for wt in waferTuples if wt[1] == -1 or wt[1] in checkedFileSet]
+        if len(waferTuples) == 1:
+            # only default stacked wafer is in list, no actual wafer data exists
+            waferTuples = []
+        return waferTuples
+    
+    
     def getSelectedContents(self):
         selectedContents = []
         if self.exportUI.Trend_cb.isChecked(): selectedContents.append(ReportSelection.Trend)
@@ -1160,10 +1174,7 @@ class stdfExporter(QtWidgets.QDialog):
         reportPath = self.getOutPath()
         selectedFiles, selectedHeads, selectedSites = self.getSelected_FileHeadSite()
         testTuples = self.getExportTestTuples()
-        waferTuples = [parseTestString(witem, True) for witem in self.AllWaferItems]
-        if len(waferTuples) == 1:
-            # only default stacked wafer is in list, no actual wafer data exists
-            waferTuples = []
+        waferTuples = self.getExportWaferTuples()
        
         # determine the max value of progress bar
         totalLoopCnt = 0
