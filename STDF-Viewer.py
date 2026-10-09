@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Fri Oct 09 2026
+# Last Modified: Sat Oct 10 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -188,6 +188,10 @@ class StdfApplication(QApplication):
 
 
 class MyWindow(QtWidgets.QMainWindow):
+    # number of checkboxes per row in
+    # file/head/site selection grids
+    CHECKBOX_PER_ROW = 4
+    
     def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
@@ -220,8 +224,8 @@ class MyWindow(QtWidgets.QMainWindow):
         self.head_cb_dict = {}
         # dict to store the file id checkbox objects
         self.file_cb_dict = {}
-        # number of checkboxes per row in the file/head/site selection grids
-        self.CHECKBOX_PER_ROW = 4
+        # full File Info rows of the loaded database, the table shows a filtered view
+        self.fileMetaData = []
         # hide file selection until multiple files are loaded
         self.ui.file_selection.hide()
         # track widgets whose click signal has already been connected
@@ -690,13 +694,15 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def onFetchAllRows(self, activeTable: QtWidgets.QTableView):
         model = activeTable.model()
-        if isinstance(model, DutSortFilter):
-            # dut summary uses proxy model
+        if isinstance(model, FileFilterProxyModel):
+            # dut summary and GDR&DTR tables uses FileFilter model
             model = model.sourceModel()
         if isinstance(model, QtSql.QSqlQueryModel):
             self.signals.statusSignal.emit(self.tr("Fetching all..."), False, False, False)
             while model.canFetchMore():
                 model.fetchMore()
+            # row heights are not preserved across lazy fetch/filter changes
+            activeTable.resizeRowsToContents()
             self.signals.statusSignal.emit(self.tr("Fetch Done!"), False, False, False)
     
     
@@ -798,7 +804,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
         # datalog info table
         self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
-        self.ui.datalogTable.setModel(self.tmodel_datalog)
+        self.proxyModel_tmodel_datalog = FileFilterProxyModel()
+        self.proxyModel_tmodel_datalog.setSourceModel(self.tmodel_datalog)
+        self.ui.datalogTable.setModel(self.proxyModel_tmodel_datalog)
         self.ui.datalogTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
         self.ui.datalogTable.addAction(self.ui.actionFetchDatalog)
@@ -1026,7 +1034,8 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def updateFileHeader(self):
         if isinstance(self.data_interface, DataInterface):
-            self.applyFileInfoRows(self.data_interface.getFileMetaData())
+            self.fileMetaData = self.data_interface.getFileMetaData()
+            self.applyFileInfoRows(self.fileMetaData, selectFiles=self.getCheckedFiles())
     
     
     def showEarlyFileInfo(self, payload: dict):
@@ -1050,9 +1059,18 @@ class MyWindow(QtWidgets.QMainWindow):
         self.applyFileInfoRows(rows, pending = loadText)
     
     
-    def applyFileInfoRows(self, rows: list, pending: str = None):
+    def applyFileInfoRows(self, rows: list, pending: str = None, selectFiles: list = None):
         # clear old info
         self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+        
+        if selectFiles is not None:
+            # the first element of a row is the field name, the rest is one
+            # value per file, keep the field name and the checked files only
+            rows = [[row[0]] + [row[fid + 1] for fid in selectFiles if fid + 1 < len(row)]
+                    for row in rows]
+        # QStandardItemModel keeps the widest column count it ever had, set it
+        # explicitly so the table shrinks when fewer files are checked
+        self.tmodel_info.setColumnCount(max((len(row) for row in rows), default=0))
         
         horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
         verticalHeader = self.ui.fileInfoTable.verticalHeader()
@@ -1223,11 +1241,18 @@ class MyWindow(QtWidgets.QMainWindow):
             tabChanged = currentTab != self.preTab
             (preHeads, preSites, preTests, preFiles) = self.selectionTracker.setdefault(currentTab, 
                                                                            (None, None, None, None))
+            filesChanged = preFiles != selFiles
             # the wafer list only exists on the wafer tab and is the only
             # content that depends on the file selection, rebuild it before
             # reading the wafer selection
-            if currentTab == tab.Wafer and preFiles != selFiles:
+            if currentTab == tab.Wafer and filesChanged:
                 self.refreshWaferList()
+            if filesChanged:
+                # the file selection filters the File Info and GDR&DTR tables too
+                self.applyFileInfoRows(self.fileMetaData, selectFiles=sorted(selFiles))
+                self.proxyModel_tmodel_datalog.setSelectedFiles(selFiles)
+                # row heights are not preserved when the proxy re-filters
+                self.ui.datalogTable.resizeRowsToContents()
             selTests = set(self.getSelectedTests())
 
             if (preHeads != selHeads or
@@ -1445,7 +1470,8 @@ class MyWindow(QtWidgets.QMainWindow):
         '''
         testTuple: (test_num, pmr, test_name)
         For wafer: (wafer index, file id, wafer name)
-        selectFiles: file ids checked in file_selection, None reads all files
+        selectFiles: file ids checked in file_selection, the stacked wafer map
+                     only aggregates these files
         '''
         if tabType == tab.Trend:
             tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites, selectFiles)
@@ -1466,7 +1492,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 return hchart
         
         elif tabType == tab.Wafer:
-            wdata = self.data_interface.getWaferMapData(testTuple, selectSites)
+            wdata = self.data_interface.getWaferMapData(testTuple, selectSites, selectFiles)
             wchart = WaferMap()
             wchart.setWaferData(wdata)
             if wchart.validData:
@@ -1490,16 +1516,15 @@ class MyWindow(QtWidgets.QMainWindow):
         return None
             
             
-    def getFileInfoForReport(self):
-        # this table uses standarded model
-        model = self.tmodel_info
+    def getFileInfoForReport(self, fids: list[int]):
+        '''
+        For report generator, File Info rows filtered by the given file ids.
+        '''
         info = []
-        for row in range(model.rowCount()):
-            infoRow = []
-            for col in range(model.columnCount()):
-                d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
-                infoRow.append(d if isinstance(d, str) else str(d))
-            info.append(infoRow)
+        for row in self.fileMetaData:
+            # the first element is the field name, the rest is one value per file
+            infoRow = [self.tr(row[0])] + [row[fid + 1] for fid in fids if fid + 1 < len(row)]
+            info.append([ele if isinstance(ele, str) else str(ele) for ele in infoRow])
         return info
     
     
@@ -1511,9 +1536,10 @@ class MyWindow(QtWidgets.QMainWindow):
         return self.data_interface.getDutSummaryReportContent(testTuples, heads, sites, fids)
     
     
-    def getDatalogForReport(self):
+    def getDatalogForReport(self, fids: list[int]):
         # this table uses sql query model
         model = self.tmodel_datalog
+        fidSet = set(fids)
         
         # # method 1: store complete data in a list
         # while model.canFetchMore():
@@ -1531,6 +1557,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # method 2: use generator
         # Yield whatever rows are currently in the model, then call fetchMore()
         # and yield again, repeating until the underlying query is exhausted.
+        # column 0 is the File ID, only the requested files are yielded.
         row = 0
         while True:
             while row < model.rowCount():
@@ -1539,7 +1566,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
                     datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
                 row += 1
-                yield datalogRow
+                fid = int(datalogRow[0])
+                if fid in fidSet:
+                    yield datalogRow
             if not model.canFetchMore():
                 break
             model.fetchMore()
@@ -1600,6 +1629,7 @@ class MyWindow(QtWidgets.QMainWindow):
                   tab.Bin, tab.Wafer, tab.Correlate]:
             self.clearCurrentTab(t)
         self.selectionTracker = {}
+        self.fileMetaData = []
         gc.collect()
     
     
