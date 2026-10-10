@@ -649,7 +649,9 @@ pub(crate) mod fetcher_queries {
                  WHEN isBeforePRR == 1 THEN printf(\"PRR #%d\", AfterDUTIndex) 
                  ELSE RecordType END) AS \"Approx. Location\" 
     FROM 
-        Datalog";
+        Datalog
+    ORDER by 
+        Fid";
 
     pub(crate) static FETCH_SELECT_WAFER_INFO: &str = "SELECT 
         Fid, HEAD_NUM, WaferIndex, PART_CNT, RTST_CNT, ABRT_CNT, 
@@ -825,6 +827,7 @@ pub(crate) mod fetcher_queries {
     WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL 
         AND YCOORD IS NOT NULL AND Flag IS NOT NULL 
         AND SITE_NUM IN (SELECT value FROM json_each(?1)) 
+        AND Fid IN (SELECT value FROM json_each(?2)) 
     GROUP By XCOORD, YCOORD, Flag";
 
     pub(crate) static FETCH_SELECT_STACKED_WAFER_ALL_SITES: &str = "SELECT 
@@ -833,6 +836,7 @@ pub(crate) mod fetcher_queries {
         Dut_Info 
     WHERE HEAD_NUM>=0 AND Supersede=0 AND XCOORD IS NOT NULL 
         AND YCOORD IS NOT NULL AND Flag IS NOT NULL AND SITE_NUM >= 0 
+        AND Fid IN (SELECT value FROM json_each(?1)) 
     GROUP By XCOORD, YCOORD, Flag";
 
     pub(crate) static FETCH_SELECT_DUT_INDEX_BY_HBIN: &str = "SELECT Fid, DUTIndex 

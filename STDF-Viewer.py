@@ -4,7 +4,7 @@
 # Author: noonchen - chennoon233@foxmail.com
 # Created Date: December 13th 2020
 # -----
-# Last Modified: Tue Oct 06 2026
+# Last Modified: Sat Oct 10 2026
 # Modified By: noonchen
 # -----
 # Copyright (c) 2020 noonchen
@@ -188,6 +188,10 @@ class StdfApplication(QApplication):
 
 
 class MyWindow(QtWidgets.QMainWindow):
+    # number of checkboxes per row in
+    # file/head/site selection grids
+    CHECKBOX_PER_ROW = 4
+    
     def __init__(self):
         super(MyWindow, self).__init__()
         self.ui = Ui_MainWindow()
@@ -218,6 +222,12 @@ class MyWindow(QtWidgets.QMainWindow):
         # dict to store site/head checkbox objects
         self.site_cb_dict = {}
         self.head_cb_dict = {}
+        # dict to store the file id checkbox objects
+        self.file_cb_dict = {}
+        # full File Info rows of the loaded database, the table shows a filtered view
+        self.fileMetaData = []
+        # hide file selection until multiple files are loaded
+        self.ui.file_selection.hide()
         # track widgets whose click signal has already been connected
         self._connectedCbs = set()
         self.translatorUI = QTranslator(self)
@@ -246,7 +256,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.updateIcons()
         self.init_TestList()
         self.init_DataTable()
-        self.init_Head_SiteCheckbox()
+        self.connectCheckbox()
         # enable drop file
         self.enableDragDrop()
         # init actions
@@ -309,7 +319,6 @@ class MyWindow(QtWidgets.QMainWindow):
         self.changeLanguage()
         self.restorePreviousSession()
         # hide unfinished feature
-        self.ui.file_selection.hide()
         self.ui.tabControl.setTabVisible(tab.PPQQ, False)
         self.ui.tabControl.setTabVisible(tab.Correlate, False)
         
@@ -685,13 +694,15 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def onFetchAllRows(self, activeTable: QtWidgets.QTableView):
         model = activeTable.model()
-        if isinstance(model, DutSortFilter):
-            # dut summary uses proxy model
+        if isinstance(model, FileFilterProxyModel):
+            # dut summary and GDR&DTR tables uses FileFilter model
             model = model.sourceModel()
         if isinstance(model, QtSql.QSqlQueryModel):
             self.signals.statusSignal.emit(self.tr("Fetching all..."), False, False, False)
             while model.canFetchMore():
                 model.fetchMore()
+            # row heights are not preserved across lazy fetch/filter changes
+            activeTable.resizeRowsToContents()
             self.signals.statusSignal.emit(self.tr("Fetch Done!"), False, False, False)
     
     
@@ -793,7 +804,9 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.dataTable.setItemDelegate(StyleDelegateForTable_List(self.ui.dataTable))
         # datalog info table
         self.tmodel_datalog = DatalogSqlQueryModel(self, 13 if isMac else 10)
-        self.ui.datalogTable.setModel(self.tmodel_datalog)
+        self.proxyModel_tmodel_datalog = FileFilterProxyModel()
+        self.proxyModel_tmodel_datalog.setSourceModel(self.tmodel_datalog)
+        self.ui.datalogTable.setModel(self.proxyModel_tmodel_datalog)
         self.ui.datalogTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)     # select row only
         self.ui.datalogTable.setItemDelegate(StyleDelegateForTable_List(self.ui.datalogTable))
         self.ui.datalogTable.addAction(self.ui.actionFetchDatalog)
@@ -831,20 +844,17 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.fileInfoTable.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
         
-    def init_Head_SiteCheckbox(self):
-        # bind functions to all checkboxes, but only once per widget
+    def connectCheckbox(self):
+        # bind functions to all file/head/site checkboxes, but only once per widget
         if id(self.ui.All) not in self._connectedCbs:
-            self.ui.All.clicked['bool'].connect(self.onSiteChecked)
+            self.ui.All.clicked.connect(self.onSelect)
             self._connectedCbs.add(id(self.ui.All))
-
-        for cb in self.site_cb_dict.values():
-            if id(cb) not in self._connectedCbs:
-                cb.clicked['bool'].connect(self.onSiteChecked)
-                self._connectedCbs.add(id(cb))
-        for cb in self.head_cb_dict.values():
-            if id(cb) not in self._connectedCbs:
-                cb.clicked['bool'].connect(self.onSiteChecked)
-                self._connectedCbs.add(id(cb))
+        # iterate the dicts directly to avoid an extra list holding every checkbox
+        for cb_dict in (self.site_cb_dict, self.head_cb_dict, self.file_cb_dict):
+            for cb in cb_dict.values():
+                if id(cb) not in self._connectedCbs:
+                    cb.clicked.connect(self.onSelect)
+                    self._connectedCbs.add(id(cb))
             
         # bind functions to check/uncheck all buttons, also only once
         if id(self.ui.checkAll) not in self._connectedCbs:
@@ -853,8 +863,167 @@ class MyWindow(QtWidgets.QMainWindow):
         if id(self.ui.cancelAll) not in self._connectedCbs:
             self.ui.cancelAll.clicked.connect(lambda: self.toggleSite(False))
             self._connectedCbs.add(id(self.ui.cancelAll))
+    
+    
+    def refreshFileCheckbox(self):
+        '''
+        Rebuild the File {fid} checkboxes of compare mode.
         
+        The whole group box is hidden unless more than one file (fid) exists,
+        every file is checked by default.
+        '''
+        # drop the old checkboxes
+        for cb in self.file_cb_dict.values():
+            self._connectedCbs.discard(id(cb))
+            self.ui.gridLayout_file_select.removeWidget(cb)
+            cb.deleteLater()
+        self.file_cb_dict = {}
         
+        num_files = self.data_interface.num_files if self.data_interface else 0
+        if num_files <= 1:
+            self.ui.file_selection.hide()
+            return
+        
+        fileNames = self.data_interface.getFileNames()
+        nrow = (num_files - 1) // self.CHECKBOX_PER_ROW + 1
+        for fid in range(num_files):
+            cb = QtWidgets.QCheckBox(self.ui.file_selection)
+            cb.setText(f"File {fid}")
+            # show the file name on hover
+            cb.setToolTip(f"[File {fid}] {fileNames[fid] if fid < len(fileNames) else '?'}")
+            cb.setChecked(True)
+            row = fid // self.CHECKBOX_PER_ROW
+            col = fid % self.CHECKBOX_PER_ROW
+            self.ui.gridLayout_file_select.addWidget(cb, row, col)
+            self.file_cb_dict[fid] = cb
+            if fid == num_files - 1:
+                # resize the group box to show every row
+                selectionHeight = 50 + (cb.sizeHint().height() + 7) * nrow
+                self.ui.file_selection.setMinimumHeight(selectionHeight)
+                self.ui.file_selection.setMaximumHeight(selectionHeight)
+        self.ui.file_selection.show()
+    
+    
+    def refreshSiteCheckbox(self):
+        '''
+        Rebuild the Site checkboxes to match the sites of the loaded database.
+        '''
+        # remove checkboxes of sites that no longer exist
+        for site in list(self.site_cb_dict.keys()):     # avoid RuntimeError: dictionary changed size during iteration
+            if site in self.availableSites:
+                continue
+            self.site_cb_dict.pop(site)
+            row = 1 + site // self.CHECKBOX_PER_ROW
+            col = site % self.CHECKBOX_PER_ROW
+            cb_layout = self.ui.gridLayout_site_select.itemAtPosition(row, col)
+            if cb_layout is not None:
+                cb = cb_layout.widget()
+                self._connectedCbs.discard(id(cb))
+                cb.deleteLater()
+                self.ui.gridLayout_site_select.removeItem(cb_layout)
+        
+        # add & enable checkboxes for each site
+        for siteNum in self.availableSites:
+            if siteNum in self.site_cb_dict: 
+                # skip if already have a checkbox for this site
+                continue
+            siteName = "Site %d" % siteNum
+            cb = QtWidgets.QCheckBox(self.ui.site_selection_contents)
+            cb.setObjectName(siteName)
+            cb.setText(siteName)
+            row = 1 + siteNum // self.CHECKBOX_PER_ROW
+            col = siteNum % self.CHECKBOX_PER_ROW
+            self.ui.gridLayout_site_select.addWidget(cb, row, col)
+            self.site_cb_dict[siteNum] = cb
+        
+        # set max height in order to resize site/head selection tab control
+        # +2: row 0 holds All/checkAll/cancelAll and sites start at row 1
+        nrow_sites = max(self.site_cb_dict, default=-1) // self.CHECKBOX_PER_ROW + 2
+        selectionHeight = 50 + (self.ui.gridLayout_site_select.cellRect(0, 0).height() + 7) * nrow_sites
+        self.ui.site_head_selection.setMaximumHeight(selectionHeight)
+    
+    
+    def refreshHeadCheckbox(self):
+        '''
+        Rebuild the Test Head checkboxes to match the heads of the loaded database.
+        '''
+        # remove checkboxes of heads that no longer exist
+        for headnum in list(self.head_cb_dict.keys()):  # avoid RuntimeError: dictionary changed size during iteration
+            if headnum in self.availableHeads:
+                continue
+            self.head_cb_dict.pop(headnum)
+            row = headnum // self.CHECKBOX_PER_ROW
+            col = headnum % self.CHECKBOX_PER_ROW
+            cb_layout = self.ui.gridLayout_head_select.itemAtPosition(row, col)
+            if cb_layout is not None:
+                cb = cb_layout.widget()
+                self._connectedCbs.discard(id(cb))
+                cb.deleteLater()
+                self.ui.gridLayout_head_select.removeItem(cb_layout)
+        
+        # add & enable checkboxes for each head
+        for headnum in self.availableHeads:
+            if headnum in self.head_cb_dict:
+                continue
+            headName = "Head %d" % headnum
+            cb = QtWidgets.QCheckBox(self.ui.head_selection_tab)
+            cb.setObjectName(headName)
+            cb.setText(headName)
+            cb.setChecked(True)
+            row = headnum // self.CHECKBOX_PER_ROW
+            col = headnum % self.CHECKBOX_PER_ROW
+            self.ui.gridLayout_head_select.addWidget(cb, row, col)
+            self.head_cb_dict[headnum] = cb
+    
+    
+    def getCheckedFiles(self) -> list:
+        '''
+        Return the checked file ids. An empty list means the user unchecked
+        every file, `None` is never returned so that "no selection yet" is
+        not mistaken for "read all files".
+        '''
+        if not self.file_cb_dict:
+            # no compare mode, the only file (if any) is selected
+            return list(range(self.data_interface.num_files)) if self.data_interface else []
+        return sorted(fid for fid, cb in self.file_cb_dict.items() if cb.isChecked())
+    
+    
+    def refreshWaferList(self):
+        '''
+        Keep only the wafers belonging to the checked files in the wafer
+        selection list, the stacked wafer map entry is always kept.
+        
+        The previously selected wafers are restored when they are still listed.
+        '''
+        if self.data_interface is None:
+            return
+        selectedBefore = set()
+        for index in self.selModel_wafer.selectedIndexes():
+            data = index.data()
+            if isinstance(data, str):
+                selectedBefore.add(data)
+        checkedFiles = set(self.getCheckedFiles())
+        waferList = []
+        for item in self.completeWaferList:
+            _, fid, _ = parseTestString(item, True)
+            # fid == -1 is the stacked wafer map, which is always available
+            if fid == -1 or fid in checkedFiles:
+                waferList.append(item)
+        # block the selection signals so that onSelect runs once, after the
+        # selection is restored
+        with QtCore.QSignalBlocker(self.selModel_wafer):
+            self.updateModelContent(self.sim_list_wafer, waferList)
+            # restore the selection for wafers that are still in the list
+            if selectedBefore:
+                for row in range(self.sim_list_wafer.rowCount()):
+                    item = self.sim_list_wafer.item(row)
+                    if item is not None and item.text() in selectedBefore:
+                        proxyIndex = self.proxyModel_list_wafer.mapFromSource(self.sim_list_wafer.index(row, 0))
+                        if proxyIndex.isValid():
+                            self.selModel_wafer.select(proxyIndex,
+                                                       QtCore.QItemSelectionModel.SelectionFlag.Select)
+    
+    
     def updateModelContent(self, model, newList):
         # clear first
         model.clear()
@@ -865,7 +1034,8 @@ class MyWindow(QtWidgets.QMainWindow):
 
     def updateFileHeader(self):
         if isinstance(self.data_interface, DataInterface):
-            self.applyFileInfoRows(self.data_interface.getFileMetaData())
+            self.fileMetaData = self.data_interface.getFileMetaData()
+            self.applyFileInfoRows(self.fileMetaData, selectFiles=self.getCheckedFiles())
     
     
     def showEarlyFileInfo(self, payload: dict):
@@ -889,9 +1059,18 @@ class MyWindow(QtWidgets.QMainWindow):
         self.applyFileInfoRows(rows, pending = loadText)
     
     
-    def applyFileInfoRows(self, rows: list, pending: str = None):
+    def applyFileInfoRows(self, rows: list, pending: str = None, selectFiles: list = None):
         # clear old info
         self.tmodel_info.removeRows(0, self.tmodel_info.rowCount())
+        
+        if selectFiles is not None:
+            # the first element of a row is the field name, the rest is one
+            # value per file, keep the field name and the checked files only
+            rows = [[row[0]] + [row[fid + 1] for fid in selectFiles if fid + 1 < len(row)]
+                    for row in rows]
+        # QStandardItemModel keeps the widest column count it ever had, set it
+        # explicitly so the table shrinks when fewer files are checked
+        self.tmodel_info.setColumnCount(max((len(row) for row in rows), default=0))
         
         horizontalHeader = self.ui.fileInfoTable.horizontalHeader()
         verticalHeader = self.ui.fileInfoTable.verticalHeader()
@@ -986,7 +1165,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.ui.All.setChecked(on)
         for _, cb in self.site_cb_dict.items():
             cb.setChecked(on)
-        self.onSiteChecked()
+        self.onSelect()
                 
                 
     def getCheckedHeads(self) -> list:
@@ -1036,7 +1215,7 @@ class MyWindow(QtWidgets.QMainWindow):
     
     def onSelect(self):
         '''
-        This func is called when events occurred in tab, site selection, test selection and wafer selection 
+        This func is called when events occurred in tab, file/site/head selection, test selection and wafer selection 
         '''
         currentTab = self.ui.tabControl.currentIndex()
         # switch test/wafer selection panel when tab changed
@@ -1057,14 +1236,29 @@ class MyWindow(QtWidgets.QMainWindow):
         if self.data_interface:
             selHeads = set(self.getCheckedHeads())
             selSites = set(self.getCheckedSites())
-            selTests = set(self.getSelectedTests())
+            selFiles = set(self.getCheckedFiles())
 
             tabChanged = currentTab != self.preTab
-            (preHeads, preSites, preTests) = self.selectionTracker.setdefault(currentTab, 
-                                                                           (None, None, None))
+            (preHeads, preSites, preTests, preFiles) = self.selectionTracker.setdefault(currentTab, 
+                                                                           (None, None, None, None))
+            filesChanged = preFiles != selFiles
+            # the wafer list only exists on the wafer tab and is the only
+            # content that depends on the file selection, rebuild it before
+            # reading the wafer selection
+            if currentTab == tab.Wafer and filesChanged:
+                self.refreshWaferList()
+            if filesChanged:
+                # the file selection filters the File Info and GDR&DTR tables too
+                self.applyFileInfoRows(self.fileMetaData, selectFiles=sorted(selFiles))
+                self.proxyModel_tmodel_datalog.setSelectedFiles(selFiles)
+                # row heights are not preserved when the proxy re-filters
+                self.ui.datalogTable.resizeRowsToContents()
+            selTests = set(self.getSelectedTests())
+
             if (preHeads != selHeads or
                 preSites != selSites or
-                preTests != selTests):
+                preTests != selTests or
+                preFiles != selFiles):
                 # if any changes, update current tab
                 updateTab = True
                 updateStat = True
@@ -1083,15 +1277,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
             self.preTab = currentTab
             # always update pre selection at last
-            self.selectionTracker[currentTab] = (selHeads, selSites, selTests)
-    
-    
-    def onSiteChecked(self):
-        # call onSelect if there's item selected in listView
-        
-        # it is safe to call onSelect directly without any items in listView
-        # the inner function will detect the items and will skip if there is none
-        self.onSelect()
+            self.selectionTracker[currentTab] = (selHeads, selSites, selTests, selFiles)
     
     
     def isTestFail(self, selected_string: str) -> str:
@@ -1149,7 +1335,8 @@ class MyWindow(QtWidgets.QMainWindow):
         settings = getSetting()
         d = self.data_interface.getTestDataTableContent(self.getSelectedTests(), 
                                                         self.getCheckedHeads(), 
-                                                        self.getCheckedSites())
+                                                        self.getCheckedSites(),
+                                                        self.getCheckedFiles())
         self.tmodel_data.setTestData(d["Data"])
         self.tmodel_data.setTestInfo(d["TestInfo"])
         self.tmodel_data.setDutIndexMap(d["dut2ind"])
@@ -1179,10 +1366,12 @@ class MyWindow(QtWidgets.QMainWindow):
         tabType = self.ui.tabControl.currentIndex()
         selSites = self.getCheckedSites()
         selHeads = self.getCheckedHeads()
+        selFiles = self.getCheckedFiles()
         # update Test Data table in info tab
         if tabType == tab.Info:
             # filter dut summary table if in Info tab and head & site changed
             self.proxyModel_tmodel_dut.updateHeadsSites(selHeads, selSites)
+            self.proxyModel_tmodel_dut.setSelectedFiles(selFiles)
             self.updateTestDataTable()
             return
         
@@ -1197,7 +1386,7 @@ class MyWindow(QtWidgets.QMainWindow):
         self.clearCurrentTab(tabType)
         tabLayout: QtWidgets.QVBoxLayout = self.tab_dict[tabType]["layout"]
         for testTuple, head in product(selTests, selHeads):
-            chart = self.genPlot(testTuple, head, selSites, tabType)
+            chart = self.genPlot(testTuple, head, selSites, tabType, selFiles)
             if isinstance(chart, QtWidgets.QGraphicsView):
                 tabLayout.addWidget(chart)
             elif isinstance(chart, list):
@@ -1220,7 +1409,8 @@ class MyWindow(QtWidgets.QMainWindow):
             # get data
             d = self.data_interface.getTestStatistics(selTests, 
                                                       self.getCheckedHeads(), 
-                                                      self.getCheckedSites())
+                                                      self.getCheckedSites(),
+                                                      self.getCheckedFiles())
             HHeader = d["HHeader"]
             indexOfFail = HHeader.index("Fail Num")
             indexOfCpk = HHeader.index("Cpk")
@@ -1248,7 +1438,8 @@ class MyWindow(QtWidgets.QMainWindow):
         else:
             if tabType == tab.Bin:
                 d = self.data_interface.getBinStatistics(self.getCheckedHeads(), 
-                                                         self.getCheckedSites())
+                                                         self.getCheckedSites(),
+                                                         self.getCheckedFiles())
             else:
                 # wafer tab
                 d = self.data_interface.getWaferStatistics(selTests, 
@@ -1275,13 +1466,15 @@ class MyWindow(QtWidgets.QMainWindow):
         horizontalHeader.setMinimumSectionSize(80)
                 
     
-    def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab):
+    def genPlot(self, testTuple: tuple, head: int, selectSites: list[int], tabType: tab, selectFiles: list[int]):
         '''
         testTuple: (test_num, pmr, test_name)
         For wafer: (wafer index, file id, wafer name)
+        selectFiles: file ids checked in file_selection, the stacked wafer map
+                     only aggregates these files
         '''
         if tabType == tab.Trend:
-            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites, selectFiles)
             tchart = TrendChart()
             tchart.setFileNames(self.data_interface.getFileNames())
             tchart.setData(tdata)
@@ -1290,7 +1483,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 return tchart
         
         elif tabType == tab.Histo:
-            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites)
+            tdata = self.data_interface.getTrendChartData(testTuple, head, selectSites, selectFiles)
             hchart = HistoChart()
             hchart.setFileNames(self.data_interface.getFileNames())
             hchart.setData(tdata)
@@ -1299,7 +1492,7 @@ class MyWindow(QtWidgets.QMainWindow):
                 return hchart
         
         elif tabType == tab.Wafer:
-            wdata = self.data_interface.getWaferMapData(testTuple, selectSites)
+            wdata = self.data_interface.getWaferMapData(testTuple, selectSites, selectFiles)
             wchart = WaferMap()
             wchart.setWaferData(wdata)
             if wchart.validData:
@@ -1310,7 +1503,7 @@ class MyWindow(QtWidgets.QMainWindow):
             bcharts = []
             # one site per binchart
             for site in selectSites:
-                bdata = self.data_interface.getBinChartData(head, site)
+                bdata = self.data_interface.getBinChartData(head, site, selectFiles)
                 bchartgen = BinChartGenerator()
                 bchartgen.setBinData(bdata)
                 if bchartgen.validData:
@@ -1323,16 +1516,15 @@ class MyWindow(QtWidgets.QMainWindow):
         return None
             
             
-    def getFileInfoForReport(self):
-        # this table uses standarded model
-        model = self.tmodel_info
+    def getFileInfoForReport(self, fids: list[int]):
+        '''
+        For report generator, File Info rows filtered by the given file ids.
+        '''
         info = []
-        for row in range(model.rowCount()):
-            infoRow = []
-            for col in range(model.columnCount()):
-                d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
-                infoRow.append(d if isinstance(d, str) else str(d))
-            info.append(infoRow)
+        for row in self.fileMetaData:
+            # the first element is the field name, the rest is one value per file
+            infoRow = [self.tr(row[0])] + [row[fid + 1] for fid in fids if fid + 1 < len(row)]
+            info.append([ele if isinstance(ele, str) else str(ele) for ele in infoRow])
         return info
     
     
@@ -1344,9 +1536,10 @@ class MyWindow(QtWidgets.QMainWindow):
         return self.data_interface.getDutSummaryReportContent(testTuples, heads, sites, fids)
     
     
-    def getDatalogForReport(self):
+    def getDatalogForReport(self, fids: list[int]):
         # this table uses sql query model
         model = self.tmodel_datalog
+        fidSet = set(fids)
         
         # # method 1: store complete data in a list
         # while model.canFetchMore():
@@ -1364,6 +1557,7 @@ class MyWindow(QtWidgets.QMainWindow):
         # method 2: use generator
         # Yield whatever rows are currently in the model, then call fetchMore()
         # and yield again, repeating until the underlying query is exhausted.
+        # column 0 is the File ID, only the requested files are yielded.
         row = 0
         while True:
             while row < model.rowCount():
@@ -1372,7 +1566,9 @@ class MyWindow(QtWidgets.QMainWindow):
                     d = model.data(model.index(row, col), Qt.ItemDataRole.DisplayRole)
                     datalogRow.append(d.strip("\n") if isinstance(d, str) else str(d))
                 row += 1
-                yield datalogRow
+                fid = int(datalogRow[0])
+                if fid in fidSet:
+                    yield datalogRow
             if not model.canFetchMore():
                 break
             model.fetchMore()
@@ -1381,21 +1577,19 @@ class MyWindow(QtWidgets.QMainWindow):
     def getImageBytesForReport(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], tabType: tab):
         '''
         For report generator
-        #TODO fids current not used
         '''
-        chart = self.genPlot(testTuple, head, sites, tabType)
+        chart = self.genPlot(testTuple, head, sites, tabType, fids)
         return pyqtGraphPlot2Bytes(chart)
     
     
     def getTestStatisticForReport(self, heads: list[int], sites: list[int], fids: list[int], tabType: tab, kargs: dict):
         '''
         For report generator, kargs contains (testTuple or isHBIN)
-        #TODO fids current not used
         '''
         data = []
         if tabType in [tab.Trend, tab.Histo, tab.PPQQ]:
             testTuples = kargs["testTuples"]
-            d = self.data_interface.getTestStatistics(testTuples, heads, sites)
+            d = self.data_interface.getTestStatistics(testTuples, heads, sites, fids)
             # add translated hheader, put an empty string for matching
             data.append([""] + [self.tr(h) for h in d["HHeader"]])
             # vheader + statistics
@@ -1404,7 +1598,7 @@ class MyWindow(QtWidgets.QMainWindow):
             
         elif tabType == tab.Bin:
             isHBIN = kargs["isHBIN"]
-            d = self.data_interface.getBinStatistics(heads, sites)
+            d = self.data_interface.getBinStatistics(heads, sites, fids)
             for vh, dataRow in zip(d["VHeader"], d["Rows"]):
                 if isHBIN == dataRow[0][-1]:
                     data.append([vh] + [ele[0] for ele in dataRow])
@@ -1435,6 +1629,7 @@ class MyWindow(QtWidgets.QMainWindow):
                   tab.Bin, tab.Wafer, tab.Correlate]:
             self.clearCurrentTab(t)
         self.selectionTracker = {}
+        self.fileMetaData = []
         gc.collect()
     
     
@@ -1508,66 +1703,12 @@ class MyWindow(QtWidgets.QMainWindow):
             self.completeTestList = self.data_interface.completeTestList
             self.completeWaferList = self.data_interface.completeWaferList
             self.refreshTestList()
-            self.updateModelContent(self.sim_list_wafer, self.completeWaferList)
-            
-            # remove site/head checkbox for invalid sites/heads
-            current_exist_site = list(self.site_cb_dict.keys())     # avoid RuntimeError: dictionary changed size during iteration
-            current_exist_head = list(self.head_cb_dict.keys())
+            # rebuild the file/head/site checkboxes for the new database
             self.availableSites = self.data_interface.availableSites
             self.availableHeads = self.data_interface.availableHeads
-            
-            for site in current_exist_site:
-                if site not in self.availableSites:
-                    self.site_cb_dict.pop(site)
-                    row = 1 + site//4
-                    col = site % 4
-                    cb_layout = self.ui.gridLayout_site_select.itemAtPosition(row, col)
-                    if cb_layout is not None:
-                        cb = cb_layout.widget()
-                        self._connectedCbs.discard(id(cb))
-                        cb.deleteLater()
-                        self.ui.gridLayout_site_select.removeItem(cb_layout)
-                        
-            for headnum in current_exist_head:
-                if headnum not in self.availableHeads:
-                    self.head_cb_dict.pop(headnum)
-                    row = headnum//3
-                    col = headnum % 3
-                    cb_layout_h = self.ui.gridLayout_head_select.itemAtPosition(row, col)
-                    if cb_layout_h is not None:
-                        cb = cb_layout_h.widget()
-                        self._connectedCbs.discard(id(cb))
-                        cb.deleteLater()
-                        self.ui.gridLayout_head_select.removeItem(cb_layout_h)
-                                 
-            # add & enable checkboxes for each sites and heads
-            siteNum = 0     # pre-define local var in case there are no available sites
-            for siteNum in self.availableSites:
-                if siteNum in self.site_cb_dict: 
-                    # skip if already have a checkbox for this site
-                    continue
-                siteName = "Site %d" % siteNum
-                self.site_cb_dict[siteNum] = QtWidgets.QCheckBox(self.ui.site_selection_contents)
-                self.site_cb_dict[siteNum].setObjectName(siteName)
-                self.site_cb_dict[siteNum].setText(siteName)
-                row = 1 + siteNum//4
-                col = siteNum % 4
-                self.ui.gridLayout_site_select.addWidget(self.site_cb_dict[siteNum], row, col)
-                
-            for headnum in self.availableHeads:
-                if headnum in self.head_cb_dict:
-                    continue
-                headName = "Head %d" % headnum
-                self.head_cb_dict[headnum] = QtWidgets.QCheckBox(self.ui.head_selection_tab)
-                self.head_cb_dict[headnum].setObjectName(headName)
-                self.head_cb_dict[headnum].setText(headName)
-                self.head_cb_dict[headnum].setChecked(True)
-                row = headnum//3
-                col = headnum % 3
-                self.ui.gridLayout_head_select.addWidget(self.head_cb_dict[headnum], row, col)
-            # set max height in order to resize site/head selection tab control
-            nrow_sites = len(set([0] + [1 + sn//4 for sn in self.site_cb_dict.keys()]))
-            self.ui.site_head_selection.setMaximumHeight(50 + self.ui.gridLayout_site_select.cellRect(0, 0).height()*nrow_sites + 7*nrow_sites)
+            self.refreshFileCheckbox()
+            self.refreshHeadCheckbox()
+            self.refreshSiteCheckbox()
             # update UI
             setSettingDefaultColor(self.availableSites, 
                                    self.data_interface.SBIN_dict, 
@@ -1586,7 +1727,7 @@ class MyWindow(QtWidgets.QMainWindow):
                                     self.availableHeads,
                                     self.availableSites,
                                     self.data_interface.num_files)
-            self.init_Head_SiteCheckbox()
+            self.connectCheckbox()
             self.updateFileHeader()
             self.updateDutSummaryTable()
             self.updateGDR_DTR_Table()

@@ -1744,12 +1744,13 @@ impl DataFetcher {
 
     /// `getStackedWaferData()` rows — (X, Y, Flag, count) grouped by
     /// X/Y/Flag, skipping NULL coordinates/flags (Flag & 24 == 8 filtering is
-    /// done by the caller).
+    /// done by the caller). Only the given file ids are aggregated.
     pub fn stacked_wafer_rows(
         &self,
         sites: &[i32],
+        file_ids: &[FileId],
     ) -> Result<Vec<(i64, i64, i64, i64)>, StdfHelperError> {
-        if sites.is_empty() {
+        if sites.is_empty() || file_ids.is_empty() {
             return Ok(Vec::new());
         }
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, i64, i64, i64)> {
@@ -1760,19 +1761,20 @@ impl DataFetcher {
                 row.get::<_, i64>(3)?,
             ))
         };
+        let file_ids_json = json_int_array(file_ids.iter().map(|&f| f as i64))?;
         let rows = if sites.contains(&-1) {
             let mut stmt = self
                 .conn
                 .prepare_cached(FETCH_SELECT_STACKED_WAFER_ALL_SITES)?;
             let rows = stmt
-                .query_map([], map_row)?
+                .query_map(rusqlite::params![file_ids_json], map_row)?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         } else {
             let sites_json = json_int_array(sites.iter().map(|&s| s as i64))?;
             let mut stmt = self.conn.prepare_cached(FETCH_SELECT_STACKED_WAFER_SITES)?;
             let rows = stmt
-                .query_map(rusqlite::params![sites_json], map_row)?
+                .query_map(rusqlite::params![sites_json, file_ids_json], map_row)?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };

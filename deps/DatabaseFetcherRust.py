@@ -484,14 +484,18 @@ class DatabaseFetcherRust:
             nested["y"] = np.array(nested["y"])
         return coordsDict
 
-    def getStackedWaferData(self, sites):
-        """Return ``{fail count: {"x": ndarray, "y": ndarray}}`` over all files.
+    def getStackedWaferData(self, sites, fileIds):
+        """Return ``{fail count: {"x": ndarray, "y": ndarray}}`` over the given files.
 
         Coordinates are grouped by (X, Y) and the counts of failing DUTs (Flag & 24 == 8)
-        are summed per coordinate; ``sites`` of -1 selects every site.
+        are summed per coordinate; only the DUTs of ``fileIds`` are aggregated.
+
+        Args:
+            sites: selected site numbers; -1 selects every site.
+            fileIds: file ids to aggregate.
         """
         self.checkConnection()
-        rows = self._fetcher.get_stacked_wafer_rows(list(sites))
+        rows = self._fetcher.get_stacked_wafer_rows(list(sites), list(fileIds))
         failDieDistribution = {}
         for x, y, flag, count in rows:
             # seed every coordinate (even non-failing ones end up as count 0),
