@@ -25,4 +25,80 @@ rust_stdf_helper = { path = "./deps/rust_stdf_helper" }
 [dependency-groups]
 dev = [
     "pyinstaller>=6.16.0",
+    "pytest>=9.2.0",     # test runner — pairs with the [tool.pytest.ini_options] below
+    "ruff>=0.15.0",      # fast linter + formatter (ruff check / ruff format)
+    "pylint>=3.3.0",     # deeper static analysis, complements ruff
+    "pyright>=1.1.400",  # static type checking (basic mode gate)
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."] # repo root imports (deps.*) resolvable from test files
+testpaths = ["tests"]
+
+# ============================================
+# Ruff
+# ============================================
+[tool.ruff]
+include = ["STDF-Viewer.py", "deps/**/*.py", "build_tools/**/*.py"]
+target-version = "py313" # matches requires-python above
+line-length = 100
+
+[tool.ruff.lint]
+# No pep8-naming (N): the codebase keeps the legacy camelCase identifiers
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names, ...)
+    "I",   # isort
+    "UP",  # pyupgrade (modernize syntax)
+    "B",   # flake8-bugbear (likely bugs & design problems)
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line too long — owned by pylint C0301 (also disabled), which the uic_* table rendering code legitimately needs
+    "E741", # ambiguous variable name — common in STDF record parsing
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# ============================================
+# Pylint
+# ============================================
+[tool.pylint.MASTER]
+max-line-length = 100
+extension-pkg-allow-list = ["PyQt5"] # compiled extension members confuse pylint otherwise
+output-format = "colorized"
+reports = false
+
+[tool.pylint."MESSAGES CONTROL"]
+# C0103: legacy camelCase identifiers are the established style of the Qt code
+# C0301: line length handled by max-line-length; ruff E501 also ignored
+# R0801: deliberate small parallelism between sibling uic_* modules
+disable = "C0103,C0301,R0801"
+
+[tool.pylint.DESIGN]
+# Relaxed thresholds for the PyQt GUI code (large classes, many attributes,
+# the ~1900-line STDF-Viewer.py entry module)
+max-parents = 12
+max-args = 12
+max-positional-arguments = 12
+max-attributes = 15
+max-locals = 40
+max-branches = 15
+max-statements = 70
+max-module-lines = 2000
+max-returns = 10
+min-public-methods = 1
+
+# ============================================
+# Pyright — basic mode
+# ============================================
+[tool.pyright]
+include = ["STDF-Viewer.py", "deps"]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
