@@ -25,4 +25,57 @@ rust_stdf_helper = { path = "./deps/rust_stdf_helper" }
 [dependency-groups]
 dev = [
     "pyinstaller>=6.16.0",
+    "ruff>=0.14.0",   # fast linter + formatter (ruff check / ruff format)
+    "pylint>=4.0.0",  # deeper static analysis, complements ruff
+]
+
+[tool.ruff]
+target-version = "py313" # matches requires-python above
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names, ...)
+    "I",   # isort
+    "B",   # flake8-bugbear (likely bugs & design problems)
+    "UP",  # pyupgrade (modernize syntax)
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line too long — handled by the formatter
+    "E741", # ambiguous variable name — heavy usage in STDF parsing code
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rust_stdf_helper"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pylint.main]
+max-line-length = 120
+output-format = "colorized"
+reports = false
+py-version = "3.13"
+ignore-paths = ["build", "build_tools", "fonts", "screenshots", "deps"]
+
+[tool.pylint.design]
+# Relaxed thresholds for the PyQt GUI code (large classes, many attributes)
+max-args = 10
+max-attributes = 20
+max-locals = 25
+max-branches = 20
+max-statements = 80
+max-module-lines = 2000
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-docstring",  # not enforced in this codebase
+    "invalid-name",       # camelCase is the established style of the Qt code
+    "too-few-public-methods",
+    "duplicate-code",
 ]
